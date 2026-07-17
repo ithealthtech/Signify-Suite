@@ -275,6 +275,33 @@ async function main() {
         result.body.error.code === "IMAGE_CONTENT_INVALID",
       "spoofed image upload was accepted",
     );
+    const animationFrames = [
+      Buffer.from([0, 0, 0, 255, 255, 255, 255, 255]).toString("base64"),
+      Buffer.from([37, 99, 235, 255, 95, 229, 255, 255]).toString("base64"),
+    ];
+    result = await request(baseUrl, "/api/signature/generated-banners", {
+      method: "POST",
+      body: { width: 2, height: 1, delay: 80, frames: animationFrames },
+      jar: editorJar,
+    });
+    assert(
+      result.response.status === 201 &&
+        /^\/generated-banners\/[^/]+\/banner-[\w-]+\.gif$/.test(
+          result.body.url,
+        ),
+      `animated banner generation failed: ${result.response.status} ${result.text}`,
+    );
+    const generatedBannerPath = path.join(
+      __dirname,
+      "..",
+      "public",
+      ...result.body.url.split("/").filter(Boolean),
+    );
+    assert(
+      fs.statSync(generatedBannerPath).size > 0,
+      "generated GIF was empty",
+    );
+    fs.unlinkSync(generatedBannerPath);
     result = await request(baseUrl, "/api/signature/register", {
       method: "POST",
       body: {

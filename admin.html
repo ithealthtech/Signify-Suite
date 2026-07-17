@@ -402,14 +402,203 @@
           <button value="cancel" aria-label="Close" type="submit">×</button>
         </div>
         <div class="form-grid">
-          <label class="full">Title<input name="title" required /></label
-          ><label class="full">Message<input name="message" /></label
+          <label class="full"
+            >Campaign headline<input
+              name="title"
+              required
+              maxlength="64" /></label
+          ><label class="full"
+            >Message<input name="message" maxlength="240" /></label
           ><label class="full"
             >Destination URL<input name="linkUrl" type="url" /></label
           ><label
             >Start date<input name="startDate" type="date" required /></label
-          ><label>End date<input name="endDate" type="date" required /></label
-          ><label class="full">Banner URL<input name="imageUrl" /></label>
+          ><label>End date<input name="endDate" type="date" required /></label>
+          <section class="campaign-composer full" aria-label="Banner composer">
+            <div class="campaign-composer-head">
+              <div>
+                <strong>Banner overlay</strong>
+                <small>Preview of the image placed below every signature</small>
+              </div>
+              <label class="campaign-overlay-toggle">
+                <input name="overlayEnabled" type="checkbox" checked />
+                <span aria-hidden="true"></span>
+                Render overlay
+              </label>
+            </div>
+            <div class="campaign-composer-preview" id="campaignComposerPreview">
+              <img id="campaignComposerImage" alt="" hidden />
+              <div class="campaign-composer-shade"></div>
+              <div class="campaign-preview-copy">
+                <strong id="campaignPreviewTitle">Campaign headline</strong>
+                <span id="campaignPreviewCta">Learn more</span>
+              </div>
+              <span class="campaign-preview-badge" id="campaignPreviewBadge"
+                >IT Done Right</span
+              >
+              <strong class="campaign-preview-event" id="campaignPreviewEvent"
+                >Event details</strong
+              >
+            </div>
+            <div class="campaign-overlay-fields">
+              <label
+                >Button label<input
+                  name="ctaLabel"
+                  value="Learn more"
+                  maxlength="24"
+              /></label>
+              <label
+                >Center badge<input
+                  name="badgeLabel"
+                  value="IT Done Right"
+                  maxlength="28"
+              /></label>
+              <label
+                >Event label<input
+                  name="eventLabel"
+                  placeholder="May 12 · 7 PM"
+                  maxlength="32"
+              /></label>
+              <label class="overlay-color-field"
+                >Badge color<input
+                  name="overlayColor"
+                  type="color"
+                  value="#2b2d8f"
+              /></label>
+            </div>
+            <div class="campaign-type-fields">
+              <label
+                >Typeface<select name="overlayFont">
+                  <option value='Inter, "Segoe UI", Arial, sans-serif' selected>
+                    Inter
+                  </option>
+                  <option value="Arial, sans-serif">Arial</option>
+                  <option value='"Trebuchet MS", Arial, sans-serif'>
+                    Trebuchet
+                  </option>
+                  <option value="Georgia, serif">Georgia</option>
+                  <option value="Verdana, sans-serif">Verdana</option>
+                </select></label
+              ><label
+                >Font weight<select name="overlayFontWeight">
+                  <option value="600">Semibold</option>
+                  <option value="700" selected>Bold</option>
+                  <option value="800">Extra bold</option>
+                </select></label
+              ><label class="headline-size-field"
+                ><span
+                  >Headline size
+                  <output id="headlineSizeValue" for="headlineSize"
+                    >20 px</output
+                  ></span
+                ><input
+                  id="headlineSize"
+                  name="headlineSize"
+                  type="range"
+                  min="16"
+                  max="26"
+                  value="20"
+              /></label>
+              <label class="overlay-color-field"
+                >Text color<input
+                  name="overlayTextColor"
+                  type="color"
+                  value="#ffffff"
+              /></label>
+            </div>
+          </section>
+          <div class="campaign-repository full">
+            <div class="campaign-repository-head">
+              <div>
+                <strong>Banner repository</strong>
+                <small>Select a ready-made campaign design</small>
+              </div>
+              <span>8 designs</span>
+            </div>
+            <div class="campaign-banner-grid" aria-label="Banner repository">
+              <button
+                data-campaign-banner="/event-banners/cloud-services-modernization.png"
+                type="button"
+              >
+                <img
+                  src="/event-banners/cloud-services-modernization.png"
+                  alt=""
+                />
+                <span>Cloud modernization</span>
+              </button>
+              <button
+                data-campaign-banner="/event-banners/cybersecurity-readiness-event.png"
+                type="button"
+              >
+                <img
+                  src="/event-banners/cybersecurity-readiness-event.png"
+                  alt=""
+                />
+                <span>Cybersecurity readiness</span>
+              </button>
+              <button
+                data-campaign-banner="/event-banners/managed-it-services-assessment.png"
+                type="button"
+              >
+                <img
+                  src="/event-banners/managed-it-services-assessment.png"
+                  alt=""
+                />
+                <span>Managed IT assessment</span>
+              </button>
+              <button
+                data-campaign-banner="/event-banners/it-health-check-network-assessment.png"
+                type="button"
+              >
+                <img
+                  src="/event-banners/it-health-check-network-assessment.png"
+                  alt=""
+                />
+                <span>IT health check</span>
+              </button>
+              <button
+                data-campaign-banner="/event-banners/backup-disaster-recovery-webinar.png"
+                type="button"
+              >
+                <img
+                  src="/event-banners/backup-disaster-recovery-webinar.png"
+                  alt=""
+                />
+                <span>Backup and recovery</span>
+              </button>
+              <button
+                data-campaign-banner="/event-banners/executive-it-strategy-session.png"
+                type="button"
+              >
+                <img
+                  src="/event-banners/executive-it-strategy-session.png"
+                  alt=""
+                />
+                <span>Executive IT strategy</span>
+              </button>
+              <button
+                data-campaign-banner="/event-banners/healthcare-professional-services-it.png"
+                type="button"
+              >
+                <img
+                  src="/event-banners/healthcare-professional-services-it.png"
+                  alt=""
+                />
+                <span>Healthcare IT</span>
+              </button>
+              <button
+                data-campaign-banner="/event-banners/proactive-monitoring-support.png"
+                type="button"
+              >
+                <img
+                  src="/event-banners/proactive-monitoring-support.png"
+                  alt=""
+                />
+                <span>Proactive monitoring</span>
+              </button>
+            </div>
+          </div>
+          <label class="full">Banner URL<input name="imageUrl" /></label>
           <div class="upload-line full">
             <input
               id="campaignImageInput"

@@ -274,6 +274,7 @@ function fillForm() {
   updateSelectedTemplate();
   renderAsset(els.photoPreview, sig.photoUrl, "Photo");
   renderAsset(els.bannerPreview, sig.bannerUrl, "Banner");
+  updateSelectedBanner();
   renderWorkflow();
 }
 function collectForm() {
@@ -316,6 +317,14 @@ function renderAsset(container, url, label) {
   container.innerHTML = url
     ? `<img src="${escapeHtml(url)}" alt="${label}">`
     : `<span>${label}</span>`;
+}
+function updateSelectedBanner() {
+  const currentUrl = state.signature?.bannerUrl || "";
+  $$("[data-banner-url]").forEach((button) => {
+    const selected = currentUrl.endsWith(button.dataset.bannerUrl);
+    button.classList.toggle("active", selected);
+    button.setAttribute("aria-pressed", String(selected));
+  });
 }
 function renderWorkflow() {
   const status = state.signature.workflowStatus || "approved",
@@ -567,9 +576,10 @@ els.customTemplateSelect.addEventListener("change", () => {
   markDirty();
 });
 $("#saveTemplate").addEventListener("click", async (event) => {
-  const name = prompt("Name this reusable template");
+  const button = event.currentTarget,
+    name = prompt("Name this reusable template");
   if (!name) return;
-  setBusy(event.currentTarget, true, "Saving…");
+  setBusy(button, true, "Saving…");
   try {
     const result = await api("/api/signature/templates", {
       method: "POST",
@@ -581,7 +591,7 @@ $("#saveTemplate").addEventListener("click", async (event) => {
   } catch (error) {
     toast(error.message);
   } finally {
-    setBusy(event.currentTarget, false);
+    setBusy(button, false);
   }
 });
 
@@ -627,13 +637,22 @@ $("#removeBanner").addEventListener("click", () => {
   fillForm();
   markDirty();
 });
+$$("[data-banner-url]").forEach((button) =>
+  button.addEventListener("click", () => {
+    state.signature.bannerUrl = button.dataset.bannerUrl;
+    fillForm();
+    markDirty();
+    toast("Banner added to the signature");
+  }),
+);
 $("#animateBanner").addEventListener("click", async (event) => {
   if (!state.signature.bannerUrl) return toast("Upload a banner first");
-  setBusy(event.currentTarget, true, "Generating…");
+  const button = event.currentTarget;
+  setBusy(button, true, "Generating…");
   try {
     const frames = await buildAnimationFrames(
       state.signature.bannerUrl,
-      $("#bannerEffect").value,
+      $('[name="bannerEffect"]:checked').value,
     );
     const result = await api("/api/signature/generated-banners", {
       method: "POST",
@@ -646,7 +665,7 @@ $("#animateBanner").addEventListener("click", async (event) => {
   } catch (error) {
     toast(error.message);
   } finally {
-    setBusy(event.currentTarget, false);
+    setBusy(button, false);
   }
 });
 async function buildAnimationFrames(source, effect) {
@@ -767,7 +786,8 @@ async function saveSignature() {
   }
 }
 els.submitApproval.addEventListener("click", async (event) => {
-  setBusy(event.currentTarget, true, "Submitting…");
+  const button = event.currentTarget;
+  setBusy(button, true, "Submitting…");
   try {
     await api("/api/signature/workflow/submit", { method: "POST", body: "{}" });
     state.signature.workflowStatus = "pending";
@@ -776,7 +796,7 @@ els.submitApproval.addEventListener("click", async (event) => {
   } catch (error) {
     toast(error.message);
   } finally {
-    setBusy(event.currentTarget, false);
+    setBusy(button, false);
   }
 });
 $("#copySignature").addEventListener("click", async () => {
@@ -815,7 +835,8 @@ $("#downloadHtml").addEventListener("click", async () => {
   URL.revokeObjectURL(link.href);
 });
 $("#emailSignature").addEventListener("click", async (event) => {
-  setBusy(event.currentTarget, true, "Sending…");
+  const button = event.currentTarget;
+  setBusy(button, true, "Sending…");
   try {
     await api("/api/signature/send", {
       method: "POST",
@@ -825,7 +846,7 @@ $("#emailSignature").addEventListener("click", async (event) => {
   } catch (error) {
     toast(error.message);
   } finally {
-    setBusy(event.currentTarget, false);
+    setBusy(button, false);
   }
 });
 window.addEventListener("beforeunload", (event) => {

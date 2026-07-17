@@ -375,7 +375,26 @@ function bindEvents() {
   );
   $("#openCampaign").addEventListener("click", () => {
     $("#campaignForm").reset();
+    $("#campaignImageName").textContent = "Optional";
+    updateCampaignBannerSelection();
+    updateCampaignComposer();
     $("#campaignDialog").showModal();
+  });
+  $$("[data-campaign-banner]").forEach((button) =>
+    button.addEventListener("click", () => {
+      $("#campaignForm").elements.imageUrl.value =
+        button.dataset.campaignBanner;
+      $("#campaignImageName").textContent = "Repository banner selected";
+      updateCampaignBannerSelection();
+      updateCampaignComposer();
+    }),
+  );
+  $("#campaignForm").addEventListener("input", updateCampaignComposer);
+  $("#campaignForm").elements.imageUrl.addEventListener("input", (event) => {
+    updateCampaignBannerSelection();
+    $("#campaignImageName").textContent = event.currentTarget.value.trim()
+      ? "Custom URL"
+      : "Optional";
   });
   $("#createCampaign").addEventListener("click", createCampaign);
   $("#campaignList").addEventListener("click", deleteCampaign);
@@ -473,7 +492,8 @@ async function handleUserAction(event) {
   }
 }
 async function syncDirectory(event) {
-  busy(event.currentTarget, true, "Syncing…");
+  const button = event.currentTarget;
+  busy(button, true, "Syncing…");
   $("#syncStatus").textContent = "Connecting to Microsoft 365…";
   try {
     const result = await api("/api/signature/directory-sync", {
@@ -490,12 +510,13 @@ async function syncDirectory(event) {
     $("#syncStatus").textContent = error.message;
     toast(error.message);
   } finally {
-    busy(event.currentTarget, false);
+    busy(button, false);
   }
 }
 async function runRollout(event) {
   if (!confirm("Apply this template to the selected team members?")) return;
-  busy(event.currentTarget, true, "Rolling out…");
+  const button = event.currentTarget;
+  busy(button, true, "Rolling out…");
   try {
     const result = await api("/api/signature/bulk-rollout", {
       method: "POST",
@@ -511,13 +532,14 @@ async function runRollout(event) {
   } catch (error) {
     toast(error.message);
   } finally {
-    busy(event.currentTarget, false);
+    busy(button, false);
   }
 }
 async function saveBrand(event) {
-  busy(event.currentTarget, true, "Saving…");
-  const form = $("#brandForm").elements,
+  const button = event.currentTarget,
+    form = $("#brandForm").elements,
     settings = state.config.workspace.settings;
+  busy(button, true, "Saving…");
   try {
     const result = await api("/api/signature/admin-config", {
       method: "PUT",
@@ -542,7 +564,7 @@ async function saveBrand(event) {
   } catch (error) {
     toast(error.message);
   } finally {
-    busy(event.currentTarget, false);
+    busy(button, false);
   }
 }
 async function uploadAsset(file, kind, input, status) {
@@ -557,12 +579,263 @@ async function uploadAsset(file, kind, input, status) {
         body: JSON.stringify({ kind, dataUrl }),
       });
     input.value = result.url;
+    if (input.name === "imageUrl") {
+      updateCampaignBannerSelection();
+      updateCampaignComposer();
+    }
+    if (input.name === "logoUrl") updateBrandPreview();
     status.textContent = file.name;
     toast("Image uploaded");
   } catch (error) {
     status.textContent = "Upload failed";
     toast(error.message);
   }
+}
+function updateCampaignBannerSelection() {
+  const selectedUrl = $("#campaignForm").elements.imageUrl.value.trim();
+  $$("[data-campaign-banner]").forEach((button) => {
+    const selected = selectedUrl.endsWith(button.dataset.campaignBanner);
+    button.classList.toggle("active", selected);
+    button.setAttribute("aria-pressed", String(selected));
+  });
+}
+function campaignEventLabel(form) {
+  if (form.elements.eventLabel.value.trim())
+    return form.elements.eventLabel.value.trim();
+  const date = form.elements.startDate.value;
+  if (!date) return "Event details";
+  return new Date(`${date}T12:00:00`).toLocaleDateString(undefined, {
+    month: "short",
+    day: "numeric",
+  });
+}
+function updateCampaignComposer() {
+  const form = $("#campaignForm"),
+    imageUrl = form.elements.imageUrl.value.trim(),
+    image = $("#campaignComposerImage"),
+    preview = $("#campaignComposerPreview");
+  $("#campaignPreviewTitle").textContent =
+    form.elements.title.value.trim() || "Campaign headline";
+  $("#campaignPreviewCta").textContent =
+    form.elements.ctaLabel.value.trim() || "Learn more";
+  $("#campaignPreviewBadge").textContent = (
+    form.elements.badgeLabel.value.trim() || "IT Done Right"
+  )
+    .split(/\s+/)
+    .slice(0, 3)
+    .join("\n");
+  $("#campaignPreviewEvent").textContent = campaignEventLabel(form)
+    .split(/\s*[·|]\s*/)
+    .slice(0, 2)
+    .join("\n");
+  preview.style.setProperty(
+    "--campaign-overlay-color",
+    form.elements.overlayColor.value,
+  );
+  preview.style.setProperty(
+    "--campaign-overlay-font",
+    form.elements.overlayFont.value,
+  );
+  preview.style.setProperty(
+    "--campaign-font-weight",
+    form.elements.overlayFontWeight.value,
+  );
+  preview.style.setProperty(
+    "--campaign-title-size",
+    form.elements.headlineSize.value,
+  );
+  preview.style.setProperty(
+    "--campaign-text-color",
+    form.elements.overlayTextColor.value,
+  );
+  $("#headlineSizeValue").textContent =
+    `${form.elements.headlineSize.value} px`;
+  preview.classList.toggle(
+    "overlay-disabled",
+    !form.elements.overlayEnabled.checked,
+  );
+  if (!imageUrl) {
+    image.hidden = true;
+    image.removeAttribute("src");
+    return;
+  }
+  image.onload = () => (image.hidden = false);
+  image.onerror = () => (image.hidden = true);
+  image.src = imageUrl;
+}
+function loadCampaignImage(source) {
+  return new Promise((resolve, reject) => {
+    const image = new Image(),
+      url = new URL(source, location.origin);
+    if (url.origin !== location.origin) image.crossOrigin = "anonymous";
+    image.onload = () => resolve(image);
+    image.onerror = () =>
+      reject(
+        new Error(
+          "That background cannot be rendered. Upload it first or disable the overlay.",
+        ),
+      );
+    image.src = url.href;
+  });
+}
+function roundedRect(ctx, x, y, width, height, radius) {
+  const r = Math.min(radius, width / 2, height / 2);
+  ctx.beginPath();
+  ctx.moveTo(x + r, y);
+  ctx.lineTo(x + width - r, y);
+  ctx.quadraticCurveTo(x + width, y, x + width, y + r);
+  ctx.lineTo(x + width, y + height - r);
+  ctx.quadraticCurveTo(x + width, y + height, x + width - r, y + height);
+  ctx.lineTo(x + r, y + height);
+  ctx.quadraticCurveTo(x, y + height, x, y + height - r);
+  ctx.lineTo(x, y + r);
+  ctx.quadraticCurveTo(x, y, x + r, y);
+  ctx.closePath();
+}
+function campaignCanvasFont(weight, size, family) {
+  return `${weight} ${size}px ${family}`;
+}
+function fitCampaignText(
+  ctx,
+  text,
+  maxWidth,
+  startSize,
+  minSize = 20,
+  weight = 700,
+  family = "Arial, sans-serif",
+) {
+  let size = startSize;
+  while (size > minSize) {
+    ctx.font = campaignCanvasFont(weight, size, family);
+    if (ctx.measureText(text).width <= maxWidth) break;
+    size -= 2;
+  }
+  return size;
+}
+async function renderCampaignOverlay(form) {
+  const width = 880,
+    height = 200,
+    canvas = document.createElement("canvas"),
+    ctx = canvas.getContext("2d"),
+    backgroundUrl = form.elements.imageUrl.value.trim();
+  canvas.width = width;
+  canvas.height = height;
+  ctx.fillStyle = "#11141c";
+  ctx.fillRect(0, 0, width, height);
+  if (backgroundUrl) {
+    const image = await loadCampaignImage(backgroundUrl),
+      scale = Math.max(width / image.width, height / image.height),
+      drawWidth = image.width * scale,
+      drawHeight = image.height * scale;
+    ctx.drawImage(
+      image,
+      (width - drawWidth) / 2,
+      (height - drawHeight) / 2,
+      drawWidth,
+      drawHeight,
+    );
+  }
+  const shade = ctx.createLinearGradient(0, 0, width, 0);
+  shade.addColorStop(0, "rgba(8,11,19,.82)");
+  shade.addColorStop(0.48, "rgba(8,11,19,.18)");
+  shade.addColorStop(1, "rgba(8,11,19,.72)");
+  ctx.fillStyle = shade;
+  ctx.fillRect(0, 0, width, height);
+
+  const title = form.elements.title.value.trim(),
+    cta = form.elements.ctaLabel.value.trim() || "Learn more",
+    badge = form.elements.badgeLabel.value.trim() || "IT Done Right",
+    eventLabel = campaignEventLabel(form),
+    accent = form.elements.overlayColor.value || "#2b2d8f",
+    textColor = form.elements.overlayTextColor.value || "#ffffff",
+    fontFamily = form.elements.overlayFont.value || "Arial, sans-serif",
+    fontWeight = Number(form.elements.overlayFontWeight.value) || 700,
+    headlineSize = (Number(form.elements.headlineSize.value) || 20) * 2;
+  ctx.fillStyle = textColor;
+  ctx.textBaseline = "middle";
+  const titleSize = fitCampaignText(
+    ctx,
+    title,
+    300,
+    headlineSize,
+    26,
+    fontWeight,
+    fontFamily,
+  );
+  ctx.font = campaignCanvasFont(fontWeight, titleSize, fontFamily);
+  ctx.fillText(title, 34, 64, 300);
+
+  ctx.font = campaignCanvasFont(fontWeight, 19, fontFamily);
+  const ctaWidth = Math.min(
+    210,
+    Math.max(104, ctx.measureText(cta).width + 34),
+  );
+  roundedRect(ctx, 34, 112, ctaWidth, 48, 24);
+  ctx.strokeStyle = textColor;
+  ctx.lineWidth = 2;
+  ctx.stroke();
+  ctx.fillStyle = textColor;
+  ctx.textAlign = "center";
+  ctx.fillText(cta, 34 + ctaWidth / 2, 136, ctaWidth - 28);
+
+  const badgeX = 365,
+    badgeY = 22,
+    badgeSize = 156;
+  ctx.fillStyle = accent;
+  ctx.fillRect(badgeX, badgeY, badgeSize, badgeSize);
+  ctx.strokeStyle = "rgba(255,255,255,.88)";
+  ctx.lineWidth = 3;
+  ctx.strokeRect(badgeX, badgeY, badgeSize, badgeSize);
+  ctx.fillStyle = textColor;
+  const badgeLines = badge.split(/\s+/).slice(0, 3),
+    longestBadgeLine = badgeLines.reduce(
+      (longest, line) => (line.length > longest.length ? line : longest),
+      "",
+    ),
+    badgeSizePx = fitCampaignText(
+      ctx,
+      longestBadgeLine,
+      badgeSize - 24,
+      27,
+      15,
+      fontWeight,
+      fontFamily,
+    ),
+    badgeLineHeight = badgeSizePx * 1.08,
+    badgeStartY =
+      badgeY + badgeSize / 2 - ((badgeLines.length - 1) * badgeLineHeight) / 2;
+  ctx.font = campaignCanvasFont(fontWeight, badgeSizePx, fontFamily);
+  badgeLines.forEach((line, index) =>
+    ctx.fillText(
+      line,
+      badgeX + badgeSize / 2,
+      badgeStartY + index * badgeLineHeight,
+      badgeSize - 24,
+    ),
+  );
+
+  ctx.textAlign = "right";
+  const eventLines = eventLabel.split(/\s*[·|]\s*/).slice(0, 2),
+    longestEventLine = eventLines.reduce(
+      (longest, line) => (line.length > longest.length ? line : longest),
+      "",
+    ),
+    eventSize = fitCampaignText(
+      ctx,
+      longestEventLine,
+      220,
+      28,
+      17,
+      fontWeight,
+      fontFamily,
+    ),
+    eventLineHeight = eventSize * 1.12,
+    eventStartY = 100 - ((eventLines.length - 1) * eventLineHeight) / 2;
+  ctx.font = campaignCanvasFont(fontWeight, eventSize, fontFamily);
+  eventLines.forEach((line, index) =>
+    ctx.fillText(line, 846, eventStartY + index * eventLineHeight, 220),
+  );
+  return canvas.toDataURL("image/png");
 }
 function fileDataUrl(file) {
   return new Promise((resolve, reject) => {
@@ -574,9 +847,28 @@ function fileDataUrl(file) {
 }
 async function createCampaign() {
   const button = $("#createCampaign"),
-    body = Object.fromEntries(new FormData($("#campaignForm")));
-  busy(button, true, "Creating…");
+    form = $("#campaignForm"),
+    body = Object.fromEntries(new FormData(form));
+  busy(button, true, "Rendering…");
   try {
+    if (form.elements.overlayEnabled.checked) {
+      const dataUrl = await renderCampaignOverlay(form),
+        image = await api("/api/signature/upload", {
+          method: "POST",
+          body: JSON.stringify({ kind: "campaign-overlay", dataUrl }),
+        });
+      body.imageUrl = image.url;
+    }
+    delete body.overlayEnabled;
+    delete body.ctaLabel;
+    delete body.badgeLabel;
+    delete body.eventLabel;
+    delete body.overlayColor;
+    delete body.overlayFont;
+    delete body.overlayFontWeight;
+    delete body.headlineSize;
+    delete body.overlayTextColor;
+    button.textContent = "Scheduling…";
     await api("/api/signature/campaigns", {
       method: "POST",
       body: JSON.stringify(body),
@@ -610,8 +902,9 @@ async function deleteCampaign(event) {
 }
 async function saveDepartment(event) {
   event.preventDefault();
-  const body = Object.fromEntries(new FormData(event.currentTarget)),
-    button = event.currentTarget.querySelector("button");
+  const form = event.currentTarget,
+    body = Object.fromEntries(new FormData(form)),
+    button = form.querySelector("button");
   busy(button, true, "Saving…");
   try {
     await api("/api/signature/departments", {
@@ -620,7 +913,7 @@ async function saveDepartment(event) {
     });
     state.departments = (await api("/api/signature/departments")).departments;
     renderDepartments();
-    event.currentTarget.elements.department.value = "";
+    form.elements.department.value = "";
     toast("Department default saved");
   } catch (error) {
     toast(error.message);
