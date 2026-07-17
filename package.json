@@ -1,0 +1,32 @@
+{
+  "name": "signify-creator",
+  "private": true,
+  "version": "0.2.0-beta.1",
+  "type": "commonjs",
+  "engines": {
+    "node": ">=22.13.0"
+  },
+  "scripts": {
+    "start": "node --env-file-if-exists=.env.local server.cjs",
+    "dev": "node scripts/dev.cjs",
+    "build": "node scripts/build.cjs",
+    "test": "node scripts/smoke-test.cjs",
+    "smoke": "node scripts/smoke-test.cjs",
+    "lint": "eslint .",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "check": "npm run format:check && npm run lint && npm test && npm run build",
+    "backup": "node --env-file-if-exists=.env.local scripts/backup.cjs",
+    "demo:seed": "node --env-file-if-exists=.env.local scripts/seed-demo-team.cjs",
+    "signature:reset-admin": "node --env-file-if-exists=.env.local scripts/reset-signature-admin.cjs"
+  },
+  "dependencies": {
+    "gifenc": "^1.0.3",
+    "qrcode": "^1.5.4",
+    "stripe": "^22.3.2"
+  },
+  "devDependencies": {
+    "eslint": "^10.7.0",
+    "prettier": "^3.9.5"
+  }
+}

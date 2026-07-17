@@ -1,0 +1,444 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>Workspace | Signify Creator</title>
+    <link rel="icon" href="/icons/email.png" />
+    <link rel="stylesheet" href="admin.css" />
+  </head>
+  <body>
+    <header class="app-header">
+      <a class="app-brand" href="/signature.html"
+        ><span class="brand-mark">S</span
+        ><span><strong>Signify</strong><small>Creator</small></span></a
+      >
+      <nav class="app-nav">
+        <a href="/signature.html">Studio</a
+        ><a class="active" href="/admin.html">Workspace</a>
+      </nav>
+      <div class="header-spacer"></div>
+      <div class="workspace-pill">
+        <span></span><b id="workspaceHeader">Workspace</b>
+      </div>
+      <button class="profile-button" id="logout" type="button">Sign out</button>
+    </header>
+    <main class="admin-shell">
+      <aside class="admin-nav">
+        <div>
+          <span class="eyebrow">Administration</span><strong>Workspace</strong>
+        </div>
+        <button class="active" data-section="overview" type="button">
+          Overview
+        </button>
+        <button data-section="team" type="button">Team</button>
+        <button data-section="brand" type="button">Brand</button>
+        <button data-section="campaigns" type="button">Campaigns</button>
+        <button data-section="departments" type="button">Departments</button>
+        <button data-section="approvals" type="button">
+          Approvals <span class="nav-count" id="approvalCount">0</span>
+        </button>
+        <button data-section="analytics" type="button">Analytics</button>
+        <button data-section="settings" type="button">Settings</button>
+      </aside>
+      <section class="admin-content">
+        <section class="admin-section active" data-admin-section="overview">
+          <div class="page-head">
+            <div>
+              <span class="eyebrow">Workspace health</span>
+              <h1>Overview</h1>
+              <p>People, campaigns, activity, and rollout readiness.</p>
+            </div>
+            <a class="button primary" href="/signature.html">Open studio</a>
+          </div>
+          <div class="stat-grid">
+            <article>
+              <span>Active people</span><strong id="statUsers">0</strong
+              ><small id="statSeatUsage">0 of 0 seats</small>
+            </article>
+            <article>
+              <span>Templates</span><strong id="statTemplates">0</strong
+              ><small>Built-in and saved</small>
+            </article>
+            <article>
+              <span>Campaigns</span><strong id="statCampaigns">0</strong
+              ><small>Workspace campaigns</small>
+            </article>
+            <article>
+              <span>Tracked clicks</span><strong id="statClicks">0</strong
+              ><small>All signature links</small>
+            </article>
+          </div>
+          <div class="overview-grid">
+            <div class="content-panel">
+              <div class="panel-head">
+                <div>
+                  <h2>Readiness</h2>
+                  <p>Items that affect a reliable rollout.</p>
+                </div>
+              </div>
+              <div class="readiness-list" id="readinessList"></div>
+            </div>
+            <div class="content-panel">
+              <div class="panel-head">
+                <div>
+                  <h2>Recent activity</h2>
+                  <p>Latest administrative changes.</p>
+                </div>
+              </div>
+              <div class="activity-list" id="activityList"></div>
+            </div>
+          </div>
+        </section>
+        <section class="admin-section" data-admin-section="team">
+          <div class="page-head">
+            <div>
+              <span class="eyebrow">Directory</span>
+              <h1>Team</h1>
+              <p>Manage access, signatures, and company-wide rollout.</p>
+            </div>
+            <div class="head-actions">
+              <button class="button secondary" id="syncDirectory" type="button">
+                Sync Microsoft 365</button
+              ><button class="button primary" id="openCreateUser" type="button">
+                Add person
+              </button>
+            </div>
+          </div>
+          <div class="team-toolbar">
+            <input
+              id="userSearch"
+              type="search"
+              placeholder="Search people"
+            /><select id="userFilter">
+              <option value="all">All people</option>
+              <option value="active">Active</option>
+              <option value="disabled">Disabled</option>
+              <option value="pending">Pending approval</option></select
+            ><span id="syncStatus"></span>
+          </div>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Person</th>
+                  <th>Department</th>
+                  <th>Role</th>
+                  <th>Status</th>
+                  <th>Signature</th>
+                  <th></th>
+                </tr>
+              </thead>
+              <tbody id="userRows"></tbody>
+            </table>
+          </div>
+          <div class="rollout-bar">
+            <div>
+              <strong>Bulk rollout</strong
+              ><small
+                >Apply a default template to the team, with department rules
+                taking precedence.</small
+              >
+            </div>
+            <select id="rolloutTemplate"></select
+            ><label
+              ><input id="rolloutOverwrite" type="checkbox" /> Overwrite
+              existing</label
+            ><button class="button secondary" id="runRollout" type="button">
+              Run rollout
+            </button>
+          </div>
+        </section>
+        <section class="admin-section" data-admin-section="brand">
+          <div class="page-head">
+            <div>
+              <span class="eyebrow">Governance</span>
+              <h1>Brand</h1>
+              <p>
+                Lock a consistent accent and company logo across every
+                signature.
+              </p>
+            </div>
+            <button class="button primary" id="saveBrand" type="button">
+              Save brand
+            </button>
+          </div>
+          <div class="settings-layout">
+            <form class="settings-form" id="brandForm">
+              <label class="toggle-line"
+                ><input name="locked" type="checkbox" /><span
+                  ><strong>Enforce brand lock</strong
+                  ><small
+                    >Overrides individual accent colors and appends the company
+                    logo.</small
+                  ></span
+                ></label
+              ><label>Company name<input name="companyName" /></label
+              ><label
+                >Accent color<input
+                  name="accent"
+                  type="color"
+                  value="#2563eb" /></label
+              ><label
+                >Company logo URL<input
+                  name="logoUrl"
+                  placeholder="https:// or upload below"
+              /></label>
+              <div class="upload-line">
+                <input
+                  id="brandLogoInput"
+                  type="file"
+                  accept="image/png,image/jpeg,image/webp"
+                  hidden
+                /><button
+                  class="button secondary"
+                  id="uploadBrandLogo"
+                  type="button"
+                >
+                  Upload logo</button
+                ><span id="brandLogoName">No upload selected</span>
+              </div>
+            </form>
+            <div class="brand-sample">
+              <span>Brand preview</span>
+              <div id="brandPreview">
+                <i>SC</i>
+                <div>
+                  <strong>Your Name</strong><small>Role · Company</small>
+                  <p>email@company.com&nbsp;&nbsp; company.com</p>
+                </div>
+              </div>
+            </div>
+          </div>
+        </section>
+        <section class="admin-section" data-admin-section="campaigns">
+          <div class="page-head">
+            <div>
+              <span class="eyebrow">Promotion</span>
+              <h1>Campaigns</h1>
+              <p>
+                Schedule a banner that appears automatically in every signature.
+              </p>
+            </div>
+            <button class="button primary" id="openCampaign" type="button">
+              New campaign
+            </button>
+          </div>
+          <div class="campaign-list" id="campaignList"></div>
+        </section>
+        <section class="admin-section" data-admin-section="departments">
+          <div class="page-head">
+            <div>
+              <span class="eyebrow">Defaults</span>
+              <h1>Departments</h1>
+              <p>Map each department to a template and accent color.</p>
+            </div>
+          </div>
+          <form class="inline-form" id="departmentForm">
+            <label
+              >Department<input
+                name="department"
+                required
+                placeholder="Sales" /></label
+            ><label
+              >Template<select
+                name="templateId"
+                id="departmentTemplate"
+              ></select></label
+            ><label
+              >Accent<input name="accent" type="color" value="#2563eb" /></label
+            ><button class="button primary" type="submit">Save mapping</button>
+          </form>
+          <div class="mapping-list" id="departmentList"></div>
+        </section>
+        <section class="admin-section" data-admin-section="approvals">
+          <div class="page-head">
+            <div>
+              <span class="eyebrow">Review queue</span>
+              <h1>Approvals</h1>
+              <p>Review self-service edits before they go live.</p>
+            </div>
+          </div>
+          <div class="approval-list" id="approvalList"></div>
+        </section>
+        <section class="admin-section" data-admin-section="analytics">
+          <div class="page-head">
+            <div>
+              <span class="eyebrow">Engagement</span>
+              <h1>Analytics</h1>
+              <p>See who is driving traffic and which links perform.</p>
+            </div>
+          </div>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Person</th>
+                  <th>Total clicks</th>
+                  <th>Top links</th>
+                  <th>Last click</th>
+                </tr>
+              </thead>
+              <tbody id="analyticsRows"></tbody>
+            </table>
+          </div>
+        </section>
+        <section class="admin-section" data-admin-section="settings">
+          <div class="page-head">
+            <div>
+              <span class="eyebrow">Configuration</span>
+              <h1>Settings</h1>
+              <p>
+                Workspace identity, publishing URLs, approvals, and
+                subscription.
+              </p>
+            </div>
+            <button class="button primary" id="saveSettings" type="button">
+              Save settings
+            </button>
+          </div>
+          <div class="settings-layout">
+            <form class="settings-form" id="settingsForm">
+              <label>Workspace name<input name="name" /></label
+              ><label
+                >Public app URL<input
+                  name="publicUrl"
+                  placeholder="https://signatures.company.com" /></label
+              ><label
+                >Hosted image URL<input
+                  name="mediaBaseUrl"
+                  placeholder="https://signatures.company.com" /></label
+              ><label
+                >Asset base URL<input
+                  name="assetBaseUrl"
+                  placeholder="https://signatures.company.com" /></label
+              ><label
+                >Session length (hours)<input
+                  name="sessionHours"
+                  type="number"
+                  min="1"
+                  max="168" /></label
+              ><label>Backup path<input name="backupPath" /></label
+              ><label class="toggle-line"
+                ><input name="requireApproval" type="checkbox" /><span
+                  ><strong>Require approval</strong
+                  ><small
+                    >Self-service edits remain drafts until an administrator
+                    approves them.</small
+                  ></span
+                ></label
+              >
+            </form>
+            <aside class="billing-panel">
+              <span class="eyebrow">Subscription</span>
+              <h2 id="planName">Beta</h2>
+              <strong id="planStatus">Trialing</strong>
+              <p id="trialEnd"></p>
+              <div class="seat-meter"><span id="seatBar"></span></div>
+              <small id="seatLabel"></small>
+              <div class="billing-actions">
+                <select id="billingPlan" aria-label="Choose plan"></select
+                ><button
+                  class="button primary"
+                  id="startCheckout"
+                  type="button"
+                >
+                  Choose plan</button
+                ><button class="button" id="manageBilling" type="button">
+                  Manage billing
+                </button>
+              </div>
+              <p class="billing-note" id="billingNote"></p>
+            </aside>
+          </div>
+        </section>
+      </section>
+    </main>
+
+    <dialog id="createUserDialog">
+      <form method="dialog" class="dialog-form" id="createUserForm">
+        <div class="dialog-head">
+          <div>
+            <span class="eyebrow">New person</span>
+            <h2>Invite a workspace member</h2>
+          </div>
+          <button value="cancel" aria-label="Close" type="submit">
+            &times;
+          </button>
+        </div>
+        <div class="form-grid">
+          <label class="full"
+            >Work email<input name="email" type="email" required /></label
+          ><label
+            >Role<select name="role">
+              <option value="editor">Editor</option>
+              <option value="viewer">Viewer</option>
+              <option value="admin">Admin</option>
+            </select></label
+          ><label class="full" id="inviteLinkField" hidden
+            >Development invite link<input id="inviteLink" readonly
+          /></label>
+        </div>
+        <div class="dialog-actions">
+          <button class="button" value="cancel" type="submit">Cancel</button
+          ><button
+            class="button primary"
+            id="createUser"
+            value="default"
+            type="button"
+          >
+            Send invitation
+          </button>
+        </div>
+      </form>
+    </dialog>
+    <dialog id="campaignDialog">
+      <form method="dialog" class="dialog-form" id="campaignForm">
+        <div class="dialog-head">
+          <div>
+            <span class="eyebrow">New campaign</span>
+            <h2>Schedule signature promotion</h2>
+          </div>
+          <button value="cancel" aria-label="Close" type="submit">×</button>
+        </div>
+        <div class="form-grid">
+          <label class="full">Title<input name="title" required /></label
+          ><label class="full">Message<input name="message" /></label
+          ><label class="full"
+            >Destination URL<input name="linkUrl" type="url" /></label
+          ><label
+            >Start date<input name="startDate" type="date" required /></label
+          ><label>End date<input name="endDate" type="date" required /></label
+          ><label class="full">Banner URL<input name="imageUrl" /></label>
+          <div class="upload-line full">
+            <input
+              id="campaignImageInput"
+              type="file"
+              accept="image/png,image/jpeg,image/gif,image/webp"
+              hidden
+            /><button
+              class="button secondary"
+              id="uploadCampaignImage"
+              type="button"
+            >
+              Upload banner</button
+            ><span id="campaignImageName">Optional</span>
+          </div>
+        </div>
+        <div class="dialog-actions">
+          <button class="button" value="cancel" type="submit">Cancel</button
+          ><button
+            class="button primary"
+            id="createCampaign"
+            value="default"
+            type="button"
+          >
+            Create campaign
+          </button>
+        </div>
+      </form>
+    </dialog>
+    <div class="toast" id="toast" role="status" aria-live="polite"></div>
+    <script src="admin.js?v=20260717"></script>
+  </body>
+</html>

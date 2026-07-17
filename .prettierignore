@@ -1,0 +1,7 @@
+node_modules
+dist
+data
+backups
+tmp
+public
+package-lock.json

@@ -1,0 +1,422 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>Signify Creator</title>
+    <link rel="icon" href="/icons/email.png" />
+    <link rel="stylesheet" href="signature.css" />
+  </head>
+  <body>
+    <main class="auth-shell" id="authView">
+      <section class="auth-product" aria-label="Signify Creator preview">
+        <div class="auth-brand">
+          <span class="brand-mark">S</span><strong>Signify</strong
+          ><small>Creator</small>
+        </div>
+        <div class="auth-copy">
+          <span class="eyebrow">Email identity workspace</span>
+          <h1>Every signature. One standard.</h1>
+          <p>
+            Build, govern, and roll out polished email signatures across your
+            organization.
+          </p>
+        </div>
+        <div class="auth-signature" aria-hidden="true">
+          <img src="/event-banners/cloud-services-modernization.png" alt="" />
+          <div class="auth-signature-body">
+            <span class="avatar-sample">TG</span>
+            <div>
+              <strong>Tyler Gifol</strong
+              ><small>President · IT HealthTech</small>
+              <p>(732) 456-6787&nbsp;&nbsp; tyler@ithealthtech.com</p>
+            </div>
+          </div>
+        </div>
+      </section>
+      <section class="auth-panel">
+        <form id="loginForm" class="auth-form">
+          <div>
+            <span class="eyebrow">Welcome back</span>
+            <h2>Sign in to your workspace</h2>
+          </div>
+          <label
+            >Work email<input
+              name="email"
+              type="email"
+              autocomplete="email"
+              required
+              placeholder="you@company.com"
+          /></label>
+          <label
+            >Password<input
+              name="password"
+              type="password"
+              autocomplete="current-password"
+              required
+          /></label>
+          <button class="button primary wide" type="submit">Sign in</button>
+          <button
+            class="button microsoft wide"
+            id="microsoftLogin"
+            type="button"
+            hidden
+          >
+            <span class="ms-grid" aria-hidden="true"></span>Continue with
+            Microsoft 365
+          </button>
+          <p class="auth-switch">
+            <button id="showForgot" type="button">Forgot password?</button>
+          </p>
+          <p class="auth-switch" id="registerPrompt" hidden>
+            New to Signify?
+            <button id="showRegister" type="button">Create a workspace</button>
+          </p>
+        </form>
+        <form id="registerForm" class="auth-form" hidden>
+          <div>
+            <span class="eyebrow">New workspace</span>
+            <h2>Start your Signify workspace</h2>
+          </div>
+          <label
+            >Your name<input name="name" autocomplete="name" required
+          /></label>
+          <label
+            >Company<input name="company" autocomplete="organization" required
+          /></label>
+          <label
+            >Work email<input
+              name="email"
+              type="email"
+              autocomplete="email"
+              required
+          /></label>
+          <label
+            >Password<input
+              name="password"
+              type="password"
+              minlength="10"
+              autocomplete="new-password"
+              required
+            /><small>Use at least 10 characters.</small></label
+          >
+          <button class="button primary wide" type="submit">
+            Create workspace
+          </button>
+          <p class="auth-switch">
+            Already have an account?
+            <button id="showLogin" type="button">Sign in</button>
+          </p>
+        </form>
+        <form id="forgotForm" class="auth-form" hidden>
+          <div>
+            <span class="eyebrow">Account recovery</span>
+            <h2>Reset your password</h2>
+          </div>
+          <p class="auth-copy-small">
+            Enter your work email and we’ll send a secure reset link.
+          </p>
+          <label
+            >Work email<input
+              name="email"
+              type="email"
+              autocomplete="email"
+              required
+          /></label>
+          <button class="button primary wide" type="submit">
+            Send reset link
+          </button>
+          <p class="auth-switch">
+            <button data-show-login type="button">Back to sign in</button>
+          </p>
+        </form>
+        <form id="resetForm" class="auth-form" hidden>
+          <div>
+            <span class="eyebrow">Choose password</span>
+            <h2>Set a new password</h2>
+          </div>
+          <input name="token" type="hidden" />
+          <label
+            >New password<input
+              name="password"
+              type="password"
+              minlength="10"
+              autocomplete="new-password"
+              required
+            /><small>Use at least 10 characters.</small></label
+          >
+          <button class="button primary wide" type="submit">
+            Update password
+          </button>
+          <p class="auth-switch">
+            <button data-show-login type="button">Back to sign in</button>
+          </p>
+        </form>
+        <form id="inviteForm" class="auth-form" hidden>
+          <div>
+            <span class="eyebrow">Workspace invitation</span>
+            <h2>Join your team</h2>
+          </div>
+          <input name="token" type="hidden" />
+          <label
+            >Your name<input name="name" autocomplete="name" required
+          /></label>
+          <label
+            >Create password<input
+              name="password"
+              type="password"
+              minlength="10"
+              autocomplete="new-password"
+              required
+            /><small>Use at least 10 characters.</small></label
+          >
+          <button class="button primary wide" type="submit">
+            Accept invitation
+          </button>
+        </form>
+        <p class="form-status" id="authStatus" role="status"></p>
+      </section>
+    </main>
+
+    <div class="app-shell" id="appView" hidden>
+      <header class="app-header">
+        <a class="app-brand" href="/signature.html"
+          ><span class="brand-mark">S</span
+          ><span><strong>Signify</strong><small>Creator</small></span></a
+        >
+        <nav class="app-nav" aria-label="Primary">
+          <a class="active" href="/signature.html">Studio</a>
+          <a id="adminNav" href="/admin.html" hidden>Workspace</a>
+        </nav>
+        <div class="header-spacer"></div>
+        <div class="workspace-pill">
+          <span class="workspace-dot"></span
+          ><span id="workspaceName">Workspace</span>
+        </div>
+        <button
+          class="profile-button"
+          id="profileButton"
+          type="button"
+          aria-expanded="false"
+        >
+          <span id="profileInitials">SC</span
+          ><span
+            ><strong id="profileName">Account</strong
+            ><small id="profileRole">Member</small></span
+          >
+        </button>
+        <div class="profile-menu" id="profileMenu" hidden>
+          <label id="workspaceSwitcherField" hidden
+            >Workspace<select id="workspaceSwitcher"></select
+          ></label>
+          <button id="logout" type="button">Sign out</button>
+        </div>
+      </header>
+
+      <main class="studio-shell">
+        <aside class="studio-controls">
+          <div class="control-heading">
+            <div>
+              <span class="eyebrow">Signature studio</span>
+              <h1>Design</h1>
+            </div>
+            <span class="save-state" id="saveState">Saved</span>
+          </div>
+          <div class="employee-picker" id="employeePicker" hidden>
+            <label>Editing for<select id="employeeSelect"></select></label>
+          </div>
+          <div class="control-tabs" role="tablist">
+            <button class="active" data-control-tab="content" type="button">
+              Content
+            </button>
+            <button data-control-tab="design" type="button">Design</button>
+            <button data-control-tab="assets" type="button">Assets</button>
+          </div>
+          <form id="signatureForm">
+            <section class="control-pane active" data-control-pane="content">
+              <div class="field-grid">
+                <label class="full"
+                  >Full name<input name="name" autocomplete="name"
+                /></label>
+                <label>Job title<input name="jobTitle" /></label>
+                <label>Department<input name="department" /></label>
+                <label class="full">Company<input name="company" /></label>
+                <label>Email<input name="email" type="email" /></label>
+                <label
+                  >Website<input
+                    name="website"
+                    type="url"
+                    placeholder="https://"
+                /></label>
+                <label>Direct phone<input name="phone" type="tel" /></label>
+                <label>Mobile<input name="mobile" type="tel" /></label>
+                <label class="full">Address<input name="address" /></label>
+              </div>
+              <details class="field-group">
+                <summary>Social profiles</summary>
+                <div class="field-grid">
+                  <label>LinkedIn<input name="linkedin" type="url" /></label
+                  ><label>X / Twitter<input name="twitter" type="url" /></label
+                  ><label>Instagram<input name="instagram" type="url" /></label
+                  ><label>Facebook<input name="facebook" type="url" /></label>
+                </div>
+              </details>
+              <label class="toggle-row"
+                ><input name="vcardEnabled" type="checkbox" /><span
+                  ><strong>Add contact card</strong
+                  ><small
+                    >Include a QR code and downloadable vCard.</small
+                  ></span
+                ></label
+              >
+            </section>
+            <section class="control-pane" data-control-pane="design">
+              <div class="section-label">
+                <span>Layout</span><small>Outlook and Gmail compatible</small>
+              </div>
+              <div class="template-grid" id="templateGrid"></div>
+              <div class="design-row">
+                <label
+                  >Accent color<input
+                    name="accent"
+                    type="color"
+                    value="#2563eb" /></label
+                ><label id="ribbonLabel" hidden
+                  >Ribbon text<input name="ribbonText"
+                /></label>
+              </div>
+              <div class="custom-template-row">
+                <select id="customTemplateSelect">
+                  <option value="">Saved templates</option></select
+                ><button class="button subtle" id="saveTemplate" type="button">
+                  Save current
+                </button>
+              </div>
+            </section>
+            <section class="control-pane" data-control-pane="assets">
+              <div class="asset-control">
+                <div class="asset-preview portrait" id="photoPreview">
+                  <span>Photo</span>
+                </div>
+                <div>
+                  <strong>Profile photo</strong
+                  ><small>Square image, up to 4 MB</small
+                  ><input
+                    id="photoInput"
+                    type="file"
+                    accept="image/png,image/jpeg,image/webp"
+                    hidden
+                  /><button
+                    class="button subtle"
+                    data-upload="photo"
+                    type="button"
+                  >
+                    Upload photo
+                  </button>
+                </div>
+              </div>
+              <div class="asset-control">
+                <div class="asset-preview banner" id="bannerPreview">
+                  <span>Banner</span>
+                </div>
+                <div>
+                  <strong>Header banner</strong
+                  ><small>Recommended 440 × 100</small
+                  ><input
+                    id="bannerInput"
+                    type="file"
+                    accept="image/png,image/jpeg,image/gif,image/webp"
+                    hidden
+                  /><button
+                    class="button subtle"
+                    data-upload="banner"
+                    type="button"
+                  >
+                    Upload banner</button
+                  ><button class="button text" id="removeBanner" type="button">
+                    Remove
+                  </button>
+                </div>
+              </div>
+              <div class="animation-tools">
+                <label
+                  >Animation<select id="bannerEffect">
+                    <option value="tech-pulse">Tech pulse</option>
+                    <option value="signal-rings">Signal rings</option>
+                    <option value="starfield">Starfield</option>
+                    <option value="clean">Light sweep</option>
+                  </select></label
+                ><button
+                  class="button secondary"
+                  id="animateBanner"
+                  type="button"
+                >
+                  Generate animated GIF
+                </button>
+              </div>
+            </section>
+          </form>
+        </aside>
+
+        <section class="preview-workspace">
+          <div class="preview-toolbar">
+            <div>
+              <span class="eyebrow">Live preview</span>
+              <h2 id="previewTitle">Employee signature</h2>
+            </div>
+            <div class="toolbar-actions">
+              <button class="button subtle" id="downloadHtml" type="button">
+                Download .htm</button
+              ><button class="button secondary" id="copyHtml" type="button">
+                Copy HTML</button
+              ><button class="button primary" id="copySignature" type="button">
+                Copy signature
+              </button>
+            </div>
+          </div>
+          <div class="workflow-banner" id="workflowBanner" hidden>
+            <span id="workflowText"></span
+            ><button class="button subtle" id="submitApproval" type="button">
+              Submit for approval
+            </button>
+          </div>
+          <div class="email-canvas">
+            <div class="email-header">
+              <span></span><span></span><span></span><small>New message</small>
+            </div>
+            <div class="email-fields">
+              <div><strong>To</strong><span>client@example.com</span></div>
+              <div><strong>Subject</strong><span>Project update</span></div>
+            </div>
+            <div class="email-body">
+              <p>Hi Jordan,</p>
+              <p>
+                Thanks for your time today. I’ve included the next steps below.
+              </p>
+              <div class="signature-preview" id="signaturePreview">
+                <span class="loading">Building preview…</span>
+              </div>
+            </div>
+          </div>
+          <div class="preview-footer">
+            <span id="previewMeta">Outlook-safe HTML</span>
+            <div>
+              <button
+                class="button text"
+                id="emailSignature"
+                type="button"
+                hidden
+              >
+                Email to employee</button
+              ><button class="button primary" id="saveSignature" type="button">
+                Save changes
+              </button>
+            </div>
+          </div>
+        </section>
+      </main>
+    </div>
+    <div class="toast" id="toast" role="status" aria-live="polite"></div>
+    <script src="signature.js?v=20260717"></script>
+  </body>
+</html>

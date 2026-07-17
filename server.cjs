@@ -1,0 +1,372 @@
+"use strict";
+const fs = require("node:fs");
+const http = require("node:http");
+const path = require("node:path");
+const { randomUUID } = require("node:crypto");
+const { URL } = require("node:url");
+const { loadConfig } = require("./server/config.cjs");
+const { openDatabase } = require("./server/database.cjs");
+const { createSignaturePortal } = require("./server/signature-portal.cjs");
+
+const contentTypes = {
+  ".html": "text/html; charset=utf-8",
+  ".css": "text/css; charset=utf-8",
+  ".js": "application/javascript; charset=utf-8",
+  ".png": "image/png",
+  ".jpg": "image/jpeg",
+  ".jpeg": "image/jpeg",
+  ".gif": "image/gif",
+  ".webp": "image/webp",
+  ".svg": "image/svg+xml",
+  ".ico": "image/x-icon",
+  ".vcf": "text/vcard; charset=utf-8",
+};
+const publicFiles = new Set([
+  "signature.html",
+  "signature.css",
+  "signature.js",
+  "admin.html",
+  "admin.css",
+  "admin.js",
+  "signature-it-banner.png",
+]);
+
+function securityHeaders() {
+  return {
+    "X-Content-Type-Options": "nosniff",
+    "X-Frame-Options": "SAMEORIGIN",
+    "Referrer-Policy": "strict-origin-when-cross-origin",
+    "Strict-Transport-Security": "max-age=31536000; includeSubDomains",
+    "Cross-Origin-Opener-Policy": "same-origin",
+    "X-DNS-Prefetch-Control": "off",
+    "Permissions-Policy": "camera=(), microphone=(), geolocation=()",
+    "Content-Security-Policy":
+      "default-src 'self'; base-uri 'self'; object-src 'none'; frame-ancestors 'self'; form-action 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; script-src 'self'; img-src 'self' data: https:; connect-src 'self'",
+  };
+}
+
+function json(res, status, payload, requestId, headers = {}) {
+  const body = Buffer.from(JSON.stringify(payload));
+  res.writeHead(status, {
+    ...securityHeaders(),
+    ...headers,
+    "Content-Type": "application/json; charset=utf-8",
+    "Content-Length": body.length,
+    "Cache-Control": "no-store",
+    "X-Request-Id": requestId,
+  });
+  res.end(body);
+}
+
+function readBody(req, { limit = 1048576 } = {}) {
+  return new Promise((resolve, reject) => {
+    const chunks = [];
+    let size = 0;
+    req.on("data", (chunk) => {
+      size += chunk.length;
+      if (size > limit) {
+        const error = new Error("Request body is too large.");
+        error.status = 413;
+        error.code = "PAYLOAD_TOO_LARGE";
+        reject(error);
+        req.destroy();
+        return;
+      }
+      chunks.push(chunk);
+    });
+    req.on("end", () => resolve(Buffer.concat(chunks)));
+    req.on("error", reject);
+  });
+}
+async function readJsonBody(req, { limit = 1048576 } = {}) {
+  const body = await readBody(req, { limit });
+  if (!body.length) return {};
+  try {
+    return JSON.parse(body.toString("utf8"));
+  } catch {
+    const error = new Error("Invalid JSON request body.");
+    error.status = 400;
+    error.code = "INVALID_JSON";
+    throw error;
+  }
+}
+
+function serve(config, req, res, pathname, requestId) {
+  let relative;
+  try {
+    relative =
+      decodeURIComponent(pathname) === "/"
+        ? "signature.html"
+        : decodeURIComponent(pathname).replace(/^\/+/, "");
+  } catch {
+    return json(
+      res,
+      400,
+      { error: { code: "INVALID_PATH", message: "Invalid path." } },
+      requestId,
+    );
+  }
+  if (relative === "index.html") relative = "signature.html";
+  if (
+    !publicFiles.has(relative) &&
+    !relative.startsWith("event-banners/") &&
+    !relative.startsWith("generated-banners/") &&
+    !relative.startsWith("icons/") &&
+    !relative.startsWith("uploads/")
+  )
+    return json(
+      res,
+      404,
+      { error: { code: "NOT_FOUND", message: "Route not found." } },
+      requestId,
+    );
+  let file = publicFiles.has(relative)
+    ? path.join(config.sourceRoot, relative)
+    : path.join(config.publicRoot, relative);
+  if (relative === "signature-it-banner.png")
+    file = path.join(config.publicRoot, relative);
+  const resolved = path.resolve(file);
+  const allowedRoots = [
+    path.resolve(config.sourceRoot),
+    path.resolve(config.publicRoot),
+  ];
+  if (
+    !allowedRoots.some(
+      (root) => resolved === root || resolved.startsWith(root + path.sep),
+    )
+  )
+    return json(
+      res,
+      400,
+      { error: { code: "INVALID_PATH", message: "Invalid path." } },
+      requestId,
+    );
+  if (!fs.existsSync(resolved) || !fs.statSync(resolved).isFile())
+    return json(
+      res,
+      404,
+      {
+        error: {
+          code: "STATIC_ASSET_NOT_FOUND",
+          message: "Static asset not found.",
+        },
+      },
+      requestId,
+    );
+  const stat = fs.statSync(resolved);
+  res.writeHead(200, {
+    ...securityHeaders(),
+    "Content-Type":
+      contentTypes[path.extname(resolved)] || "application/octet-stream",
+    "Content-Length": stat.size,
+    "Cache-Control":
+      config.production && path.extname(resolved) !== ".html"
+        ? "public, max-age=3600"
+        : "no-cache",
+    "X-Request-Id": requestId,
+  });
+  if (req.method === "HEAD") return res.end();
+  fs.createReadStream(resolved).pipe(res);
+}
+
+function createApplication(options = {}) {
+  const config = options.config || loadConfig(options.env);
+  const db = options.db || openDatabase(config.databasePath);
+  const signaturePortal = createSignaturePortal({
+    db,
+    production: config.production,
+    signature: config.signature,
+    json,
+    readJsonBody,
+    readBody,
+    publicRoot: config.publicRoot,
+  });
+  const rateBuckets = new Map();
+  function clientIp(req) {
+    if (config.trustProxy) {
+      const forwarded = String(req.headers["x-forwarded-for"] || "")
+        .split(",")[0]
+        .trim();
+      if (forwarded) return forwarded;
+    }
+    return req.socket.remoteAddress || "unknown";
+  }
+  function checkRateLimit(req, pathname) {
+    const policies = {
+        "/api/signature/login": { limit: 10, windowMs: 15 * 60 * 1000 },
+        "/api/signature/register": { limit: 5, windowMs: 60 * 60 * 1000 },
+        "/api/signature/password/forgot": {
+          limit: 5,
+          windowMs: 60 * 60 * 1000,
+        },
+        "/api/signature/password/reset": {
+          limit: 10,
+          windowMs: 60 * 60 * 1000,
+        },
+      },
+      policy = policies[pathname];
+    if (req.method !== "POST" || !policy) return null;
+    const now = Date.now(),
+      key = `${clientIp(req)}:${pathname}`,
+      existing = rateBuckets.get(key);
+    const bucket =
+      !existing || existing.resetAt <= now
+        ? { count: 0, resetAt: now + policy.windowMs }
+        : existing;
+    bucket.count += 1;
+    rateBuckets.set(key, bucket);
+    if (rateBuckets.size > 5000)
+      for (const [entryKey, value] of rateBuckets)
+        if (value.resetAt <= now) rateBuckets.delete(entryKey);
+    return bucket.count > policy.limit
+      ? Math.max(1, Math.ceil((bucket.resetAt - now) / 1000))
+      : null;
+  }
+  function log(level, event, fields = {}) {
+    if (config.logLevel === "silent") return;
+    const order = { debug: 10, info: 20, warn: 30, error: 40 };
+    if ((order[level] || 20) < (order[config.logLevel] || 20)) return;
+    console[level === "error" ? "error" : "log"](
+      JSON.stringify({
+        time: new Date().toISOString(),
+        level,
+        event,
+        ...fields,
+      }),
+    );
+  }
+  const handler = async (req, res) => {
+    const requestId = randomUUID();
+    const startedAt = Date.now();
+    res.once("finish", () =>
+      log(
+        res.statusCode >= 500
+          ? "error"
+          : res.statusCode >= 400
+            ? "warn"
+            : "info",
+        "http.request",
+        {
+          requestId,
+          method: req.method,
+          path: String(req.url || "").split("?")[0],
+          status: res.statusCode,
+          durationMs: Date.now() - startedAt,
+          ip: clientIp(req),
+        },
+      ),
+    );
+    try {
+      const url = new URL(req.url || "/", "http://signature.local");
+      const retryAfter = checkRateLimit(req, url.pathname);
+      if (retryAfter)
+        return json(
+          res,
+          429,
+          {
+            error: {
+              code: "RATE_LIMITED",
+              message: "Too many attempts. Try again later.",
+            },
+          },
+          requestId,
+          { "Retry-After": String(retryAfter) },
+        );
+      if (url.pathname === "/api/health") {
+        if (req.method !== "GET")
+          return json(
+            res,
+            405,
+            {
+              error: {
+                code: "METHOD_NOT_ALLOWED",
+                message: "Method not allowed.",
+              },
+            },
+            requestId,
+            { Allow: "GET" },
+          );
+        db.prepare("SELECT 1").get();
+        return json(
+          res,
+          200,
+          {
+            status: "ok",
+            service: "signify-creator",
+            database: "ready",
+            time: new Date().toISOString(),
+          },
+          requestId,
+        );
+      }
+      const handled = await signaturePortal(req, res, url, requestId);
+      if (handled !== false) return handled;
+      if (req.method !== "GET" && req.method !== "HEAD")
+        return json(
+          res,
+          405,
+          {
+            error: {
+              code: "METHOD_NOT_ALLOWED",
+              message: "Method not allowed.",
+            },
+          },
+          requestId,
+          { Allow: "GET, HEAD" },
+        );
+      return serve(config, req, res, url.pathname, requestId);
+    } catch (error) {
+      log(
+        error.status && error.status < 500 ? "warn" : "error",
+        "request.error",
+        {
+          requestId,
+          code: error.code || "SERVER_ERROR",
+          status: error.status || 500,
+          message: error.status ? error.message : "Unhandled server error",
+          stack: error.status ? undefined : error.stack,
+        },
+      );
+      return json(
+        res,
+        error.status || 500,
+        {
+          error: {
+            code: error.code || "SERVER_ERROR",
+            message: error.status ? error.message : "Server error.",
+          },
+        },
+        requestId,
+      );
+    }
+  };
+  return { config, db, handler };
+}
+
+function startServer(options = {}) {
+  const application = createApplication(options);
+  const server = http.createServer(application.handler);
+  server.listen(application.config.port, application.config.host, () =>
+    console.log(
+      JSON.stringify({
+        time: new Date().toISOString(),
+        level: "info",
+        event: "server.started",
+        url: `http://${application.config.host}:${application.config.port}`,
+      }),
+    ),
+  );
+  function shutdown(signal) {
+    console.log(`${signal} received; closing Signify Creator.`);
+    server.close(() => {
+      application.db.close();
+      process.exit(0);
+    });
+  }
+  process.once("SIGINT", () => shutdown("SIGINT"));
+  process.once("SIGTERM", () => shutdown("SIGTERM"));
+  return { ...application, server };
+}
+
+if (require.main === module) startServer();
+module.exports = { createApplication, startServer };

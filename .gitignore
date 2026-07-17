@@ -1,0 +1,11 @@
+node_modules/
+dist/
+data/
+backups/
+tmp/
+.env
+.env.local
+public/generated-banners/*
+!public/generated-banners/.gitkeep
+*.log
+*.zip
