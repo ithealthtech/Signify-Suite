@@ -399,7 +399,9 @@
             <span class="eyebrow">New campaign</span>
             <h2>Schedule signature promotion</h2>
           </div>
-          <button value="cancel" aria-label="Close" type="submit">×</button>
+          <button data-close-campaign aria-label="Close" type="button">
+            ×
+          </button>
         </div>
         <div class="form-grid">
           <label class="full"
@@ -615,7 +617,8 @@
           </div>
         </div>
         <div class="dialog-actions">
-          <button class="button" value="cancel" type="submit">Cancel</button
+          <button class="button" data-close-campaign type="button">
+            Cancel</button
           ><button
             class="button primary"
             id="createCampaign"

@@ -380,6 +380,9 @@ function bindEvents() {
     updateCampaignComposer();
     $("#campaignDialog").showModal();
   });
+  $$("[data-close-campaign]").forEach((button) =>
+    button.addEventListener("click", () => $("#campaignDialog").close()),
+  );
   $$("[data-campaign-banner]").forEach((button) =>
     button.addEventListener("click", () => {
       $("#campaignForm").elements.imageUrl.value =
