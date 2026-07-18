@@ -1751,12 +1751,23 @@ function createSignaturePortal({
           "text/plain; charset=utf-8",
           { "Set-Cookie": clearOauthCookie },
         );
+      const authorizationCode = String(
+        url.searchParams.get("code") || "",
+      ).trim();
+      if (!authorizationCode)
+        return textResponse(
+          res,
+          400,
+          "Microsoft sign-in authorization code is missing.",
+          "text/plain; charset=utf-8",
+          { "Set-Cookie": clearOauthCookie },
+        );
       const microsoftConfiguration = microsoftSettings(),
         callback = `${applicationPublicBase(req)}/auth/microsoft/callback`,
         body = new URLSearchParams({
           client_id: microsoftConfiguration.clientId,
           client_secret: microsoftConfiguration.clientSecret,
-          code: url.searchParams.get("code") || "",
+          code: authorizationCode,
           redirect_uri: callback,
           grant_type: "authorization_code",
           scope: "openid profile email User.Read",
