@@ -2,6 +2,7 @@
 
 const { randomUUID } = require("node:crypto");
 const { clearInterval, setInterval } = require("node:timers");
+const { cleanupOrphanMedia } = require("./media-storage.cjs");
 
 function createJobQueue(db, handlers = {}, options = {}) {
   const retryBaseSeconds = Math.max(1, Number(options.retryBaseSeconds || 5)),
@@ -135,6 +136,10 @@ function startJobWorker(db, options = {}) {
           DELETE FROM password_reset_tokens WHERE expires_at<=strftime('%Y-%m-%dT%H:%M:%fZ','now') OR used_at IS NOT NULL;
           DELETE FROM email_verification_tokens WHERE expires_at<=strftime('%Y-%m-%dT%H:%M:%fZ','now') OR used_at IS NOT NULL;
           DELETE FROM oauth_states WHERE expires_at<=strftime('%Y-%m-%dT%H:%M:%fZ','now');`),
+      "maintenance.media": () =>
+        options.publicRoot
+          ? cleanupOrphanMedia(db, options.publicRoot, 7)
+          : { removedFiles: 0, removedBytes: 0 },
       ...(options.handlers || {}),
     },
     queue = createJobQueue(db, handlers, options);
@@ -146,6 +151,7 @@ function startJobWorker(db, options = {}) {
     {},
     { dedupeKey: "maintenance.cleanup" },
   );
+  queue.enqueue("maintenance.media", {}, { dedupeKey: "maintenance.media" });
   async function poll() {
     if (stopped || active) return;
     active = true;

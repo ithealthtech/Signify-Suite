@@ -1,18 +1,18 @@
 {
   "schemaVersion": 1,
-  "capturedAt": "2026-07-18T08:59:53.536Z",
+  "capturedAt": "2026-07-18T09:05:47.046Z",
   "runtime": {
     "node": "v24.18.0",
     "platform": "win32",
     "arch": "x64"
   },
   "source": {
-    "measuredBytes": 447997,
+    "measuredBytes": 448370,
     "files": [
       {
         "path": "server.cjs",
-        "bytes": 12267,
-        "lines": 412
+        "bytes": 12497,
+        "lines": 418
       },
       {
         "path": "server/access-control.cjs",
@@ -31,7 +31,7 @@
       },
       {
         "path": "server/signature-portal.cjs",
-        "bytes": 189851,
+        "bytes": 189994,
         "lines": 5471
       },
       {
@@ -97,24 +97,24 @@
     ]
   },
   "production": {
-    "artifactBytes": 13528793,
+    "artifactBytes": 13534097,
     "dependencyCount": 63
   },
   "tests": {
     "durationMs": {
-      "setup": 1209.854,
-      "smoke": 1930.382,
-      "build": 177.193
+      "setup": 1259.293,
+      "smoke": 1929.281,
+      "build": 178.106
     }
   },
   "server": {
-    "initializationMs": 40.137,
+    "initializationMs": 66.526,
     "healthRequests": 100,
     "healthLatencyMs": {
       "min": 0.483,
-      "p50": 15.542,
-      "p95": 16.198,
-      "max": 16.648
+      "p50": 15.472,
+      "p95": 16.238,
+      "max": 16.949
     }
   }
 }

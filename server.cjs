@@ -183,9 +183,13 @@ function serve(config, req, res, pathname, requestId) {
       contentTypes[path.extname(resolved)] || "application/octet-stream",
     "Content-Length": stat.size,
     "Cache-Control":
-      config.production && path.extname(resolved) !== ".html"
-        ? "public, max-age=3600"
-        : "no-cache",
+      config.production &&
+      (relative.startsWith("uploads/") ||
+        relative.startsWith("generated-banners/"))
+        ? "public, max-age=31536000, immutable"
+        : config.production && path.extname(resolved) !== ".html"
+          ? "public, max-age=3600"
+          : "no-cache",
     "X-Request-Id": requestId,
   });
   if (req.method === "HEAD") return res.end();
@@ -377,7 +381,9 @@ function createApplication(options = {}) {
 function startServer(options = {}) {
   const application = createApplication(options);
   const server = http.createServer(application.handler);
-  const jobs = startJobWorker(application.db);
+  const jobs = startJobWorker(application.db, {
+    publicRoot: application.config.publicRoot,
+  });
   server.requestTimeout = 30000;
   server.headersTimeout = 15000;
   server.keepAliveTimeout = 5000;
