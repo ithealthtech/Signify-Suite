@@ -1,7 +1,7 @@
 {
   "name": "signify-creator",
   "private": true,
-  "version": "0.3.0",
+  "version": "0.3.1",
   "type": "commonjs",
   "engines": {
     "node": ">=22.13.0"
@@ -16,7 +16,7 @@
     "lint": "eslint .",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
-    "check": "npm run format:check && npm run lint && npm test && npm run build",
+    "check": "npm run format:check && npm run lint && npm test && npm run build && node scripts/artifact-test.cjs",
     "backup": "node --env-file-if-exists=.env.local scripts/backup.cjs",
     "demo:seed": "node --env-file-if-exists=.env.local scripts/seed-demo-team.cjs",
     "signature:reset-admin": "node --env-file-if-exists=.env.local scripts/reset-signature-admin.cjs",

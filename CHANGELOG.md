@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.3.1 - 2026-07-18
+
+### Security
+
+- Production packaging now copies an explicit public-asset allowlist instead of
+  the working tree's complete `public` directory.
+- Added an artifact gate that rejects runtime uploads, generated media,
+  databases, local environment files, backups, logs, archives, dependencies,
+  and populated provider secrets.
+
 ## 0.3.0 - 2026-07-18
 
 Signify Creator 0.3.0 promotes the multi-tenant control plane, guided provider

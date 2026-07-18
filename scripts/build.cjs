@@ -4,6 +4,27 @@ const path = require("node:path");
 
 const root = path.join(__dirname, ".."),
   destination = path.join(root, "dist"),
+  publicFiles = [
+    "public/signature-it-banner.png",
+    "public/event-banners/backup-disaster-recovery-webinar.png",
+    "public/event-banners/cloud-services-modernization.png",
+    "public/event-banners/cybersecurity-readiness-event.png",
+    "public/event-banners/executive-it-strategy-session.png",
+    "public/event-banners/healthcare-professional-services-it.png",
+    "public/event-banners/it-health-check-network-assessment.png",
+    "public/event-banners/managed-it-services-assessment.png",
+    "public/event-banners/proactive-monitoring-support.png",
+    "public/icons/address.png",
+    "public/icons/email.png",
+    "public/icons/facebook.png",
+    "public/icons/instagram.png",
+    "public/icons/linkedin.png",
+    "public/icons/mobile.png",
+    "public/icons/phone.png",
+    "public/icons/twitter.png",
+    "public/icons/web.png",
+    "public/icons/website.png",
+  ],
   entries = [
     "server.cjs",
     "package.json",
@@ -22,7 +43,7 @@ const root = path.join(__dirname, ".."),
     "platform.css",
     "platform.js",
     "server",
-    "public",
+    ...publicFiles,
     "scripts/backup.cjs",
     "scripts/grant-application-owner.cjs",
     "scripts/reset-signature-admin.cjs",
@@ -49,5 +70,15 @@ for (const entry of entries) {
   fs.mkdirSync(path.dirname(target), { recursive: true });
   fs.cpSync(source, target, { recursive: true });
 }
-fs.mkdirSync(path.join(destination, "data"), { recursive: true });
+for (const directory of [
+  "data",
+  "backups",
+  "public/uploads",
+  "public/generated-banners",
+])
+  fs.mkdirSync(path.join(destination, directory), { recursive: true });
+fs.writeFileSync(
+  path.join(destination, "public/generated-banners/.gitkeep"),
+  "",
+);
 console.log(`Production artifact created at ${destination}`);
