@@ -5,3 +5,4 @@ backups
 tmp
 public
 package-lock.json
+docs/sbom.cdx.json

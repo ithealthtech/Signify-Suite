@@ -365,7 +365,10 @@ GET /api/metrics  aggregate request counts, errors, status classes, and latency
 ```
 
 Application logs are structured JSON and include request IDs, status codes,
-duration, and sanitized server errors.
+latency, and sanitized server errors. The production deployment, monitoring, queue recovery,
+backup, restore, rollback, and capacity runbook is in `docs/OPERATIONS.md`. A
+CycloneDX production dependency inventory is generated with `npm run sbom` and
+included as `docs/sbom.cdx.json` in release artifacts.
 
 ## Backups and Recovery
 
