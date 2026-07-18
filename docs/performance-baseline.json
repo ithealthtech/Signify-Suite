@@ -1,0 +1,85 @@
+{
+  "schemaVersion": 1,
+  "capturedAt": "2026-07-18T08:29:47.787Z",
+  "runtime": {
+    "node": "v24.18.0",
+    "platform": "win32",
+    "arch": "x64"
+  },
+  "source": {
+    "measuredBytes": 444931,
+    "files": [
+      {
+        "path": "server.cjs",
+        "bytes": 12068,
+        "lines": 407
+      },
+      {
+        "path": "server/signature-portal.cjs",
+        "bytes": 196283,
+        "lines": 5666
+      },
+      {
+        "path": "server/templates.cjs",
+        "bytes": 22366,
+        "lines": 482
+      },
+      {
+        "path": "admin.js",
+        "bytes": 39713,
+        "lines": 1116
+      },
+      {
+        "path": "platform.js",
+        "bytes": 24718,
+        "lines": 672
+      },
+      {
+        "path": "signature.js",
+        "bytes": 28550,
+        "lines": 905
+      },
+      {
+        "path": "admin.css",
+        "bytes": 27759,
+        "lines": 1535
+      },
+      {
+        "path": "platform.css",
+        "bytes": 4309,
+        "lines": 252
+      },
+      {
+        "path": "signature.css",
+        "bytes": 23693,
+        "lines": 1303
+      },
+      {
+        "path": "scripts/smoke-test.cjs",
+        "bytes": 65472,
+        "lines": 1923
+      }
+    ]
+  },
+  "production": {
+    "artifactBytes": 13520982,
+    "dependencyCount": 63
+  },
+  "tests": {
+    "durationMs": {
+      "setup": 1099.366,
+      "smoke": 1961.629,
+      "build": 173.454
+    }
+  },
+  "server": {
+    "initializationMs": 46.759,
+    "healthRequests": 100,
+    "healthLatencyMs": {
+      "min": 0.444,
+      "p50": 15.462,
+      "p95": 16.495,
+      "max": 16.673
+    }
+  }
+}

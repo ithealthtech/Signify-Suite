@@ -11,6 +11,7 @@
     "setup": "node scripts/setup.cjs",
     "dev": "node scripts/dev.cjs",
     "build": "node scripts/build.cjs",
+    "benchmark": "node scripts/benchmark.cjs",
     "test": "node scripts/setup-test.cjs && node scripts/smoke-test.cjs",
     "smoke": "node scripts/smoke-test.cjs",
     "lint": "eslint .",
