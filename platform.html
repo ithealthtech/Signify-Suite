@@ -27,13 +27,110 @@
         <div>
           <span class="eyebrow">Control plane</span><strong>Signify</strong>
         </div>
+        <button data-section="setup" type="button">First-time setup</button>
         <button class="active" data-section="tenants" type="button">
           Tenants
         </button>
+        <button data-section="integrations" type="button">Integrations</button>
         <button data-section="owners" type="button">Application Owners</button>
         <button data-section="audit" type="button">Application audit</button>
       </aside>
       <section class="admin-content">
+        <section class="admin-section" data-admin-section="setup">
+          <div class="page-head">
+            <div>
+              <span class="eyebrow">Application readiness</span>
+              <h1>First-time setup</h1>
+              <p>
+                Complete the required application services before onboarding
+                tenants.
+              </p>
+            </div>
+            <strong id="setupCompletion">Not ready</strong>
+          </div>
+          <div class="setup-progress" id="setupProgress"></div>
+          <form class="control-form integration-form" id="applicationSetupForm">
+            <h2>1. Application identity</h2>
+            <div class="form-grid">
+              <label
+                >Company name<input name="companyName" required minlength="2"
+              /></label>
+              <label
+                >Public application URL<input
+                  name="publicUrl"
+                  type="url"
+                  required
+              /></label>
+            </div>
+            <label
+              >Reason<input
+                name="reason"
+                value="Configure application identity"
+                required
+            /></label>
+            <button class="button primary" type="submit">Save identity</button>
+          </form>
+          <form class="control-form integration-form" id="microsoftSetupForm">
+            <h2>2. Microsoft 365 application</h2>
+            <div class="form-grid">
+              <label
+                >Application (client) ID<input
+                  name="clientId"
+                  required
+                  autocomplete="off"
+              /></label>
+              <label
+                >Home tenant ID<input
+                  name="homeTenantId"
+                  required
+                  autocomplete="off"
+              /></label>
+            </div>
+            <label
+              >Client credential<input
+                name="clientSecret"
+                type="password"
+                required
+                autocomplete="off"
+            /></label>
+            <label
+              >Reason<input
+                name="reason"
+                value="Configure Microsoft application"
+                required
+            /></label>
+            <button class="button primary" type="submit">
+              Verify Microsoft
+            </button>
+          </form>
+          <div class="control-form integration-form">
+            <h2>3. Stripe billing</h2>
+            <p>
+              Configure Stripe in Integrations, or defer billing for this
+              installation.
+            </p>
+            <div class="integration-actions">
+              <button class="button primary" id="openStripeSetup" type="button">
+                Configure Stripe
+              </button>
+              <button class="button" id="skipStripeSetup" type="button">
+                Skip for now
+              </button>
+            </div>
+          </div>
+          <div class="control-form integration-form">
+            <h2>4. Readiness</h2>
+            <p id="setupReadinessMessage">Complete the required steps above.</p>
+            <button
+              class="button primary"
+              id="finishSetup"
+              type="button"
+              disabled
+            >
+              Continue to tenants
+            </button>
+          </div>
+        </section>
         <section class="admin-section active" data-admin-section="tenants">
           <div class="page-head">
             <div>
@@ -98,6 +195,125 @@
             ><span id="pageLabel"></span
             ><button class="button" id="nextPage" type="button">Next</button>
           </div>
+        </section>
+        <section class="admin-section" data-admin-section="integrations">
+          <div class="page-head">
+            <div>
+              <span class="eyebrow">Provider setup</span>
+              <h1>Integrations</h1>
+              <p>Connect and verify application-level services.</p>
+            </div>
+            <button class="button" id="refreshIntegrations" type="button">
+              Refresh
+            </button>
+          </div>
+          <div class="integration-status" id="microsoftIntegrationStatus"></div>
+          <div
+            class="control-form integration-form"
+            id="microsoftIntegrationActions"
+          >
+            <h2>Microsoft 365 application</h2>
+            <p id="microsoftPermissions">
+              Configure Microsoft in First-time setup.
+            </p>
+            <div class="integration-actions">
+              <button class="button" id="openMicrosoftSetup" type="button">
+                Configure Microsoft
+              </button>
+              <button
+                class="button danger"
+                id="disconnectMicrosoft"
+                type="button"
+              >
+                Disconnect Microsoft
+              </button>
+            </div>
+          </div>
+          <div class="integration-status" id="stripeIntegrationStatus"></div>
+          <form class="control-form integration-form" id="stripeConnectForm">
+            <h2>Stripe account</h2>
+            <p>
+              Use a test secret key during setup. The key is encrypted before it
+              is stored and is never returned to the browser.
+            </p>
+            <label
+              >Stripe secret key<input
+                name="secretKey"
+                type="password"
+                autocomplete="off"
+                spellcheck="false"
+                required
+            /></label>
+            <label
+              >Reason<input
+                name="reason"
+                value="Connect Stripe account"
+                required
+                minlength="3"
+            /></label>
+            <button class="button primary" type="submit">Verify account</button>
+          </form>
+          <form
+            class="control-form integration-form"
+            id="stripePlanForm"
+            hidden
+          >
+            <h2>Plan mapping</h2>
+            <p>
+              Map active recurring Stripe prices, then create the signed webhook
+              destination automatically.
+            </p>
+            <div class="form-grid three">
+              <label>Starter<select name="starter"></select></label>
+              <label>Team<select name="team"></select></label>
+              <label>Business<select name="business"></select></label>
+            </div>
+            <label
+              >Reason<input
+                name="reason"
+                value="Configure Stripe plans and webhook"
+                required
+                minlength="3"
+            /></label>
+            <div class="integration-actions">
+              <button class="button primary" type="submit">
+                Save and create webhook
+              </button>
+              <button class="button danger" id="disconnectStripe" type="button">
+                Disconnect Stripe
+              </button>
+            </div>
+          </form>
+          <form
+            class="control-form integration-form"
+            id="stripeTestForm"
+            hidden
+          >
+            <h2>Sandbox Checkout test</h2>
+            <div class="form-grid">
+              <label
+                >Plan<select name="plan">
+                  <option value="starter">Starter</option>
+                  <option value="team">Team</option>
+                  <option value="business">Business</option>
+                </select></label
+              >
+              <label
+                >Test customer email<input
+                  name="customerEmail"
+                  type="email"
+                  required
+              /></label>
+            </div>
+            <input
+              name="reason"
+              type="hidden"
+              value="Stripe sandbox Checkout test"
+            />
+            <button class="button primary" type="submit">
+              Open test Checkout
+            </button>
+          </form>
         </section>
         <section class="admin-section" data-admin-section="owners">
           <div class="page-head">
@@ -289,6 +505,54 @@
           <button class="button primary" id="createCheckout" type="submit">
             Create checkout</button
           ><small id="stripeStatus"></small>
+        </form>
+        <form class="control-form" id="stripeSubscriptionForm">
+          <h3>Stripe subscription actions</h3>
+          <div class="form-grid">
+            <label
+              >Mapped plan<select name="plan">
+                <option value="starter">Starter</option>
+                <option value="team">Team</option>
+                <option value="business">Business</option>
+              </select></label
+            ><label
+              >Reason<input
+                name="reason"
+                value="Application Owner billing change"
+                required
+                minlength="3"
+            /></label>
+          </div>
+          <div class="integration-actions">
+            <button
+              class="button primary"
+              data-stripe-action="change_plan"
+              type="submit"
+            >
+              Change plan
+            </button>
+            <button class="button" id="openStripePortal" type="button">
+              Open billing portal
+            </button>
+            <button
+              class="button danger"
+              data-stripe-action="cancel"
+              type="submit"
+            >
+              Cancel at period end
+            </button>
+            <button
+              class="button"
+              data-stripe-action="reactivate"
+              type="submit"
+            >
+              Reactivate
+            </button>
+          </div>
+          <small
+            >Stripe webhooks remain authoritative for local subscription
+            status.</small
+          >
         </form>
         <div class="control-form">
           <h3>Tenant administrators and users</h3>

@@ -14,6 +14,7 @@ const { GIFEncoder, quantize, applyPalette } = require("gifenc");
 const QRCode = require("qrcode");
 const Stripe = require("stripe");
 const sharp = require("sharp");
+const { createCredentialVault } = require("./credential-vault.cjs");
 const {
   TEMPLATES,
   buildSignatureHtml,
@@ -518,16 +519,12 @@ function createSignaturePortal({
   publicRoot = path.join(__dirname, "..", "public"),
   trustProxy = false,
   fetchImpl = fetch,
+  stripeFactory = (key) =>
+    new Stripe(key, { maxNetworkRetries: 2, timeout: 10000 }),
 }) {
   seed(db, signature);
-  const stripe = signature.stripeSecretKey
-    ? new Stripe(signature.stripeSecretKey, {
-        maxNetworkRetries: 2,
-        timeout: 10000,
-      })
-    : null;
-  const microsoftAvailable = Boolean(
-    signature.microsoftClientId && signature.microsoftClientSecret,
+  const credentialVault = createCredentialVault(
+    signature.credentialEncryptionKey,
   );
   let microsoftJwksCache = { expiresAt: 0, keys: [] };
   const memberSelect = `SELECT u.id,u.email,u.password_hash,u.display_name,u.role,u.status,u.created_at,u.updated_at,u.last_login_at,u.email_verified_at,m.signature_json,m.role AS membership_role,m.status AS membership_status,o.id AS organization_id,o.name AS organization_name,o.slug AS organization_slug,o.status AS organization_status,o.settings_json AS organization_settings FROM signature_users u JOIN organization_memberships m ON m.user_id=u.id JOIN organizations o ON o.id=m.organization_id`;
@@ -537,6 +534,119 @@ function createSignaturePortal({
     blurb: item.blurb,
     kind: "builtin",
   }));
+
+  function integrationRow(provider) {
+    return db
+      .prepare("SELECT * FROM application_integrations WHERE provider=?")
+      .get(provider);
+  }
+  function integrationCredentials(provider) {
+    const row = integrationRow(provider);
+    if (!row?.encrypted_credentials) return null;
+    return credentialVault.decrypt(provider, row.encrypted_credentials);
+  }
+  function stripeSettings() {
+    const row = integrationRow("stripe"),
+      credentials = integrationCredentials("stripe"),
+      configuration = safeJson(row?.configuration_json);
+    return credentials
+      ? {
+          secretKey: credentials.secretKey || "",
+          webhookSecret: credentials.webhookSecret || "",
+          prices: configuration.prices || {},
+          mode: row.mode || "",
+          accountId: row.account_id || "",
+          accountName: row.account_name || "",
+          source: "vault",
+        }
+      : {
+          secretKey: signature.stripeSecretKey || "",
+          webhookSecret: signature.stripeWebhookSecret || "",
+          prices: signature.stripePrices || {},
+          mode: String(signature.stripeSecretKey || "").startsWith("sk_live_")
+            ? "live"
+            : signature.stripeSecretKey
+              ? "test"
+              : "",
+          accountId: "",
+          accountName: "",
+          source: signature.stripeSecretKey ? "environment" : "none",
+        };
+  }
+  function microsoftSettings() {
+    const row = integrationRow("microsoft"),
+      credentials = integrationCredentials("microsoft"),
+      configuration = safeJson(row?.configuration_json);
+    return credentials
+      ? {
+          clientId: credentials.clientId || "",
+          clientSecret: credentials.clientSecret || "",
+          homeTenantId: configuration.homeTenantId || "",
+          source: "vault",
+        }
+      : {
+          clientId: signature.microsoftClientId || "",
+          clientSecret: signature.microsoftClientSecret || "",
+          homeTenantId: signature.microsoftTenantId || "",
+          source: signature.microsoftClientId ? "environment" : "none",
+        };
+  }
+  function microsoftAvailable() {
+    const settings = microsoftSettings();
+    return Boolean(settings.clientId && settings.clientSecret);
+  }
+  function applicationSetting(key, fallback = "") {
+    return (
+      db
+        .prepare(
+          "SELECT setting_value FROM application_settings WHERE setting_key=?",
+        )
+        .get(key)?.setting_value ?? fallback
+    );
+  }
+  function applicationPublicBase(req) {
+    return cleanUrl(
+      applicationSetting("public_url", signature.publicUrl || requestBase(req)),
+    );
+  }
+  function stripeClient(settings = stripeSettings()) {
+    return settings.secretKey ? stripeFactory(settings.secretKey) : null;
+  }
+  async function stripeRequest(operation, message) {
+    try {
+      return await operation();
+    } catch (cause) {
+      throw Object.assign(new Error(message), {
+        status: 502,
+        code: "STRIPE_API_FAILED",
+        cause,
+      });
+    }
+  }
+  function integrationSummary(provider) {
+    const row = integrationRow(provider);
+    if (!row)
+      return {
+        provider,
+        status: "disconnected",
+        mode: "",
+        accountId: "",
+        accountName: "",
+        lastVerifiedAt: null,
+        lastError: "",
+        source: provider === "stripe" ? stripeSettings().source : "environment",
+      };
+    return {
+      provider,
+      status: row.status,
+      mode: row.mode,
+      accountId: row.account_id,
+      accountName: row.account_name,
+      lastVerifiedAt: row.last_verified_at,
+      lastError: row.last_error,
+      source: "vault",
+    };
+  }
 
   function requestBase(req) {
     const forwardedProto = trustProxy
@@ -849,12 +959,12 @@ function createSignaturePortal({
   function mailAvailable(organizationId) {
     if (!organizationId)
       return Boolean(
-        microsoftAvailable &&
+        microsoftAvailable() &&
         signature.microsoftTenantId &&
         signature.microsoftSenderEmail,
       );
     const connection = microsoftConnection(organizationId, true);
-    return Boolean(microsoftAvailable && connection?.sender_email);
+    return Boolean(microsoftAvailable() && connection?.sender_email);
   }
   function mailOrganizationForUser(userId) {
     return db
@@ -864,15 +974,16 @@ function createSignaturePortal({
       .get(userId)?.organization_id;
   }
   function billingAvailable() {
+    const settings = stripeSettings();
     return Boolean(
-      stripe &&
-      signature.stripeWebhookSecret &&
-      Object.values(signature.stripePrices || {}).some(Boolean),
+      settings.secretKey &&
+      settings.webhookSecret &&
+      Object.values(settings.prices || {}).some(Boolean),
     );
   }
   function planForPrice(priceId) {
     return (
-      Object.entries(signature.stripePrices || {}).find(
+      Object.entries(stripeSettings().prices || {}).find(
         ([, configured]) => configured && configured === priceId,
       )?.[0] || "starter"
     );
@@ -1170,6 +1281,7 @@ function createSignaturePortal({
   }
 
   async function verifyMicrosoftIdToken(token, expectedNonce) {
+    const microsoftConfiguration = microsoftSettings();
     const parts = String(token || "").split("."),
       header = safeJson(
         parts[0] ? Buffer.from(parts[0], "base64url").toString("utf8") : "{}",
@@ -1219,7 +1331,7 @@ function createSignaturePortal({
       expectedIssuer = `https://login.microsoftonline.com/${tenantId}/v2.0`,
       now = Math.floor(Date.now() / 1000);
     if (
-      !audience.includes(signature.microsoftClientId) ||
+      !audience.includes(microsoftConfiguration.clientId) ||
       payload.iss !== expectedIssuer ||
       payload.nonce !== expectedNonce ||
       !Number.isFinite(payload.exp) ||
@@ -1234,14 +1346,15 @@ function createSignaturePortal({
   }
 
   async function graphTokenForTenant(tenantId) {
-    if (!microsoftAvailable)
+    const microsoftConfiguration = microsoftSettings();
+    if (!microsoftAvailable())
       throw Object.assign(new Error("Microsoft 365 is not configured."), {
         status: 400,
         code: "MICROSOFT_NOT_CONFIGURED",
       });
     const body = new URLSearchParams({
-      client_id: signature.microsoftClientId,
-      client_secret: signature.microsoftClientSecret,
+      client_id: microsoftConfiguration.clientId,
+      client_secret: microsoftConfiguration.clientSecret,
       scope: "https://graph.microsoft.com/.default",
       grant_type: "client_credentials",
     });
@@ -1397,7 +1510,9 @@ function createSignaturePortal({
 
   return async function handle(req, res, url, requestId) {
     if (url.pathname === "/webhooks/stripe" && req.method === "POST") {
-      if (!stripe || !signature.stripeWebhookSecret)
+      const stripeConfiguration = stripeSettings(),
+        stripe = stripeClient(stripeConfiguration);
+      if (!stripe || !stripeConfiguration.webhookSecret)
         return json(
           res,
           503,
@@ -1415,7 +1530,7 @@ function createSignaturePortal({
         event = stripe.webhooks.constructEvent(
           rawBody,
           String(req.headers["stripe-signature"] || ""),
-          signature.stripeWebhookSecret,
+          stripeConfiguration.webhookSecret,
         );
       } catch {
         return json(
@@ -1455,7 +1570,7 @@ function createSignaturePortal({
     ) {
       const user = requireSession(req);
       requireAdmin(user);
-      if (!microsoftAvailable)
+      if (!microsoftAvailable())
         return redirect(res, "/admin.html?microsoft=unavailable#settings");
       const state = randomBytes(24).toString("base64url");
       db.prepare(
@@ -1466,9 +1581,10 @@ function createSignaturePortal({
         user.organizationId,
         user.id,
       );
-      const callback = `${publicBase(req, user)}/auth/microsoft/admin-consent/callback`,
+      const microsoftConfiguration = microsoftSettings(),
+        callback = `${publicBase(req, user)}/auth/microsoft/admin-consent/callback`,
         params = new URLSearchParams({
-          client_id: signature.microsoftClientId,
+          client_id: microsoftConfiguration.clientId,
           scope: "https://graph.microsoft.com/.default",
           redirect_uri: callback,
           state,
@@ -1566,7 +1682,7 @@ function createSignaturePortal({
       });
     }
     if (url.pathname === "/auth/microsoft" && req.method === "GET") {
-      if (!microsoftAvailable)
+      if (!microsoftAvailable())
         return redirect(res, "/signature.html?auth=microsoft-unavailable");
       const state = randomBytes(24).toString("base64url"),
         nonce = randomBytes(24).toString("base64url"),
@@ -1580,9 +1696,10 @@ function createSignaturePortal({
       db.prepare(
         "INSERT INTO oauth_state_security(token_hash,code_verifier,nonce) VALUES (?,?,?)",
       ).run(tokenHash(state), codeVerifier, nonce);
-      const callback = `${cleanUrl(signature.publicUrl || requestBase(req))}/auth/microsoft/callback`,
+      const microsoftConfiguration = microsoftSettings(),
+        callback = `${applicationPublicBase(req)}/auth/microsoft/callback`,
         params = new URLSearchParams({
-          client_id: signature.microsoftClientId,
+          client_id: microsoftConfiguration.clientId,
           response_type: "code",
           redirect_uri: callback,
           response_mode: "query",
@@ -1634,10 +1751,11 @@ function createSignaturePortal({
           "text/plain; charset=utf-8",
           { "Set-Cookie": clearOauthCookie },
         );
-      const callback = `${cleanUrl(signature.publicUrl || requestBase(req))}/auth/microsoft/callback`,
+      const microsoftConfiguration = microsoftSettings(),
+        callback = `${applicationPublicBase(req)}/auth/microsoft/callback`,
         body = new URLSearchParams({
-          client_id: signature.microsoftClientId,
-          client_secret: signature.microsoftClientSecret,
+          client_id: microsoftConfiguration.clientId,
+          client_secret: microsoftConfiguration.clientSecret,
           code: url.searchParams.get("code") || "",
           redirect_uri: callback,
           grant_type: "authorization_code",
@@ -1810,7 +1928,9 @@ function createSignaturePortal({
             },
             stripe: {
               configured: billingAvailable(),
-              plans: Object.entries(signature.stripePrices || {})
+              ...integrationSummary("stripe"),
+              vaultConfigured: credentialVault.configured,
+              plans: Object.entries(stripeSettings().prices || {})
                 .filter(([, price]) => Boolean(price))
                 .map(([plan]) => plan),
             },
@@ -1818,6 +1938,572 @@ function createSignaturePortal({
           requestId,
           refreshCsrf(owner),
         );
+      }
+      if (url.pathname === "/api/platform/integrations" && req.method === "GET")
+        return json(
+          res,
+          200,
+          {
+            vault: {
+              configured: credentialVault.configured,
+              keyId: credentialVault.keyId,
+            },
+            stripe: {
+              ...integrationSummary("stripe"),
+              configured: billingAvailable(),
+              prices: stripeSettings().prices,
+              catalog:
+                safeJson(integrationRow("stripe")?.configuration_json)
+                  .catalog || [],
+            },
+            microsoft: {
+              ...integrationSummary("microsoft"),
+              ...safeJson(integrationRow("microsoft")?.configuration_json),
+              configured: microsoftAvailable(),
+            },
+          },
+          requestId,
+        );
+      if (url.pathname === "/api/platform/setup" && req.method === "GET") {
+        const companyName = applicationSetting(
+            "company_name",
+            signature.companyName || "",
+          ),
+          publicUrl = applicationSetting(
+            "public_url",
+            signature.publicUrl || "",
+          ),
+          stripeSkipped = applicationSetting("stripe_skipped") === "true",
+          microsoft = microsoftSettings();
+        return json(
+          res,
+          200,
+          {
+            company: {
+              name: companyName,
+              publicUrl,
+              ready: Boolean(companyName && publicUrl),
+            },
+            vault: {
+              configured: credentialVault.configured,
+              keyId: credentialVault.keyId,
+            },
+            microsoft: {
+              ...integrationSummary("microsoft"),
+              configured: microsoftAvailable(),
+              homeTenantId: microsoft.homeTenantId,
+            },
+            stripe: {
+              ...integrationSummary("stripe"),
+              configured: billingAvailable(),
+              skipped: stripeSkipped,
+            },
+            complete: Boolean(
+              companyName &&
+              publicUrl &&
+              credentialVault.configured &&
+              microsoftAvailable() &&
+              (billingAvailable() || stripeSkipped),
+            ),
+          },
+          requestId,
+        );
+      }
+      if (
+        url.pathname === "/api/platform/setup/application" &&
+        req.method === "PUT"
+      ) {
+        const body = await readJsonBody(req, { limit: 8192 }),
+          companyName = limited(body.companyName, 120),
+          publicUrl = cleanUrl(body.publicUrl);
+        if (companyName.length < 2 || !validUrl(publicUrl))
+          throw Object.assign(
+            new Error("Enter a company name and valid public application URL."),
+            { status: 400, code: "APPLICATION_SETUP_INVALID" },
+          );
+        if (production && !publicUrl.startsWith("https://"))
+          throw Object.assign(
+            new Error("The production public URL must use HTTPS."),
+            { status: 400, code: "APPLICATION_URL_INSECURE" },
+          );
+        const update = db.prepare(
+          `INSERT INTO application_settings(setting_key,setting_value,updated_by) VALUES (?,?,?) ON CONFLICT(setting_key) DO UPDATE SET setting_value=excluded.setting_value,updated_by=excluded.updated_by,updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now')`,
+        );
+        db.exec("BEGIN IMMEDIATE");
+        try {
+          update.run("company_name", companyName, owner.id);
+          update.run("public_url", publicUrl, owner.id);
+          db.exec("COMMIT");
+        } catch (error) {
+          db.exec("ROLLBACK");
+          throw error;
+        }
+        recordApplicationAudit(
+          owner,
+          "application.setup_updated",
+          "application_settings",
+          "identity",
+          null,
+          limited(body.reason || "Configure application identity", 500),
+          { companyName, publicUrl },
+          requestId,
+        );
+        return json(res, 200, { companyName, publicUrl }, requestId);
+      }
+      if (
+        url.pathname === "/api/platform/setup/stripe-skip" &&
+        req.method === "PUT"
+      ) {
+        const body = await readJsonBody(req, { limit: 8192 }),
+          skipped = Boolean(body.skipped);
+        db.prepare(
+          `INSERT INTO application_settings(setting_key,setting_value,updated_by) VALUES ('stripe_skipped',?,?) ON CONFLICT(setting_key) DO UPDATE SET setting_value=excluded.setting_value,updated_by=excluded.updated_by,updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now')`,
+        ).run(skipped ? "true" : "false", owner.id);
+        recordApplicationAudit(
+          owner,
+          skipped ? "stripe.setup_skipped" : "stripe.setup_required",
+          "application_settings",
+          "stripe_skipped",
+          null,
+          limited(body.reason || "Update Stripe setup choice", 500),
+          {},
+          requestId,
+        );
+        return json(res, 200, { skipped }, requestId);
+      }
+      if (
+        url.pathname === "/api/platform/integrations/microsoft/connect" &&
+        req.method === "POST"
+      ) {
+        const body = await readJsonBody(req, { limit: 16384 }),
+          clientId = limited(body.clientId, 100),
+          clientSecret = String(body.clientSecret || "").trim(),
+          homeTenantId = limited(body.homeTenantId, 100),
+          guid =
+            /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+        if (!guid.test(clientId) || !guid.test(homeTenantId) || !clientSecret)
+          throw Object.assign(
+            new Error(
+              "Enter the Microsoft application ID, home tenant ID, and client credential.",
+            ),
+            { status: 400, code: "MICROSOFT_CONFIGURATION_INVALID" },
+          );
+        const tokenResponse = await fetchWithRetry(
+            `https://login.microsoftonline.com/${encodeURIComponent(homeTenantId)}/oauth2/v2.0/token`,
+            {
+              method: "POST",
+              headers: { "Content-Type": "application/x-www-form-urlencoded" },
+              body: new URLSearchParams({
+                client_id: clientId,
+                client_secret: clientSecret,
+                scope: "https://graph.microsoft.com/.default",
+                grant_type: "client_credentials",
+              }),
+            },
+          ),
+          tokens = await tokenResponse.json();
+        if (!tokenResponse.ok || !tokens.access_token)
+          throw Object.assign(
+            new Error(
+              tokens.error_description ||
+                "Microsoft rejected the application credentials.",
+            ),
+            { status: 502, code: "MICROSOFT_CONFIGURATION_REJECTED" },
+          );
+        const requiredPermissions = [
+            "Mail.Send",
+            "Organization.Read.All",
+            "User.Read.All",
+          ],
+          accessClaims = jwtPayload(tokens.access_token),
+          permissions = Array.isArray(accessClaims.roles)
+            ? accessClaims.roles.sort()
+            : [],
+          missingPermissions = requiredPermissions.filter(
+            (permission) => !permissions.includes(permission),
+          );
+        if (
+          String(tokens.access_token).split(".").length === 3 &&
+          missingPermissions.length
+        )
+          throw Object.assign(
+            new Error(
+              `Microsoft admin consent is missing: ${missingPermissions.join(", ")}.`,
+            ),
+            { status: 409, code: "MICROSOFT_PERMISSIONS_MISSING" },
+          );
+        const organizationResponse = await fetchWithRetry(
+            "https://graph.microsoft.com/v1.0/organization?$select=id,displayName,verifiedDomains",
+            { headers: { Authorization: `Bearer ${tokens.access_token}` } },
+          ),
+          organizationData = await organizationResponse.json(),
+          organization = organizationData.value?.[0];
+        if (!organizationResponse.ok || !organization)
+          throw Object.assign(
+            new Error("Microsoft Graph organization verification failed."),
+            { status: 502, code: "MICROSOFT_CONFIGURATION_REJECTED" },
+          );
+        const encrypted = credentialVault.encrypt("microsoft", {
+          clientId,
+          clientSecret,
+        });
+        db.prepare(
+          `INSERT INTO application_integrations(provider,status,mode,account_id,account_name,configuration_json,encrypted_credentials,credential_key_id,last_verified_at,last_error,updated_by) VALUES ('microsoft','connected','multitenant',?,?,?,?,?,strftime('%Y-%m-%dT%H:%M:%fZ','now'),'',?) ON CONFLICT(provider) DO UPDATE SET status='connected',mode='multitenant',account_id=excluded.account_id,account_name=excluded.account_name,configuration_json=excluded.configuration_json,encrypted_credentials=excluded.encrypted_credentials,credential_key_id=excluded.credential_key_id,last_verified_at=excluded.last_verified_at,last_error='',updated_by=excluded.updated_by,updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now')`,
+        ).run(
+          organization.id || homeTenantId,
+          limited(organization.displayName || homeTenantId, 180),
+          JSON.stringify({
+            homeTenantId,
+            permissions,
+            requiredPermissions,
+            missingPermissions,
+          }),
+          encrypted,
+          credentialVault.keyId,
+          owner.id,
+        );
+        microsoftJwksCache = { expiresAt: 0, keys: [] };
+        recordApplicationAudit(
+          owner,
+          "microsoft.application_connected",
+          "application_integration",
+          "microsoft",
+          null,
+          limited(body.reason || "Configure Microsoft application", 500),
+          { homeTenantId, organizationName: organization.displayName },
+          requestId,
+        );
+        return json(
+          res,
+          200,
+          { integration: integrationSummary("microsoft") },
+          requestId,
+        );
+      }
+      if (
+        url.pathname === "/api/platform/integrations/microsoft" &&
+        req.method === "DELETE"
+      ) {
+        const body = await readJsonBody(req, { limit: 8192 }),
+          reason = limited(body.reason, 500);
+        if (reason.length < 3)
+          throw Object.assign(new Error("A reason is required."), {
+            status: 400,
+            code: "REASON_REQUIRED",
+          });
+        db.prepare(
+          "DELETE FROM application_integrations WHERE provider='microsoft'",
+        ).run();
+        microsoftJwksCache = { expiresAt: 0, keys: [] };
+        recordApplicationAudit(
+          owner,
+          "microsoft.application_disconnected",
+          "application_integration",
+          "microsoft",
+          null,
+          reason,
+          {},
+          requestId,
+        );
+        return json(res, 200, { disconnected: true }, requestId);
+      }
+      if (
+        url.pathname === "/api/platform/integrations/stripe/connect" &&
+        req.method === "POST"
+      ) {
+        const body = await readJsonBody(req, { limit: 8192 }),
+          secretKey = String(body.secretKey || "").trim();
+        if (!/^sk_(test|live)_[A-Za-z0-9_]+$/.test(secretKey))
+          throw Object.assign(new Error("Enter a valid Stripe secret key."), {
+            status: 400,
+            code: "STRIPE_KEY_INVALID",
+          });
+        const client = stripeFactory(secretKey);
+        let account, prices;
+        try {
+          [account, prices] = await Promise.all([
+            client.accounts.retrieve(),
+            client.prices.list({
+              active: true,
+              type: "recurring",
+              limit: 100,
+              expand: ["data.product"],
+            }),
+          ]);
+        } catch (cause) {
+          throw Object.assign(
+            new Error("Stripe rejected the key or could not be reached."),
+            { status: 502, code: "STRIPE_CONNECTION_FAILED", cause },
+          );
+        }
+        const priceCatalog = prices.data.map((price) => ({
+            id: price.id,
+            productId:
+              typeof price.product === "string"
+                ? price.product
+                : price.product?.id || "",
+            productName:
+              typeof price.product === "object"
+                ? price.product?.name || "Unnamed product"
+                : "Stripe product",
+            currency: price.currency,
+            unitAmount: price.unit_amount,
+            interval: price.recurring?.interval || "",
+            intervalCount: price.recurring?.interval_count || 1,
+          })),
+          encrypted = credentialVault.encrypt("stripe", {
+            secretKey,
+            webhookSecret: "",
+          });
+        db.prepare(
+          `INSERT INTO application_integrations(provider,status,mode,account_id,account_name,configuration_json,encrypted_credentials,credential_key_id,last_verified_at,last_error,updated_by) VALUES ('stripe','connected',?,?,?,?,?,?,strftime('%Y-%m-%dT%H:%M:%fZ','now'),'',?) ON CONFLICT(provider) DO UPDATE SET status='connected',mode=excluded.mode,account_id=excluded.account_id,account_name=excluded.account_name,encrypted_credentials=excluded.encrypted_credentials,credential_key_id=excluded.credential_key_id,last_verified_at=excluded.last_verified_at,last_error='',updated_by=excluded.updated_by,updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now')`,
+        ).run(
+          secretKey.startsWith("sk_live_") ? "live" : "test",
+          account.id || "",
+          limited(
+            account.settings?.dashboard?.display_name ||
+              account.business_profile?.name ||
+              account.email ||
+              account.id,
+            180,
+          ),
+          JSON.stringify({ prices: {}, catalog: priceCatalog }),
+          encrypted,
+          credentialVault.keyId,
+          owner.id,
+        );
+        recordApplicationAudit(
+          owner,
+          "stripe.connected",
+          "application_integration",
+          "stripe",
+          null,
+          limited(body.reason || "Connect Stripe", 500),
+          {
+            accountId: account.id,
+            mode: secretKey.startsWith("sk_live_") ? "live" : "test",
+          },
+          requestId,
+        );
+        return json(
+          res,
+          200,
+          {
+            integration: integrationSummary("stripe"),
+            prices: priceCatalog,
+          },
+          requestId,
+        );
+      }
+      if (
+        url.pathname === "/api/platform/integrations/stripe/configure" &&
+        req.method === "PUT"
+      ) {
+        const body = await readJsonBody(req, { limit: 16384 }),
+          settings = stripeSettings(),
+          client = stripeClient(settings);
+        if (!client || settings.source !== "vault")
+          throw Object.assign(
+            new Error("Connect Stripe before mapping plans."),
+            {
+              status: 409,
+              code: "STRIPE_NOT_CONNECTED",
+            },
+          );
+        const selected = Object.fromEntries(
+          ["starter", "team", "business"]
+            .map((plan) => [plan, limited(body.prices?.[plan], 255)])
+            .filter(([, value]) => Boolean(value)),
+        );
+        if (!Object.keys(selected).length)
+          throw Object.assign(
+            new Error("Map at least one Signify plan to a Stripe price."),
+            { status: 400, code: "STRIPE_PRICE_REQUIRED" },
+          );
+        let available;
+        try {
+          available = await client.prices.list({
+            active: true,
+            type: "recurring",
+            limit: 100,
+          });
+        } catch (cause) {
+          throw Object.assign(
+            new Error("Stripe prices could not be verified."),
+            {
+              status: 502,
+              code: "STRIPE_PRICE_VERIFICATION_FAILED",
+              cause,
+            },
+          );
+        }
+        const validPrices = new Set(available.data.map((price) => price.id));
+        if (Object.values(selected).some((price) => !validPrices.has(price)))
+          throw Object.assign(
+            new Error("One or more selected Stripe prices are unavailable."),
+            { status: 400, code: "STRIPE_PRICE_INVALID" },
+          );
+        const webhookUrl = `${applicationPublicBase(req)}/webhooks/stripe`,
+          enabledEvents = [
+            "checkout.session.completed",
+            "customer.subscription.updated",
+            "customer.subscription.deleted",
+            "invoice.paid",
+            "invoice.payment_failed",
+          ],
+          currentConfiguration = safeJson(
+            integrationRow("stripe")?.configuration_json,
+          );
+        let endpoint;
+        try {
+          endpoint = currentConfiguration.webhookEndpointId
+            ? {
+                ...(await client.webhookEndpoints.update(
+                  currentConfiguration.webhookEndpointId,
+                  {
+                    url: webhookUrl,
+                    description: "Signify Creator subscription events",
+                    enabled_events: enabledEvents,
+                  },
+                )),
+                secret: settings.webhookSecret,
+              }
+            : await client.webhookEndpoints.create({
+                url: webhookUrl,
+                description: "Signify Creator subscription events",
+                enabled_events: enabledEvents,
+              });
+        } catch (cause) {
+          throw Object.assign(
+            new Error(
+              "Stripe could not create the webhook endpoint. Confirm the public application URL is reachable over HTTPS.",
+            ),
+            { status: 502, code: "STRIPE_WEBHOOK_CREATE_FAILED", cause },
+          );
+        }
+        const encrypted = credentialVault.encrypt("stripe", {
+          secretKey: settings.secretKey,
+          webhookSecret: endpoint.secret,
+        });
+        db.prepare(
+          `UPDATE application_integrations SET status='connected',configuration_json=?,encrypted_credentials=?,credential_key_id=?,last_verified_at=strftime('%Y-%m-%dT%H:%M:%fZ','now'),last_error='',updated_by=?,updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE provider='stripe'`,
+        ).run(
+          JSON.stringify({
+            prices: selected,
+            catalog: currentConfiguration.catalog || [],
+            webhookEndpointId: endpoint.id,
+          }),
+          encrypted,
+          credentialVault.keyId,
+          owner.id,
+        );
+        recordApplicationAudit(
+          owner,
+          "stripe.configured",
+          "application_integration",
+          "stripe",
+          null,
+          limited(body.reason || "Configure Stripe plans", 500),
+          { plans: Object.keys(selected), webhookEndpointId: endpoint.id },
+          requestId,
+        );
+        return json(
+          res,
+          200,
+          { integration: integrationSummary("stripe"), prices: selected },
+          requestId,
+        );
+      }
+      if (
+        url.pathname === "/api/platform/integrations/stripe/test-checkout" &&
+        req.method === "POST"
+      ) {
+        const body = await readJsonBody(req, { limit: 8192 }),
+          settings = stripeSettings(),
+          client = stripeClient(settings),
+          plan = String(body.plan || "starter"),
+          price = settings.prices?.[plan],
+          customerEmail = limited(body.customerEmail, 180).toLowerCase();
+        if (settings.mode !== "test")
+          throw Object.assign(
+            new Error(
+              "Sandbox Checkout is available only with a Stripe test key.",
+            ),
+            { status: 409, code: "STRIPE_TEST_MODE_REQUIRED" },
+          );
+        if (!client || !price || !validEmail(customerEmail))
+          throw Object.assign(
+            new Error("Choose a mapped plan and enter a test customer email."),
+            { status: 400, code: "STRIPE_TEST_CHECKOUT_INVALID" },
+          );
+        const checkout = await stripeRequest(
+          () =>
+            client.checkout.sessions.create({
+              mode: "subscription",
+              customer_email: customerEmail,
+              line_items: [{ price, quantity: 1 }],
+              success_url: `${applicationPublicBase(req)}/platform.html?billing=test-success`,
+              cancel_url: `${applicationPublicBase(req)}/platform.html?billing=test-canceled`,
+              metadata: { setup_test: "true", plan },
+              subscription_data: {
+                metadata: { setup_test: "true", plan },
+              },
+            }),
+          "Stripe could not create the sandbox Checkout session.",
+        );
+        recordApplicationAudit(
+          owner,
+          "stripe.test_checkout_created",
+          "application_integration",
+          "stripe",
+          null,
+          limited(body.reason || "Stripe sandbox Checkout test", 500),
+          { plan, checkoutSessionId: checkout.id },
+          requestId,
+        );
+        return json(res, 201, { url: checkout.url }, requestId);
+      }
+      if (
+        url.pathname === "/api/platform/integrations/stripe" &&
+        req.method === "DELETE"
+      ) {
+        const body = await readJsonBody(req, { limit: 8192 }),
+          reason = limited(body.reason, 500),
+          settings = stripeSettings(),
+          configuration = safeJson(
+            integrationRow("stripe")?.configuration_json,
+          ),
+          client = stripeClient(settings);
+        if (reason.length < 3)
+          throw Object.assign(new Error("A reason is required."), {
+            status: 400,
+            code: "REASON_REQUIRED",
+          });
+        if (client && configuration.webhookEndpointId)
+          try {
+            await client.webhookEndpoints.del(configuration.webhookEndpointId);
+          } catch (cause) {
+            throw Object.assign(
+              new Error(
+                "Stripe webhook revocation failed; the integration was not disconnected.",
+              ),
+              { status: 502, code: "STRIPE_DISCONNECT_FAILED", cause },
+            );
+          }
+        db.prepare(
+          "DELETE FROM application_integrations WHERE provider='stripe'",
+        ).run();
+        recordApplicationAudit(
+          owner,
+          "stripe.disconnected",
+          "application_integration",
+          "stripe",
+          null,
+          reason,
+          {},
+          requestId,
+        );
+        return json(res, 200, { disconnected: true }, requestId);
       }
       if (
         url.pathname === "/api/platform/organizations" &&
@@ -2172,9 +2858,11 @@ function createSignaturePortal({
             },
             requestId,
           );
-        const body = await readJsonBody(req, { limit: 8192 }),
+        const stripeConfiguration = stripeSettings(),
+          stripe = stripeClient(stripeConfiguration),
+          body = await readJsonBody(req, { limit: 8192 }),
           plan = String(body.plan || "starter"),
-          price = signature.stripePrices?.[plan],
+          price = stripeConfiguration.prices?.[plan],
           customerEmail = limited(body.customerEmail, 180).toLowerCase(),
           subscription = db
             .prepare(
@@ -2198,21 +2886,25 @@ function createSignaturePortal({
             requestId,
           );
         const base = cleanUrl(signature.publicUrl || requestBase(req)),
-          checkout = await stripe.checkout.sessions.create({
-            mode: "subscription",
-            client_reference_id: checkoutMatch[1],
-            ...(subscription.stripe_customer_id
-              ? { customer: subscription.stripe_customer_id }
-              : { customer_email: customerEmail }),
-            line_items: [{ price, quantity: 1 }],
-            allow_promotion_codes: true,
-            success_url: `${base}/platform.html?billing=success`,
-            cancel_url: `${base}/platform.html?billing=canceled`,
-            metadata: { organization_id: checkoutMatch[1], plan },
-            subscription_data: {
-              metadata: { organization_id: checkoutMatch[1], plan },
-            },
-          });
+          checkout = await stripeRequest(
+            () =>
+              stripe.checkout.sessions.create({
+                mode: "subscription",
+                client_reference_id: checkoutMatch[1],
+                ...(subscription.stripe_customer_id
+                  ? { customer: subscription.stripe_customer_id }
+                  : { customer_email: customerEmail }),
+                line_items: [{ price, quantity: 1 }],
+                allow_promotion_codes: true,
+                success_url: `${base}/platform.html?billing=success`,
+                cancel_url: `${base}/platform.html?billing=canceled`,
+                metadata: { organization_id: checkoutMatch[1], plan },
+                subscription_data: {
+                  metadata: { organization_id: checkoutMatch[1], plan },
+                },
+              }),
+            "Stripe could not create the tenant Checkout session.",
+          );
         recordApplicationAudit(
           owner,
           "stripe.checkout_created",
@@ -2224,6 +2916,135 @@ function createSignaturePortal({
           requestId,
         );
         return json(res, 201, { url: checkout.url }, requestId);
+      }
+      const portalMatch = url.pathname.match(
+        /^\/api\/platform\/organizations\/([^/]+)\/billing\/portal$/,
+      );
+      if (portalMatch && req.method === "POST") {
+        const settings = stripeSettings(),
+          stripe = stripeClient(settings),
+          subscription = db
+            .prepare(
+              "SELECT * FROM organization_subscriptions WHERE organization_id=?",
+            )
+            .get(portalMatch[1]);
+        if (!stripe || !subscription?.stripe_customer_id)
+          throw Object.assign(
+            new Error("This tenant does not have a Stripe customer yet."),
+            { status: 409, code: "STRIPE_CUSTOMER_REQUIRED" },
+          );
+        const session = await stripeRequest(
+          () =>
+            stripe.billingPortal.sessions.create({
+              customer: subscription.stripe_customer_id,
+              return_url: `${applicationPublicBase(req)}/platform.html`,
+            }),
+          "Stripe could not create the billing portal session.",
+        );
+        recordApplicationAudit(
+          owner,
+          "stripe.portal_created",
+          "organization_subscription",
+          portalMatch[1],
+          portalMatch[1],
+          "Open Stripe billing portal",
+          {},
+          requestId,
+        );
+        return json(res, 201, { url: session.url }, requestId);
+      }
+      const stripeSubscriptionMatch = url.pathname.match(
+        /^\/api\/platform\/organizations\/([^/]+)\/billing\/subscription$/,
+      );
+      if (stripeSubscriptionMatch && req.method === "PUT") {
+        const body = await readJsonBody(req, { limit: 8192 }),
+          action = String(body.action || ""),
+          reason = limited(body.reason, 500),
+          settings = stripeSettings(),
+          stripe = stripeClient(settings),
+          subscription = db
+            .prepare(
+              "SELECT * FROM organization_subscriptions WHERE organization_id=?",
+            )
+            .get(stripeSubscriptionMatch[1]);
+        if (reason.length < 3)
+          throw Object.assign(new Error("A reason is required."), {
+            status: 400,
+            code: "REASON_REQUIRED",
+          });
+        if (!stripe || !subscription?.stripe_subscription_id)
+          throw Object.assign(
+            new Error("This tenant does not have a Stripe subscription yet."),
+            { status: 409, code: "STRIPE_SUBSCRIPTION_REQUIRED" },
+          );
+        let updated;
+        if (action === "change_plan") {
+          const plan = String(body.plan || ""),
+            price = settings.prices?.[plan];
+          if (!price)
+            throw Object.assign(new Error("Choose a mapped Stripe plan."), {
+              status: 400,
+              code: "STRIPE_PLAN_INVALID",
+            });
+          const current = await stripeRequest(
+            () =>
+              stripe.subscriptions.retrieve(
+                subscription.stripe_subscription_id,
+              ),
+            "Stripe could not load the subscription.",
+          );
+          const item = current.items?.data?.[0];
+          if (!item?.id)
+            throw Object.assign(
+              new Error("Stripe subscription has no billable item."),
+              { status: 409, code: "STRIPE_ITEM_REQUIRED" },
+            );
+          updated = await stripeRequest(
+            () =>
+              stripe.subscriptions.update(current.id, {
+                items: [{ id: item.id, price }],
+                proration_behavior: "create_prorations",
+                metadata: {
+                  ...(current.metadata || {}),
+                  organization_id: stripeSubscriptionMatch[1],
+                  plan,
+                },
+              }),
+            "Stripe could not change the subscription plan.",
+          );
+        } else if (["cancel", "reactivate"].includes(action)) {
+          updated = await stripeRequest(
+            () =>
+              stripe.subscriptions.update(subscription.stripe_subscription_id, {
+                cancel_at_period_end: action === "cancel",
+              }),
+            "Stripe could not update the cancellation setting.",
+          );
+        } else
+          throw Object.assign(new Error("Choose a billing action."), {
+            status: 400,
+            code: "STRIPE_ACTION_INVALID",
+          });
+        recordApplicationAudit(
+          owner,
+          `stripe.subscription_${action}`,
+          "organization_subscription",
+          stripeSubscriptionMatch[1],
+          stripeSubscriptionMatch[1],
+          reason,
+          { stripeSubscriptionId: updated.id, plan: body.plan || null },
+          requestId,
+        );
+        return json(
+          res,
+          202,
+          {
+            accepted: true,
+            stripeSubscriptionId: updated.id,
+            cancelAtPeriodEnd: Boolean(updated.cancel_at_period_end),
+          },
+          requestId,
+        );
       }
       if (url.pathname === "/api/platform/owners" && req.method === "GET") {
         const owners = db
@@ -2363,7 +3184,7 @@ function createSignaturePortal({
         200,
         {
           registration: signature.allowRegistration,
-          microsoft: microsoftAvailable,
+          microsoft: microsoftAvailable(),
           passwordReset:
             mailAvailable() ||
             Boolean(
@@ -2995,9 +3816,9 @@ function createSignaturePortal({
           organization,
           subscription,
           capabilities: {
-            microsoft: microsoftAvailable,
+            microsoft: microsoftAvailable(),
             directorySync: Boolean(
-              microsoftAvailable &&
+              microsoftAvailable() &&
               microsoftConnection(user.organizationId, true),
             ),
             mail: mailAvailable(user.organizationId),
@@ -4649,7 +5470,7 @@ function createSignaturePortal({
           integrations: {
             mail: mailAvailable(user.organizationId),
             microsoftDirectory: Boolean(
-              microsoftAvailable &&
+              microsoftAvailable() &&
               microsoftConnection(user.organizationId, true),
             ),
             microsoft: microsoftConnectionDto(
@@ -4680,7 +5501,7 @@ function createSignaturePortal({
                 id: "microsoft",
                 label: "Microsoft 365 connected",
                 ok: Boolean(
-                  microsoftAvailable &&
+                  microsoftAvailable() &&
                   microsoftConnection(user.organizationId, true),
                 ),
               },

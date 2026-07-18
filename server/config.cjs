@@ -163,6 +163,9 @@ function loadConfig(env = process.env, baseDir = path.join(__dirname, "..")) {
       ),
       allowRegistration: bool(env.SIGNIFY_ALLOW_REGISTRATION, !production),
       applicationOwnerEmail,
+      credentialEncryptionKey: String(
+        env.SIGNIFY_CREDENTIAL_ENCRYPTION_KEY || "",
+      ).trim(),
       microsoftClientId: String(
         env.MICROSOFT_CLIENT_ID || env.AZURE_CLIENT_ID || "",
       ).trim(),

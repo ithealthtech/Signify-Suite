@@ -3,11 +3,13 @@ const http = require("node:http");
 const os = require("node:os");
 const path = require("node:path");
 const fs = require("node:fs");
+const { spawnSync } = require("node:child_process");
 const { generateKeyPairSync, sign } = require("node:crypto");
 const Stripe = require("stripe");
 const sharp = require("sharp");
 const { createApplication } = require("../server.cjs");
 const { loadConfig } = require("../server/config.cjs");
+const { createCredentialVault } = require("../server/credential-vault.cjs");
 const { buildSignatureHtml } = require("../server/templates.cjs");
 
 function assert(condition, message) {
@@ -106,6 +108,7 @@ async function main() {
     STRIPE_WEBHOOK_SECRET: "whsec_smoke",
     STRIPE_PRICE_STARTER: "price_starter",
     STRIPE_PRICE_TEAM: "price_team",
+    SIGNIFY_CREDENTIAL_ENCRYPTION_KEY: Buffer.alloc(32, 7).toString("base64"),
     MICROSOFT_CLIENT_ID: "client-smoke",
     MICROSOFT_CLIENT_SECRET: "secret-smoke",
     MICROSOFT_TENANT_ID: "11111111-1111-4111-8111-111111111111",
@@ -219,7 +222,76 @@ async function main() {
       });
     throw new Error(`Unexpected external request in smoke test: ${url}`);
   };
-  let application = createApplication({ env, fetchImpl }),
+  const stripeSandboxPrices = [
+      {
+        id: "price_setup_starter",
+        product: { id: "prod_starter", name: "Starter" },
+        currency: "usd",
+        unit_amount: 1900,
+        recurring: { interval: "month", interval_count: 1 },
+      },
+      {
+        id: "price_setup_team",
+        product: { id: "prod_team", name: "Team" },
+        currency: "usd",
+        unit_amount: 4900,
+        recurring: { interval: "month", interval_count: 1 },
+      },
+    ],
+    stripeFactory = (key) =>
+      key === "sk_test_setup"
+        ? {
+            accounts: {
+              retrieve: async () => ({
+                id: "acct_setup",
+                email: "billing@example.com",
+                settings: { dashboard: { display_name: "Signify Sandbox" } },
+              }),
+            },
+            prices: { list: async () => ({ data: stripeSandboxPrices }) },
+            webhookEndpoints: {
+              create: async (input) => ({
+                id: "we_setup",
+                secret: "whsec_setup",
+                ...input,
+              }),
+              update: async (id, input) => ({ id, ...input }),
+              del: async (id) => ({ id, deleted: true }),
+            },
+            billingPortal: {
+              sessions: {
+                create: async ({ customer }) => ({
+                  id: "bps_setup",
+                  url: `https://billing.stripe.test/${customer}`,
+                }),
+              },
+            },
+            subscriptions: {
+              retrieve: async (id) => ({
+                id,
+                metadata: {},
+                items: { data: [{ id: "si_setup" }] },
+              }),
+              update: async (id, input) => ({
+                id,
+                cancel_at_period_end: Boolean(input.cancel_at_period_end),
+              }),
+            },
+            checkout: {
+              sessions: {
+                create: async (input) => {
+                  if (input.customer_email === "fail@example.com")
+                    throw new Error("simulated Stripe outage");
+                  return {
+                    id: "cs_setup_test",
+                    url: "https://checkout.stripe.test/cs_setup_test",
+                  };
+                },
+              },
+            },
+          }
+        : new Stripe(key);
+  let application = createApplication({ env, fetchImpl, stripeFactory }),
     server = http.createServer(application.handler);
   try {
     const baseUrl = await listen(server),
@@ -1432,6 +1504,227 @@ async function main() {
         result.body.subscription.status === "active",
       "Stripe webhook did not update subscription state",
     );
+    result = await request(baseUrl, "/api/platform/integrations", {
+      jar: adminJar,
+    });
+    assert(
+      result.response.status === 200 &&
+        result.body.vault.configured === true &&
+        result.body.stripe.source === "environment",
+      "integration readiness did not expose the environment fallback",
+    );
+    result = await request(
+      baseUrl,
+      "/api/platform/integrations/stripe/connect",
+      {
+        method: "POST",
+        body: {
+          secretKey: "sk_test_setup",
+          reason: "Sandbox onboarding regression",
+        },
+        jar: adminJar,
+      },
+    );
+    assert(
+      result.response.status === 200 &&
+        result.body.integration.accountId === "acct_setup" &&
+        result.body.prices.length === 2,
+      "Stripe onboarding did not verify the account and discover prices",
+    );
+    const storedStripeIntegration = application.db
+      .prepare(
+        "SELECT encrypted_credentials,configuration_json FROM application_integrations WHERE provider='stripe'",
+      )
+      .get();
+    assert(
+      storedStripeIntegration.encrypted_credentials.startsWith("v1.") &&
+        !storedStripeIntegration.encrypted_credentials.includes(
+          "sk_test_setup",
+        ),
+      "Stripe credentials were not encrypted at rest",
+    );
+    result = await request(
+      baseUrl,
+      "/api/platform/integrations/stripe/configure",
+      {
+        method: "PUT",
+        body: {
+          prices: {
+            starter: "price_setup_starter",
+            team: "price_setup_team",
+          },
+          reason: "Map sandbox prices",
+        },
+        jar: adminJar,
+      },
+    );
+    assert(
+      result.response.status === 200 &&
+        result.body.prices.team === "price_setup_team" &&
+        result.body.integration.status === "connected",
+      "Stripe plan mapping and webhook setup failed",
+    );
+    result = await request(baseUrl, "/api/platform/integrations", {
+      jar: adminJar,
+    });
+    assert(
+      result.body.stripe.configured === true &&
+        result.body.stripe.catalog.length === 2 &&
+        !JSON.stringify(result.body).includes("sk_test_setup") &&
+        !JSON.stringify(result.body).includes("whsec_setup"),
+      "Stripe integration response leaked secrets or lost its catalog",
+    );
+    result = await request(
+      baseUrl,
+      "/api/platform/integrations/stripe/test-checkout",
+      {
+        method: "POST",
+        body: {
+          plan: "starter",
+          customerEmail: "sandbox@example.com",
+          reason: "Sandbox Checkout regression",
+        },
+        jar: adminJar,
+      },
+    );
+    assert(
+      result.response.status === 201 &&
+        result.body.url === "https://checkout.stripe.test/cs_setup_test",
+      "Stripe sandbox Checkout test failed",
+    );
+    result = await request(
+      baseUrl,
+      "/api/platform/integrations/stripe/test-checkout",
+      {
+        method: "POST",
+        body: {
+          plan: "starter",
+          customerEmail: "fail@example.com",
+          reason: "Sandbox failure regression",
+        },
+        jar: adminJar,
+      },
+    );
+    assert(
+      result.response.status === 502 &&
+        result.body.error.code === "STRIPE_API_FAILED",
+      "Stripe downstream failure was not normalized",
+    );
+    result = await request(
+      baseUrl,
+      `/api/platform/organizations/${controlPlaneOrganizationId}/billing/portal`,
+      { method: "POST", body: {}, jar: adminJar },
+    );
+    assert(
+      result.response.status === 201 &&
+        result.body.url === "https://billing.stripe.test/cus_platform_smoke",
+      "Application Owner Stripe portal creation failed",
+    );
+    result = await request(
+      baseUrl,
+      `/api/platform/organizations/${controlPlaneOrganizationId}/billing/subscription`,
+      {
+        method: "PUT",
+        body: {
+          action: "change_plan",
+          plan: "team",
+          reason: "Provider-backed plan change",
+        },
+        jar: adminJar,
+      },
+    );
+    assert(
+      result.response.status === 202 && result.body.accepted === true,
+      "provider-backed Stripe plan change failed",
+    );
+    result = await request(
+      baseUrl,
+      `/api/platform/organizations/${controlPlaneOrganizationId}/billing/subscription`,
+      {
+        method: "PUT",
+        body: {
+          action: "cancel",
+          reason: "Cancellation regression",
+        },
+        jar: adminJar,
+      },
+    );
+    assert(
+      result.response.status === 202 && result.body.cancelAtPeriodEnd === true,
+      "provider-backed Stripe cancellation failed",
+    );
+    result = await request(baseUrl, "/api/platform/integrations/stripe", {
+      method: "DELETE",
+      body: { reason: "Sandbox onboarding complete" },
+      jar: adminJar,
+    });
+    assert(
+      result.response.status === 200 && result.body.disconnected === true,
+      "Stripe integration disconnect failed",
+    );
+    result = await request(baseUrl, "/api/platform/setup/application", {
+      method: "PUT",
+      body: {
+        companyName: "Signify Test Control Plane",
+        publicUrl: baseUrl,
+        reason: "First-run identity regression",
+      },
+      jar: adminJar,
+    });
+    assert(
+      result.response.status === 200 &&
+        result.body.companyName === "Signify Test Control Plane",
+      "first-run application identity setup failed",
+    );
+    result = await request(
+      baseUrl,
+      "/api/platform/integrations/microsoft/connect",
+      {
+        method: "POST",
+        body: {
+          clientId: "33333333-3333-4333-8333-333333333333",
+          clientSecret: "microsoft-setup-secret",
+          homeTenantId: microsoftTenantId,
+          reason: "Microsoft bootstrap regression",
+        },
+        jar: adminJar,
+      },
+    );
+    assert(
+      result.response.status === 200 &&
+        result.body.integration.status === "connected" &&
+        result.body.integration.accountName === "Smoke Microsoft Tenant",
+      "Microsoft application bootstrap verification failed",
+    );
+    const storedMicrosoftIntegration = application.db
+      .prepare(
+        "SELECT encrypted_credentials FROM application_integrations WHERE provider='microsoft'",
+      )
+      .get();
+    assert(
+      storedMicrosoftIntegration.encrypted_credentials.startsWith("v1.") &&
+        !storedMicrosoftIntegration.encrypted_credentials.includes(
+          "microsoft-setup-secret",
+        ),
+      "Microsoft credentials were not encrypted at rest",
+    );
+    result = await request(baseUrl, "/api/platform/setup/stripe-skip", {
+      method: "PUT",
+      body: { skipped: true, reason: "Billing deferred for regression" },
+      jar: adminJar,
+    });
+    assert(
+      result.response.status === 200 && result.body.skipped === true,
+      "first-run Stripe deferral failed",
+    );
+    result = await request(baseUrl, "/api/platform/setup", { jar: adminJar });
+    assert(
+      result.response.status === 200 &&
+        result.body.complete === true &&
+        result.body.microsoft.configured === true &&
+        !JSON.stringify(result.body).includes("microsoft-setup-secret"),
+      "first-run readiness did not complete safely",
+    );
     application.db
       .prepare(
         `INSERT INTO application_owners(user_id,status,granted_by) VALUES (?,'active',?) ON CONFLICT(user_id) DO UPDATE SET status='active'`,
@@ -1511,13 +1804,63 @@ async function main() {
         .get(),
       "Microsoft OIDC hardening migration was not applied",
     );
+    assert(
+      application.db
+        .prepare(
+          "SELECT 1 FROM schema_migrations WHERE version='012_application_integrations.sql'",
+        )
+        .get(),
+      "application integration migration was not applied",
+    );
     await new Promise((resolve) => server.close(resolve));
     application.db.close();
+    const oldEncryptionKey = env.SIGNIFY_CREDENTIAL_ENCRYPTION_KEY,
+      newEncryptionKey = Buffer.alloc(32, 9).toString("base64"),
+      rotation = spawnSync(
+        process.execPath,
+        [path.join(__dirname, "rotate-integration-credentials.cjs")],
+        {
+          cwd: path.join(__dirname, ".."),
+          env: {
+            ...env,
+            SIGNIFY_OLD_CREDENTIAL_ENCRYPTION_KEY: oldEncryptionKey,
+            SIGNIFY_CREDENTIAL_ENCRYPTION_KEY: newEncryptionKey,
+          },
+          encoding: "utf8",
+        },
+      );
+    assert(
+      rotation.status === 0 && rotation.stdout.includes("Rotated 1"),
+      `credential rotation failed: ${rotation.stderr || rotation.stdout}`,
+    );
+    env.SIGNIFY_CREDENTIAL_ENCRYPTION_KEY = newEncryptionKey;
     application = createApplication({ env });
     server = http.createServer(application.handler);
     const reopened = await listen(server);
     result = await request(reopened, "/api/health");
     assert(result.response.status === 200, "existing database reopen failed");
+    const rotatedMicrosoft = application.db
+      .prepare(
+        "SELECT encrypted_credentials FROM application_integrations WHERE provider='microsoft'",
+      )
+      .get();
+    assert(
+      createCredentialVault(newEncryptionKey).decrypt(
+        "microsoft",
+        rotatedMicrosoft.encrypted_credentials,
+      ).clientSecret === "microsoft-setup-secret",
+      "rotated Microsoft credentials could not be decrypted",
+    );
+    let retiredKeyRejected = false;
+    try {
+      createCredentialVault(oldEncryptionKey).decrypt(
+        "microsoft",
+        rotatedMicrosoft.encrypted_credentials,
+      );
+    } catch (error) {
+      retiredKeyRejected = error.code === "CREDENTIAL_DECRYPT_FAILED";
+    }
+    assert(retiredKeyRejected, "retired credential key still decrypted data");
     console.log(
       "Smoke test passed: migrations, three-tier RBAC, Application Owner control plane, tenant lifecycle, owner-only Stripe, tenant Microsoft consent, request validation, auth, browser-bound OAuth state, verification retry, invitations, CSRF, tenant isolation, workspace switching, approval integrity, atomic updates, subscription enforcement, recovery, Microsoft directory pagination, image normalization, templates, rollout, campaigns, brand rendering, Stripe webhooks, rate limiting, database integrity, and reopen",
     );
@@ -1525,8 +1868,15 @@ async function main() {
     if (server.listening) await new Promise((resolve) => server.close(resolve));
     try {
       application.db.close();
-    } catch {}
-    fs.rmSync(tempDir, { recursive: true, force: true });
+    } catch (error) {
+      if (!String(error.message).includes("database is not open")) throw error;
+    }
+    await fs.promises.rm(tempDir, {
+      recursive: true,
+      force: true,
+      maxRetries: 10,
+      retryDelay: 100,
+    });
   }
 }
 main().catch((error) => {

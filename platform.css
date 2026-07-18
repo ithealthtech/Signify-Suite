@@ -186,3 +186,66 @@ hr {
     overflow: auto;
   }
 }
+.integration-status {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 1px;
+  margin-bottom: 20px;
+  border: 1px solid var(--line);
+  background: var(--line);
+}
+.integration-status > div {
+  min-width: 0;
+  padding: 14px;
+  background: var(--panel);
+}
+.integration-status span,
+.integration-status strong {
+  display: block;
+  overflow-wrap: anywhere;
+}
+.integration-status span {
+  margin-bottom: 5px;
+  color: var(--muted);
+  font-size: 12px;
+}
+.integration-form {
+  max-width: 860px;
+  margin-bottom: 18px;
+}
+.integration-form p {
+  color: var(--muted);
+}
+.integration-actions {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+.setup-progress {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 8px;
+  margin-bottom: 20px;
+}
+.setup-progress div {
+  min-width: 0;
+  padding: 12px;
+  border: 1px solid var(--line);
+  background: var(--panel);
+}
+.setup-progress strong,
+.setup-progress span {
+  display: block;
+  overflow-wrap: anywhere;
+}
+.setup-progress span {
+  margin-top: 4px;
+  color: var(--muted);
+  font-size: 12px;
+}
+@media (max-width: 760px) {
+  .integration-status,
+  .setup-progress {
+    grid-template-columns: 1fr 1fr;
+  }
+}

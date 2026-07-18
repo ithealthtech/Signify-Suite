@@ -1,7 +1,7 @@
 {
   "name": "signify-creator",
   "private": true,
-  "version": "0.2.0",
+  "version": "0.3.0-rc.1",
   "type": "commonjs",
   "engines": {
     "node": ">=22.13.0"
@@ -19,7 +19,9 @@
     "backup": "node --env-file-if-exists=.env.local scripts/backup.cjs",
     "demo:seed": "node --env-file-if-exists=.env.local scripts/seed-demo-team.cjs",
     "signature:reset-admin": "node --env-file-if-exists=.env.local scripts/reset-signature-admin.cjs",
-    "application:grant-owner": "node --env-file-if-exists=.env.local scripts/grant-application-owner.cjs"
+    "application:grant-owner": "node --env-file-if-exists=.env.local scripts/grant-application-owner.cjs",
+    "credentials:rotate": "node --env-file-if-exists=.env.local scripts/rotate-integration-credentials.cjs",
+    "integrations:verify": "node --env-file-if-exists=.env.local scripts/verify-provider-integrations.cjs"
   },
   "dependencies": {
     "gifenc": "^1.0.3",
