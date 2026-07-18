@@ -43,6 +43,8 @@ for (const required of [
   "package.json",
   ".env.example",
   "scripts/setup.cjs",
+  "docs/OPERATIONS.md",
+  "docs/sbom.cdx.json",
   "public/signature-it-banner.png",
 ])
   if (!relativeFiles.includes(required))
