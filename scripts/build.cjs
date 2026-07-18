@@ -27,6 +27,7 @@ const root = path.join(__dirname, ".."),
     "scripts/grant-application-owner.cjs",
     "scripts/reset-signature-admin.cjs",
     "scripts/rotate-integration-credentials.cjs",
+    "scripts/setup.cjs",
     "scripts/verify-provider-integrations.cjs",
     "start-production.cmd",
   ];

@@ -7,9 +7,22 @@ npm ci
 npm run check
 cd dist
 npm ci --omit=dev
+npm run setup
 ```
 
-Create `dist/.env.local` from `.env.example`. Never place production secrets in source control.
+`npm run setup` is the normal first-install path. It validates persistent
+storage, generates credentials, creates `.env.local`, runs migrations, and
+creates the first Application Owner. Never place production secrets in source
+control.
+
+Hosting panels can provide configuration without a local environment file:
+
+```powershell
+npm run setup -- --non-interactive --no-write-env
+```
+
+After noninteractive setup, disable `SIGNATURE_ALLOW_DEFAULT_ADMIN`, remove the
+bootstrap password from the hosting panel, and restart the application.
 
 ## 2. Required configuration
 

@@ -1,5 +1,14 @@
 # Changelog
 
+## Unreleased
+
+### Added
+
+- Interactive and hosting-panel setup installer with environment generation,
+  persistent-storage checks, database migrations, and first-owner creation.
+- Installer regression coverage for fresh installs, safe reruns, configuration
+  backups, generated credentials, and production validation failures.
+
 ## 0.3.0-rc.1 - 2026-07-18
 
 ### Added

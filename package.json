@@ -8,9 +8,10 @@
   },
   "scripts": {
     "start": "node --env-file-if-exists=.env.local server.cjs",
+    "setup": "node scripts/setup.cjs",
     "dev": "node scripts/dev.cjs",
     "build": "node scripts/build.cjs",
-    "test": "node scripts/smoke-test.cjs",
+    "test": "node scripts/setup-test.cjs && node scripts/smoke-test.cjs",
     "smoke": "node scripts/smoke-test.cjs",
     "lint": "eslint .",
     "format": "prettier --write .",
