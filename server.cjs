@@ -7,6 +7,7 @@ const { URL } = require("node:url");
 const { loadConfig } = require("./server/config.cjs");
 const { openDatabase } = require("./server/database.cjs");
 const { createSignaturePortal } = require("./server/signature-portal.cjs");
+const { startJobWorker } = require("./server/job-queue.cjs");
 
 const contentTypes = {
   ".html": "text/html; charset=utf-8",
@@ -376,6 +377,7 @@ function createApplication(options = {}) {
 function startServer(options = {}) {
   const application = createApplication(options);
   const server = http.createServer(application.handler);
+  const jobs = startJobWorker(application.db);
   server.requestTimeout = 30000;
   server.headersTimeout = 15000;
   server.keepAliveTimeout = 5000;
@@ -389,19 +391,20 @@ function startServer(options = {}) {
       }),
     ),
   );
-  function shutdown(signal) {
+  async function shutdown(signal) {
     console.log(`${signal} received; closing Signify Creator.`);
     const forceClose = setTimeout(() => server.closeAllConnections(), 10000);
     forceClose.unref();
-    server.close(() => {
+    server.close(async () => {
       clearTimeout(forceClose);
+      await jobs.stop();
       application.db.close();
       process.exit(0);
     });
   }
   process.once("SIGINT", () => shutdown("SIGINT"));
   process.once("SIGTERM", () => shutdown("SIGTERM"));
-  return { ...application, server };
+  return { ...application, jobs, server };
 }
 
 if (require.main === module) startServer();

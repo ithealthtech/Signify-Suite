@@ -1,18 +1,18 @@
 {
   "schemaVersion": 1,
-  "capturedAt": "2026-07-18T08:54:09.701Z",
+  "capturedAt": "2026-07-18T08:59:53.536Z",
   "runtime": {
     "node": "v24.18.0",
     "platform": "win32",
     "arch": "x64"
   },
   "source": {
-    "measuredBytes": 447845,
+    "measuredBytes": 447997,
     "files": [
       {
         "path": "server.cjs",
-        "bytes": 12115,
-        "lines": 409
+        "bytes": 12267,
+        "lines": 412
       },
       {
         "path": "server/access-control.cjs",
@@ -97,24 +97,24 @@
     ]
   },
   "production": {
-    "artifactBytes": 13521981,
+    "artifactBytes": 13528793,
     "dependencyCount": 63
   },
   "tests": {
     "durationMs": {
-      "setup": 1262.774,
-      "smoke": 1889.069,
-      "build": 176.141
+      "setup": 1209.854,
+      "smoke": 1930.382,
+      "build": 177.193
     }
   },
   "server": {
-    "initializationMs": 37.519,
+    "initializationMs": 40.137,
     "healthRequests": 100,
     "healthLatencyMs": {
-      "min": 0.439,
-      "p50": 15.638,
-      "p95": 16.183,
-      "max": 16.85
+      "min": 0.483,
+      "p50": 15.542,
+      "p95": 16.198,
+      "max": 16.648
     }
   }
 }
