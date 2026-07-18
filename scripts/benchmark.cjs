@@ -9,7 +9,7 @@ const { spawnSync } = require("node:child_process");
 const { createApplication } = require("../server.cjs");
 
 const root = path.join(__dirname, ".."),
-  reportPath = path.join(root, "docs", "performance-baseline.json");
+  reportPath = path.join(root, "docs", "performance-current.json");
 
 function fileMetrics(relativePaths) {
   return relativePaths.map((relativePath) => {
@@ -134,9 +134,11 @@ async function main() {
       "admin.js",
       "platform.js",
       "signature.js",
+      "signify-shared.js",
       "admin.css",
       "platform.css",
       "signature.css",
+      "signify-shared.css",
       "scripts/smoke-test.cjs",
     ]),
     report = {

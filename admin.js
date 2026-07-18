@@ -1,6 +1,5 @@
 "use strict";
-const $ = (selector) => document.querySelector(selector);
-const $$ = (selector) => [...document.querySelectorAll(selector)];
+const { $, $$, api, escapeHtml, initials } = window.Signify;
 let state = {
   me: null,
   config: null,
@@ -20,54 +19,6 @@ const brandFonts = {
   verdana: "Verdana, Arial, sans-serif",
   georgia: 'Georgia, "Times New Roman", serif',
 };
-function cookieValue(name) {
-  return (
-    document.cookie
-      .split(";")
-      .map((item) => item.trim())
-      .find((item) => item.startsWith(`${name}=`))
-      ?.slice(name.length + 1) || ""
-  );
-}
-async function api(path, options = {}) {
-  const method = String(options.method || "GET").toUpperCase(),
-    csrf = !["GET", "HEAD", "OPTIONS"].includes(method)
-      ? decodeURIComponent(cookieValue("sig_csrf"))
-      : "";
-  const response = await fetch(path, {
-    credentials: "same-origin",
-    headers: {
-      "Content-Type": "application/json",
-      ...(csrf ? { "X-CSRF-Token": csrf } : {}),
-      ...(options.headers || {}),
-    },
-    ...options,
-  });
-  const data = await response.json().catch(() => ({}));
-  if (!response.ok)
-    throw new Error(
-      data.error?.message || `Request failed (${response.status})`,
-    );
-  return data;
-}
-function escapeHtml(value) {
-  return String(value || "").replace(
-    /[&<>"']/g,
-    (char) =>
-      ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[
-        char
-      ],
-  );
-}
-function initials(value) {
-  return String(value || "SC")
-    .split(/\s+/)
-    .filter(Boolean)
-    .map((part) => part[0])
-    .slice(0, 2)
-    .join("")
-    .toUpperCase();
-}
 function toast(message) {
   const element = $("#toast");
   element.textContent = message;

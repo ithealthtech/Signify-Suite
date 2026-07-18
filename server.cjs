@@ -31,6 +31,8 @@ const publicFiles = new Set([
   "platform.html",
   "platform.css",
   "platform.js",
+  "signify-shared.js",
+  "signify-shared.css",
   "signature-it-banner.png",
 ]);
 

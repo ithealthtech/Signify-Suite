@@ -13,21 +13,9 @@
   background: #eef0f3;
   font-synthesis: none;
 }
-* {
-  box-sizing: border-box;
-}
-[hidden] {
-  display: none !important;
-}
 body {
   margin: 0;
   background: #eef0f3;
-}
-button,
-input,
-select,
-textarea {
-  font: inherit;
 }
 .eyebrow {
   display: block;

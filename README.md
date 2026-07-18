@@ -335,9 +335,9 @@ baseline with:
 npm run benchmark
 ```
 
-The machine-readable result is written to
-`docs/performance-baseline.json`; methodology and acceptance rules are in
-`docs/OPTIMIZATION.md`.
+The machine-readable result is written to `docs/performance-current.json` for
+comparison with the initial `docs/performance-baseline.json`; methodology and
+acceptance rules are in `docs/OPTIMIZATION.md`.
 
 Run the complete local validation suite:
 

@@ -13,24 +13,12 @@
   font-family: Inter, "Segoe UI", Arial, sans-serif;
   font-synthesis: none;
 }
-* {
-  box-sizing: border-box;
-}
-[hidden] {
-  display: none !important;
-}
 html,
 body {
   min-height: 100%;
   margin: 0;
   background: #eef0f3;
   color: var(--ink);
-}
-button,
-input,
-select,
-textarea {
-  font: inherit;
 }
 button,
 a {
