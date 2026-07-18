@@ -36,7 +36,7 @@ function avatarRing(photoUrl, name, size, accent) {
   return `
     <table role="presentation" cellpadding="0" cellspacing="0" border="0" width="${outer}" height="${outer}" style="background:${accent}22;border-radius:50%;">
       <tr><td align="center" valign="middle" style="border-radius:50%;">
-        <img src="${photoUrl}" width="${size}" height="${size}" alt="${esc(name)}" style="border-radius:50%;display:block;border:3px solid #ffffff;">
+        <img src="${esc(photoUrl)}" width="${size}" height="${size}" alt="${esc(name)}" style="border-radius:50%;display:block;border:3px solid #ffffff;">
       </td></tr>
     </table>`;
 }
@@ -65,7 +65,7 @@ function socialRow(links = {}, hrefs = {}, iconBase, size = 18, gap = 8) {
     .filter((k) => links[k])
     .map((k) => {
       const href = (hrefs && hrefs[k]) || links[k];
-      return `<a href="${esc(href)}" style="text-decoration:none;display:inline-block;margin-right:${gap}px;" target="_blank"><img src="${iconBase}/${k}.png" width="${size}" height="${size}" alt="" style="display:inline-block;border:0;vertical-align:middle;"></a>`;
+      return `<a href="${esc(href)}" style="text-decoration:none;display:inline-block;margin-right:${gap}px;" target="_blank"><img src="${esc(iconBase)}/${k}.png" width="${size}" height="${size}" alt="" style="display:inline-block;border:0;vertical-align:middle;"></a>`;
     })
     .join("");
   return cells
@@ -83,7 +83,7 @@ function campaignBlock(campaign, trackedLinkUrl) {
   if (!campaign) return "";
   const link = trackedLinkUrl || campaign.linkUrl;
   const content = campaign.imageUrl
-    ? `<img src="${campaign.imageUrl}" alt="${esc(campaign.title || "")}" style="display:block;border:0;width:100%;max-width:440px;border-radius:8px;">`
+    ? `<img src="${esc(campaign.imageUrl)}" alt="${esc(campaign.title || "")}" style="display:block;border:0;width:100%;max-width:440px;border-radius:8px;">`
     : `
       <table role="presentation" cellpadding="0" cellspacing="0" border="0" width="440" style="background:#14161f;border-radius:8px;">
         <tr>
@@ -105,7 +105,7 @@ function companyLogoBlock(logoUrl, companyName) {
   return `
     <tr>
       <td style="padding-top:14px;">
-        <img src="${logoUrl}" alt="${esc(companyName || "")}" height="26" style="display:block;border:0;max-height:26px;width:auto;">
+        <img src="${esc(logoUrl)}" alt="${esc(companyName || "")}" height="26" style="display:block;border:0;max-height:26px;width:auto;">
       </td>
     </tr>`;
 }
@@ -118,7 +118,7 @@ function vcardBlock(qrDataUri, vcardTrackedUrl) {
       <td style="padding-top:16px;">
         <table role="presentation" cellpadding="0" cellspacing="0" border="0">
           <tr>
-            ${qrDataUri ? `<td style="padding-right:12px;"><img src="${qrDataUri}" width="60" height="60" alt="QR code to save contact" style="display:block;border:0;border-radius:4px;"></td>` : ""}
+            ${qrDataUri ? `<td style="padding-right:12px;"><img src="${esc(qrDataUri)}" width="60" height="60" alt="QR code to save contact" style="display:block;border:0;border-radius:4px;"></td>` : ""}
             ${vcardTrackedUrl ? `<td style="vertical-align:middle;"><a href="${esc(vcardTrackedUrl)}" style="font-family:${SANS};font-size:12px;color:#2563eb;text-decoration:none;font-weight:600;">Save contact →</a></td>` : ""}
           </tr>
         </table>
@@ -130,7 +130,7 @@ function vcardBlock(qrDataUri, vcardTrackedUrl) {
 // works with every template, not just one) ----------
 function headerBannerRow(bannerUrl, width = 440, height = 100) {
   if (!bannerUrl) return "";
-  return `<tr><td style="padding-bottom:14px;"><img src="${bannerUrl}" width="${width}" height="${height}" alt="" style="display:block;border:0;width:${width}px;height:${height}px;object-fit:cover;border-radius:8px;"></td></tr>`;
+  return `<tr><td style="padding-bottom:14px;"><img src="${esc(bannerUrl)}" width="${width}" height="${height}" alt="" style="display:block;border:0;width:${width}px;height:${height}px;object-fit:cover;border-radius:8px;"></td></tr>`;
 }
 
 // ================= TEMPLATES =================
@@ -194,7 +194,7 @@ function minimalLine({ f, colors, iconBase, hrefs = {} }) {
 function modernMinimal({ f, colors, photoUrl, iconBase, hrefs = {} }) {
   const accent = colors.accent || "#2563eb";
   const photo = photoUrl
-    ? `<img src="${photoUrl}" width="80" height="80" alt="${esc(f.name)}" style="border-radius:50%;display:block;border:0;">`
+    ? `<img src="${esc(photoUrl)}" width="80" height="80" alt="${esc(f.name)}" style="border-radius:50%;display:block;border:0;">`
     : "";
   return `
 <table role="presentation" cellpadding="0" cellspacing="0" border="0" style="font-family:${SANS};">
@@ -227,7 +227,7 @@ function corporateSerif({ f, colors, photoUrl, iconBase, hrefs = {} }) {
 <table role="presentation" cellpadding="0" cellspacing="0" border="0" style="font-family:${SANS};">
   <tr>
     <td style="vertical-align:top;padding-right:16px;">
-      ${photoUrl ? `<img src="${photoUrl}" width="70" height="70" alt="${esc(f.name)}" style="display:block;border:0;border-radius:4px;">` : `<div style="width:3px;height:70px;background:${accent};"></div>`}
+      ${photoUrl ? `<img src="${esc(photoUrl)}" width="70" height="70" alt="${esc(f.name)}" style="display:block;border:0;border-radius:4px;">` : `<div style="width:3px;height:70px;background:${accent};"></div>`}
     </td>
     <td style="vertical-align:top;border-left:1px solid #e4e2dc;padding-left:16px;">
       <table role="presentation" cellpadding="0" cellspacing="0" border="0">
@@ -252,7 +252,7 @@ function compact({ f, colors, photoUrl }) {
   return `
 <table role="presentation" cellpadding="0" cellspacing="0" border="0" style="font-family:${SANS};">
   <tr>
-    ${photoUrl ? `<td style="padding-right:10px;"><img src="${photoUrl}" width="38" height="38" alt="${esc(f.name)}" style="border-radius:50%;display:block;border:0;"></td>` : ""}
+    ${photoUrl ? `<td style="padding-right:10px;"><img src="${esc(photoUrl)}" width="38" height="38" alt="${esc(f.name)}" style="border-radius:50%;display:block;border:0;"></td>` : ""}
     <td>
       <span style="font-family:${SANS};font-size:13px;font-weight:600;color:#111318;">${esc(f.name)}</span>
       <span style="font-family:${SANS};font-size:12px;color:#8a8d99;"> — ${esc(f.jobTitle)}, ${esc(f.company)}</span><br>
@@ -291,7 +291,7 @@ function gradientEdge({ f, colors, photoUrl, iconBase, hrefs = {} }) {
 <table role="presentation" cellpadding="0" cellspacing="0" border="0" style="font-family:${SANS};">
   <tr>
     <td><table role="presentation" cellpadding="0" cellspacing="0" border="0" height="72"><tr>${bands}</tr></table></td>
-    ${photoUrl ? `<td style="padding:0 16px;vertical-align:top;"><img src="${photoUrl}" width="68" height="68" alt="${esc(f.name)}" style="border-radius:50%;display:block;border:0;"></td>` : `<td width="16"></td>`}
+    ${photoUrl ? `<td style="padding:0 16px;vertical-align:top;"><img src="${esc(photoUrl)}" width="68" height="68" alt="${esc(f.name)}" style="border-radius:50%;display:block;border:0;"></td>` : `<td width="16"></td>`}
     <td style="vertical-align:top;">
       <table role="presentation" cellpadding="0" cellspacing="0" border="0">
         <tr><td style="font-family:${SANS};font-size:16px;font-weight:600;color:#111318;">${esc(f.name)}</td></tr>
@@ -320,7 +320,7 @@ function darkModeCard({ f, colors, photoUrl, hrefs = {} }) {
     <td style="padding:20px 22px;">
       <table role="presentation" cellpadding="0" cellspacing="0" border="0">
         <tr>
-          ${photoUrl ? `<td style="padding-right:16px;vertical-align:top;"><img src="${photoUrl}" width="60" height="60" alt="${esc(f.name)}" style="border-radius:50%;display:block;border:2px solid ${accent};"></td>` : ""}
+          ${photoUrl ? `<td style="padding-right:16px;vertical-align:top;"><img src="${esc(photoUrl)}" width="60" height="60" alt="${esc(f.name)}" style="border-radius:50%;display:block;border:2px solid ${accent};"></td>` : ""}
           <td style="vertical-align:top;">
             <table role="presentation" cellpadding="0" cellspacing="0" border="0">
               <tr><td style="font-family:${SANS};font-size:16px;font-weight:600;color:#ffffff;">${esc(f.name)}</td></tr>
@@ -367,7 +367,7 @@ function seasonalRibbon({
     <td style="border:1px solid #e4e2dc;border-top:none;border-radius:0 0 8px 8px;padding:16px;">
       <table role="presentation" cellpadding="0" cellspacing="0" border="0">
         <tr>
-          ${photoUrl ? `<td style="padding-right:16px;vertical-align:top;"><img src="${photoUrl}" width="60" height="60" alt="${esc(f.name)}" style="border-radius:50%;display:block;border:0;"></td>` : ""}
+          ${photoUrl ? `<td style="padding-right:16px;vertical-align:top;"><img src="${esc(photoUrl)}" width="60" height="60" alt="${esc(f.name)}" style="border-radius:50%;display:block;border:0;"></td>` : ""}
           <td style="vertical-align:top;">
             <table role="presentation" cellpadding="0" cellspacing="0" border="0">
               <tr><td style="font-family:${SANS};font-size:15px;font-weight:600;color:#111318;">${esc(f.name)}</td></tr>

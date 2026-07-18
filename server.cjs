@@ -31,12 +31,16 @@ const publicFiles = new Set([
   "signature-it-banner.png",
 ]);
 
-function securityHeaders() {
+function securityHeaders(production = false) {
   return {
     "X-Content-Type-Options": "nosniff",
     "X-Frame-Options": "SAMEORIGIN",
     "Referrer-Policy": "strict-origin-when-cross-origin",
-    "Strict-Transport-Security": "max-age=31536000; includeSubDomains",
+    ...(production
+      ? {
+          "Strict-Transport-Security": "max-age=31536000; includeSubDomains",
+        }
+      : {}),
     "Cross-Origin-Opener-Policy": "same-origin",
     "X-DNS-Prefetch-Control": "off",
     "Permissions-Policy": "camera=(), microphone=(), geolocation=()",
@@ -48,7 +52,6 @@ function securityHeaders() {
 function json(res, status, payload, requestId, headers = {}) {
   const body = Buffer.from(JSON.stringify(payload));
   res.writeHead(status, {
-    ...securityHeaders(),
     ...headers,
     "Content-Type": "application/json; charset=utf-8",
     "Content-Length": body.length,
@@ -62,32 +65,47 @@ function readBody(req, { limit = 1048576 } = {}) {
   return new Promise((resolve, reject) => {
     const chunks = [];
     let size = 0;
+    let settled = false;
     req.on("data", (chunk) => {
+      if (settled) return;
       size += chunk.length;
       if (size > limit) {
+        settled = true;
         const error = new Error("Request body is too large.");
         error.status = 413;
         error.code = "PAYLOAD_TOO_LARGE";
         reject(error);
-        req.destroy();
+        req.resume();
         return;
       }
       chunks.push(chunk);
     });
-    req.on("end", () => resolve(Buffer.concat(chunks)));
-    req.on("error", reject);
+    req.on("end", () => {
+      if (!settled) resolve(Buffer.concat(chunks));
+    });
+    req.on("error", (error) => {
+      if (!settled) reject(error);
+    });
   });
 }
 async function readJsonBody(req, { limit = 1048576 } = {}) {
   const body = await readBody(req, { limit });
   if (!body.length) return {};
   try {
-    return JSON.parse(body.toString("utf8"));
-  } catch {
-    const error = new Error("Invalid JSON request body.");
-    error.status = 400;
-    error.code = "INVALID_JSON";
-    throw error;
+    const parsed = JSON.parse(body.toString("utf8"));
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+      const error = new Error("JSON request body must be an object.");
+      error.status = 400;
+      error.code = "INVALID_JSON_OBJECT";
+      throw error;
+    }
+    return parsed;
+  } catch (error) {
+    if (error.code === "INVALID_JSON_OBJECT") throw error;
+    const invalid = new Error("Invalid JSON request body.");
+    invalid.status = 400;
+    invalid.code = "INVALID_JSON";
+    throw invalid;
   }
 }
 
@@ -155,7 +173,6 @@ function serve(config, req, res, pathname, requestId) {
     );
   const stat = fs.statSync(resolved);
   res.writeHead(200, {
-    ...securityHeaders(),
     "Content-Type":
       contentTypes[path.extname(resolved)] || "application/octet-stream",
     "Content-Length": stat.size,
@@ -180,6 +197,8 @@ function createApplication(options = {}) {
     readJsonBody,
     readBody,
     publicRoot: config.publicRoot,
+    trustProxy: config.trustProxy,
+    fetchImpl: options.fetchImpl,
   });
   const rateBuckets = new Map();
   function clientIp(req) {
@@ -238,6 +257,11 @@ function createApplication(options = {}) {
   const handler = async (req, res) => {
     const requestId = randomUUID();
     const startedAt = Date.now();
+    for (const [name, value] of Object.entries(
+      securityHeaders(config.production),
+    ))
+      res.setHeader(name, value);
+    res.setHeader("X-Request-Id", requestId);
     res.once("finish", () =>
       log(
         res.statusCode >= 500
@@ -346,6 +370,9 @@ function createApplication(options = {}) {
 function startServer(options = {}) {
   const application = createApplication(options);
   const server = http.createServer(application.handler);
+  server.requestTimeout = 30000;
+  server.headersTimeout = 15000;
+  server.keepAliveTimeout = 5000;
   server.listen(application.config.port, application.config.host, () =>
     console.log(
       JSON.stringify({
@@ -358,7 +385,10 @@ function startServer(options = {}) {
   );
   function shutdown(signal) {
     console.log(`${signal} received; closing Signify Creator.`);
+    const forceClose = setTimeout(() => server.closeAllConnections(), 10000);
+    forceClose.unref();
     server.close(() => {
+      clearTimeout(forceClose);
       application.db.close();
       process.exit(0);
     });

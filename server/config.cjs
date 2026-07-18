@@ -19,6 +19,10 @@ function httpUrl(value, name) {
   return String(value).trim().replace(/\/+$/, "");
 }
 
+function validEmail(value) {
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(value || ""));
+}
+
 function loadConfig(env = process.env, baseDir = path.join(__dirname, "..")) {
   const production = env.NODE_ENV === "production";
   const port = Number(env.PORT || 4173);
@@ -31,8 +35,26 @@ function loadConfig(env = process.env, baseDir = path.join(__dirname, "..")) {
       env.SIGNATURE_ALLOW_DEFAULT_ADMIN,
       !production,
     ),
+    bootstrapEmail = String(
+      env.SIGNIFY_BOOTSTRAP_EMAIL || "admin@signify.local",
+    )
+      .trim()
+      .toLowerCase(),
     bootstrapPassword = String(
       env.SIGNIFY_BOOTSTRAP_PASSWORD || "SignifyDemo123!",
+    ),
+    publicUrl = httpUrl(
+      String(env.SIGNIFY_PUBLIC_URL || "").trim(),
+      "SIGNIFY_PUBLIC_URL",
+    ),
+    logLevel = String(env.LOG_LEVEL || "info").toLowerCase();
+  if (!["debug", "info", "warn", "error", "silent"].includes(logLevel))
+    throw new Error("LOG_LEVEL must be debug, info, warn, error, or silent.");
+  if (allowDefaultAdmin && !validEmail(bootstrapEmail))
+    throw new Error("SIGNIFY_BOOTSTRAP_EMAIL must be a valid email address.");
+  if (allowDefaultAdmin && bootstrapPassword.length < 10)
+    throw new Error(
+      "SIGNIFY_BOOTSTRAP_PASSWORD must be at least 10 characters.",
     );
   if (
     production &&
@@ -41,6 +63,10 @@ function loadConfig(env = process.env, baseDir = path.join(__dirname, "..")) {
   )
     throw new Error(
       "Set a unique SIGNIFY_BOOTSTRAP_PASSWORD before enabling the production bootstrap administrator.",
+    );
+  if (production && (!publicUrl || !publicUrl.startsWith("https://")))
+    throw new Error(
+      "SIGNIFY_PUBLIC_URL must be configured with an HTTPS URL in production.",
     );
   const microsoft = [
     env.MICROSOFT_CLIENT_ID || env.AZURE_CLIENT_ID,
@@ -51,12 +77,43 @@ function loadConfig(env = process.env, baseDir = path.join(__dirname, "..")) {
     throw new Error(
       "Microsoft integration requires MICROSOFT_CLIENT_ID, MICROSOFT_CLIENT_SECRET, and MICROSOFT_TENANT_ID together.",
     );
+  const microsoftSenderEmail = String(env.MICROSOFT_SENDER_EMAIL || "")
+    .trim()
+    .toLowerCase();
+  if (microsoftSenderEmail && !validEmail(microsoftSenderEmail))
+    throw new Error("MICROSOFT_SENDER_EMAIL must be a valid email address.");
+  if (production && microsoftSenderEmail && microsoft.length !== 3)
+    throw new Error(
+      "MICROSOFT_SENDER_EMAIL requires complete Microsoft integration credentials.",
+    );
+  const stripeSecretKey = String(env.STRIPE_SECRET_KEY || "").trim(),
+    stripeWebhookSecret = String(env.STRIPE_WEBHOOK_SECRET || "").trim(),
+    stripePrices = {
+      starter: String(env.STRIPE_PRICE_STARTER || "").trim(),
+      team: String(env.STRIPE_PRICE_TEAM || "").trim(),
+      business: String(env.STRIPE_PRICE_BUSINESS || "").trim(),
+    },
+    stripeConfigured = Boolean(
+      stripeSecretKey ||
+      stripeWebhookSecret ||
+      Object.values(stripePrices).some(Boolean),
+    );
+  if (
+    production &&
+    stripeConfigured &&
+    (!stripeSecretKey ||
+      !stripeWebhookSecret ||
+      !Object.values(stripePrices).some(Boolean))
+  )
+    throw new Error(
+      "Stripe integration requires STRIPE_SECRET_KEY, STRIPE_WEBHOOK_SECRET, and at least one Stripe price.",
+    );
   return {
     production,
     port,
     host: env.HOST || "127.0.0.1",
     trustProxy: bool(env.TRUST_PROXY, false),
-    logLevel: String(env.LOG_LEVEL || "info").toLowerCase(),
+    logLevel,
     sourceRoot: baseDir,
     publicRoot: path.join(baseDir, "public"),
     databasePath:
@@ -64,19 +121,12 @@ function loadConfig(env = process.env, baseDir = path.join(__dirname, "..")) {
     signature: {
       sessionHours,
       allowDefaultAdmin,
-      bootstrapEmail: String(
-        env.SIGNIFY_BOOTSTRAP_EMAIL || "admin@signify.local",
-      )
-        .trim()
-        .toLowerCase(),
+      bootstrapEmail,
       bootstrapPassword,
       companyName: String(
         env.SIGNIFY_COMPANY_NAME || "Signify Workspace",
       ).trim(),
-      publicUrl: httpUrl(
-        String(env.SIGNIFY_PUBLIC_URL || "").trim(),
-        "SIGNIFY_PUBLIC_URL",
-      ),
+      publicUrl,
       assetBaseUrl: httpUrl(
         String(
           env.SIGNIFY_ASSET_BASE_URL || env.SIGNIFY_PUBLIC_URL || "",
@@ -102,16 +152,10 @@ function loadConfig(env = process.env, baseDir = path.join(__dirname, "..")) {
       microsoftTenantId: String(
         env.MICROSOFT_TENANT_ID || env.AZURE_TENANT_ID || "",
       ).trim(),
-      microsoftSenderEmail: String(env.MICROSOFT_SENDER_EMAIL || "")
-        .trim()
-        .toLowerCase(),
-      stripeSecretKey: String(env.STRIPE_SECRET_KEY || "").trim(),
-      stripeWebhookSecret: String(env.STRIPE_WEBHOOK_SECRET || "").trim(),
-      stripePrices: {
-        starter: String(env.STRIPE_PRICE_STARTER || "").trim(),
-        team: String(env.STRIPE_PRICE_TEAM || "").trim(),
-        business: String(env.STRIPE_PRICE_BUSINESS || "").trim(),
-      },
+      microsoftSenderEmail,
+      stripeSecretKey,
+      stripeWebhookSecret,
+      stripePrices,
     },
   };
 }

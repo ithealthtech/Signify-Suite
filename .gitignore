@@ -7,5 +7,6 @@ tmp/
 .env.local
 public/generated-banners/*
 !public/generated-banners/.gitkeep
+public/uploads/
 *.log
 *.zip
