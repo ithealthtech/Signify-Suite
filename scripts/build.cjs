@@ -18,9 +18,13 @@ const root = path.join(__dirname, ".."),
     "admin.html",
     "admin.css",
     "admin.js",
+    "platform.html",
+    "platform.css",
+    "platform.js",
     "server",
     "public",
     "scripts/backup.cjs",
+    "scripts/grant-application-owner.cjs",
     "start-production.cmd",
   ];
 

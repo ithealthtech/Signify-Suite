@@ -187,6 +187,7 @@ async function loadApp() {
   $("#profileRole").textContent = state.me.role;
   $("#profileInitials").textContent = initials(state.me.displayName);
   $("#adminNav").hidden = state.me.role !== "admin";
+  $("#platformNav").hidden = !state.me.applicationOwner;
   const switcher = $("#workspaceSwitcher");
   switcher.innerHTML = state.workspaces
     .map(
@@ -388,6 +389,10 @@ els.loginForm.addEventListener("submit", async (event) => {
       ),
     });
     state.me = result.user;
+    if (state.me.applicationOwner && !state.me.organizationId) {
+      location.href = "/platform.html";
+      return;
+    }
     await loadApp();
   } catch (error) {
     els.authStatus.textContent = error.message;

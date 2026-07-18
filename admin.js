@@ -123,6 +123,7 @@ async function boot() {
     return;
   }
   state.me = session.user;
+  $("#platformNav").hidden = !state.me.applicationOwner;
   await refreshAll();
   bindEvents();
 }
@@ -301,7 +302,7 @@ function renderSettings() {
     settings = workspace.settings,
     form = $("#settingsForm").elements,
     subscription = state.config.subscription,
-    billing = state.config.billing || {},
+    microsoft = state.config.integrations?.microsoft,
     used = state.config.stats.activeUsers,
     seats = subscription?.seats || 1;
   form.name.value = workspace.name;
@@ -322,15 +323,20 @@ function renderSettings() {
   $("#seatBar").style.width =
     `${Math.min(100, Math.round((used / seats) * 100))}%`;
   $("#seatLabel").textContent = `${used} active people of ${seats} seats`;
-  $("#billingPlan").innerHTML = (billing.plans || [])
-    .map((plan) => `<option value="${plan}">${plan}</option>`)
-    .join("");
-  $("#startCheckout").disabled = !billing.available;
-  $("#manageBilling").disabled =
-    !billing.available || !subscription?.stripeCustomerId;
-  $("#billingNote").textContent = billing.available
-    ? "Billing changes are completed securely through Stripe."
-    : "Stripe billing is not configured for this environment.";
+  $("#microsoftTenantName").textContent =
+    microsoft?.tenantName || "Not connected";
+  $("#microsoftStatus").textContent = microsoft?.status || "disconnected";
+  $("#microsoftTenantId").textContent = microsoft?.tenantId || "";
+  $("#microsoftSenderEmail").value = microsoft?.senderEmail || "";
+  $("#connectMicrosoft").textContent = microsoft
+    ? "Grant consent again"
+    : "Connect Microsoft 365";
+  $("#saveMicrosoftSender").disabled = !microsoft;
+  $("#disconnectMicrosoft").disabled = !microsoft;
+  $("#microsoftNote").textContent = microsoft
+    ? microsoft.lastError ||
+      "Directory sync and email delivery use this tenant connection."
+    : "A Microsoft 365 Global Administrator must grant tenant-wide consent.";
 }
 
 function showSection(name) {
@@ -427,14 +433,16 @@ function bindEvents() {
   $("#departmentList").addEventListener("click", deleteDepartment);
   $("#approvalList").addEventListener("click", reviewApproval);
   $("#saveSettings").addEventListener("click", saveSettings);
-  $("#startCheckout").addEventListener("click", startCheckout);
-  $("#manageBilling").addEventListener("click", manageBilling);
-  const billingResult = new URLSearchParams(location.search).get("billing");
-  if (billingResult) {
+  $("#saveMicrosoftSender").addEventListener("click", saveMicrosoftSender);
+  $("#disconnectMicrosoft").addEventListener("click", disconnectMicrosoft);
+  const microsoftResult = new URLSearchParams(location.search).get("microsoft");
+  if (microsoftResult) {
     toast(
-      billingResult === "success"
-        ? "Checkout completed. Subscription status updates after Stripe confirms payment."
-        : "Checkout canceled.",
+      microsoftResult === "connected"
+        ? "Microsoft 365 tenant connected"
+        : microsoftResult === "canceled"
+          ? "Microsoft 365 consent canceled"
+          : "Microsoft 365 application credentials are not configured",
     );
     history.replaceState(null, "", `${location.pathname}#settings`);
   }
@@ -1062,31 +1070,42 @@ async function saveSettings(event) {
     busy(button, false);
   }
 }
-async function startCheckout(event) {
+async function saveMicrosoftSender(event) {
   const button = event.currentTarget;
-  busy(button, true, "Opening…");
+  busy(button, true, "Saving...");
   try {
-    const result = await api("/api/signature/billing/checkout", {
-      method: "POST",
-      body: JSON.stringify({ plan: $("#billingPlan").value }),
+    const result = await api("/api/signature/microsoft-connection", {
+      method: "PUT",
+      body: JSON.stringify({
+        senderEmail: $("#microsoftSenderEmail").value.trim(),
+      }),
     });
-    location.href = result.url;
+    state.config.integrations.microsoft = result.microsoft;
+    renderSettings();
+    toast("Microsoft sender mailbox saved");
   } catch (error) {
     toast(error.message);
+  } finally {
     busy(button, false);
   }
 }
-async function manageBilling(event) {
+async function disconnectMicrosoft(event) {
+  if (!confirm("Disconnect Microsoft 365 from this tenant?")) return;
+  const reason = prompt("Reason for disconnecting Microsoft 365:");
+  if (!reason) return;
   const button = event.currentTarget;
-  busy(button, true, "Opening…");
+  busy(button, true, "Disconnecting...");
   try {
-    const result = await api("/api/signature/billing/portal", {
-      method: "POST",
-      body: "{}",
+    await api("/api/signature/microsoft-connection", {
+      method: "DELETE",
+      body: JSON.stringify({ reason }),
     });
-    location.href = result.url;
+    state.config.integrations.microsoft = null;
+    renderSettings();
+    toast("Microsoft 365 disconnected");
   } catch (error) {
     toast(error.message);
+  } finally {
     busy(button, false);
   }
 }

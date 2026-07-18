@@ -1,0 +1,305 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>Application | Signify Creator</title>
+    <link rel="icon" href="/icons/email.png" />
+    <link rel="stylesheet" href="admin.css" />
+    <link rel="stylesheet" href="platform.css" />
+  </head>
+  <body>
+    <header class="app-header">
+      <a class="app-brand" href="/signature.html"
+        ><span class="brand-mark">S</span
+        ><span><strong>Signify</strong><small>Creator</small></span></a
+      >
+      <nav class="app-nav" aria-label="Primary">
+        <a href="/signature.html">Studio</a><a href="/admin.html">Workspace</a
+        ><a class="active" href="/platform.html">Application</a>
+      </nav>
+      <div class="header-spacer"></div>
+      <div class="workspace-pill"><span></span><b>Application Owner</b></div>
+      <button class="profile-button" id="logout" type="button">Sign out</button>
+    </header>
+    <main class="admin-shell platform-shell">
+      <aside class="admin-nav">
+        <div>
+          <span class="eyebrow">Control plane</span><strong>Signify</strong>
+        </div>
+        <button class="active" data-section="tenants" type="button">
+          Tenants
+        </button>
+        <button data-section="owners" type="button">Application Owners</button>
+        <button data-section="audit" type="button">Application audit</button>
+      </aside>
+      <section class="admin-content">
+        <section class="admin-section active" data-admin-section="tenants">
+          <div class="page-head">
+            <div>
+              <span class="eyebrow">Application control</span>
+              <h1>Tenants</h1>
+              <p>
+                Lifecycle, Microsoft 365 connection, seats, and SaaS billing.
+              </p>
+            </div>
+            <button class="button primary" id="openCreateTenant" type="button">
+              Create tenant
+            </button>
+          </div>
+          <div class="stat-grid platform-stats">
+            <article>
+              <span>All tenants</span><strong id="statOrganizations">0</strong>
+            </article>
+            <article>
+              <span>Active</span><strong id="statActive">0</strong>
+            </article>
+            <article>
+              <span>Suspended</span><strong id="statSuspended">0</strong>
+            </article>
+            <article>
+              <span>Microsoft connected</span
+              ><strong id="statMicrosoft">0</strong>
+            </article>
+          </div>
+          <div class="table-tools">
+            <label class="search-field"
+              >Search<input id="tenantSearch" type="search"
+            /></label>
+            <label
+              >Status<select id="tenantStatus">
+                <option value="">All</option>
+                <option value="active">Active</option>
+                <option value="suspended">Suspended</option>
+              </select></label
+            >
+            <button class="button" id="refreshTenants" type="button">
+              Refresh
+            </button>
+          </div>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Tenant</th>
+                  <th>Status</th>
+                  <th>People</th>
+                  <th>Plan</th>
+                  <th>Microsoft 365</th>
+                  <th></th>
+                </tr>
+              </thead>
+              <tbody id="tenantRows"></tbody>
+            </table>
+          </div>
+          <div class="pagination">
+            <button class="button" id="previousPage" type="button">
+              Previous</button
+            ><span id="pageLabel"></span
+            ><button class="button" id="nextPage" type="button">Next</button>
+          </div>
+        </section>
+        <section class="admin-section" data-admin-section="owners">
+          <div class="page-head">
+            <div>
+              <span class="eyebrow">Global authority</span>
+              <h1>Application Owners</h1>
+              <p>Only these accounts can manage tenants and Stripe.</p>
+            </div>
+          </div>
+          <form class="inline-form" id="ownerForm">
+            <label
+              >Existing account email<input
+                name="email"
+                type="email"
+                required /></label
+            ><label>Reason<input name="reason" required minlength="3" /></label
+            ><button class="button primary" type="submit">Grant access</button>
+          </form>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Owner</th>
+                  <th>Status</th>
+                  <th>Granted</th>
+                  <th></th>
+                </tr>
+              </thead>
+              <tbody id="ownerRows"></tbody>
+            </table>
+          </div>
+        </section>
+        <section class="admin-section" data-admin-section="audit">
+          <div class="page-head">
+            <div>
+              <span class="eyebrow">Immutable activity</span>
+              <h1>Application audit</h1>
+              <p>Global tenant, access, subscription, and Stripe changes.</p>
+            </div>
+            <button class="button" id="refreshAudit" type="button">
+              Refresh
+            </button>
+          </div>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Time</th>
+                  <th>Actor</th>
+                  <th>Action</th>
+                  <th>Tenant</th>
+                  <th>Reason</th>
+                </tr>
+              </thead>
+              <tbody id="auditRows"></tbody>
+            </table>
+          </div>
+        </section>
+      </section>
+    </main>
+
+    <dialog id="createTenantDialog">
+      <form class="dialog-form" id="createTenantForm">
+        <div class="dialog-head">
+          <div>
+            <span class="eyebrow">Customer onboarding</span>
+            <h2>Create tenant</h2>
+          </div>
+          <button type="button" data-close-create aria-label="Close">×</button>
+        </div>
+        <label>Tenant name<input name="name" required minlength="2" /></label>
+        <label
+          >Tenant administrator email<input
+            name="adminEmail"
+            type="email"
+            required
+        /></label>
+        <div class="form-grid">
+          <label
+            >Plan<select name="plan">
+              <option value="starter">Starter</option>
+              <option value="team">Team</option>
+              <option value="business">Business</option>
+            </select></label
+          ><label
+            >Seats<input
+              name="seats"
+              type="number"
+              min="1"
+              max="10000"
+              value="10"
+              required
+          /></label>
+        </div>
+        <label
+          >Reason<input
+            name="reason"
+            value="New customer onboarding"
+            required
+            minlength="3"
+        /></label>
+        <label id="invitationResult" hidden
+          >Administrator invitation URL<input id="invitationUrl" readonly
+        /></label>
+        <div class="dialog-actions">
+          <button class="button" type="button" data-close-create>Cancel</button
+          ><button class="button primary" id="createTenant" type="submit">
+            Create tenant
+          </button>
+        </div>
+      </form>
+    </dialog>
+
+    <dialog id="tenantDialog">
+      <div class="dialog-form tenant-detail">
+        <div class="dialog-head">
+          <div>
+            <span class="eyebrow">Tenant control</span>
+            <h2 id="detailName">Tenant</h2>
+            <p id="detailSlug"></p>
+          </div>
+          <button type="button" data-close-detail aria-label="Close">×</button>
+        </div>
+        <div class="detail-summary" id="detailSummary"></div>
+        <form class="control-form" id="tenantStatusForm">
+          <h3>Lifecycle</h3>
+          <div class="form-grid">
+            <label
+              >Status<select name="status">
+                <option value="active">Active</option>
+                <option value="suspended">Suspended</option>
+              </select></label
+            ><label>Reason<input name="reason" required minlength="3" /></label>
+          </div>
+          <button class="button" type="submit">Update status</button>
+        </form>
+        <form class="control-form" id="subscriptionForm">
+          <h3>Subscription</h3>
+          <div class="form-grid three">
+            <label
+              >Plan<select name="plan">
+                <option value="starter">Starter</option>
+                <option value="team">Team</option>
+                <option value="business">Business</option>
+              </select></label
+            ><label
+              >Status<select name="status">
+                <option value="trialing">Trialing</option>
+                <option value="active">Active</option>
+                <option value="past_due">Past due</option>
+                <option value="canceled">Canceled</option>
+              </select></label
+            ><label
+              >Seats<input
+                name="seats"
+                type="number"
+                min="1"
+                max="10000"
+                required
+            /></label>
+          </div>
+          <div class="form-grid">
+            <label>Stripe customer ID<input name="stripeCustomerId" /></label
+            ><label
+              >Stripe subscription ID<input name="stripeSubscriptionId"
+            /></label>
+          </div>
+          <label>Reason<input name="reason" required minlength="3" /></label
+          ><button class="button" type="submit">Save subscription</button>
+        </form>
+        <form class="control-form" id="checkoutForm">
+          <h3>Stripe checkout</h3>
+          <div class="form-grid three">
+            <label
+              >Plan<select name="plan">
+                <option value="starter">Starter</option>
+                <option value="team">Team</option>
+                <option value="business">Business</option>
+              </select></label
+            ><label
+              >Customer email<input name="customerEmail" type="email" /></label
+            ><label
+              >Reason<input
+                name="reason"
+                value="Subscription checkout"
+                required
+            /></label>
+          </div>
+          <button class="button primary" id="createCheckout" type="submit">
+            Create checkout</button
+          ><small id="stripeStatus"></small>
+        </form>
+        <div class="control-form">
+          <h3>Tenant administrators and users</h3>
+          <div id="detailMembers" class="member-list"></div>
+        </div>
+        <div class="dialog-actions">
+          <button class="button" type="button" data-close-detail>Close</button>
+        </div>
+      </div>
+    </dialog>
+    <div class="toast" id="toast" role="status" aria-live="polite"></div>
+    <script src="platform.js"></script>
+  </body>
+</html>

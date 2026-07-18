@@ -6,6 +6,8 @@ const {
   scryptSync,
   timingSafeEqual,
   createHash,
+  createPublicKey,
+  verify: verifySignature,
   randomUUID,
 } = require("node:crypto");
 const { GIFEncoder, quantize, applyPalette } = require("gifenc");
@@ -82,7 +84,7 @@ function csrfCookie(token, maxAge, secure) {
   return `sig_csrf=${encodeURIComponent(token || "")}; Path=/; SameSite=Strict; Max-Age=${maxAge};${secure ? " Secure;" : ""}`;
 }
 function oauthStateCookie(token, maxAge, secure) {
-  return `sig_oauth_state=${encodeURIComponent(token || "")}; Path=/auth/microsoft/callback; HttpOnly; SameSite=Lax; Max-Age=${maxAge};${secure ? " Secure;" : ""}`;
+  return `sig_oauth_state=${encodeURIComponent(token || "")}; Path=/auth/microsoft/; HttpOnly; SameSite=Lax; Max-Age=${maxAge};${secure ? " Secure;" : ""}`;
 }
 function validEmail(value) {
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(value || ""));
@@ -126,6 +128,16 @@ function safeJson(value, fallback = {}) {
     return JSON.parse(value || "{}");
   } catch {
     return fallback;
+  }
+}
+function jwtPayload(token) {
+  try {
+    const parts = String(token || "").split(".");
+    return parts.length === 3
+      ? JSON.parse(Buffer.from(parts[1], "base64url").toString("utf8"))
+      : {};
+  } catch {
+    return {};
   }
 }
 function limited(value, max = 240) {
@@ -426,6 +438,7 @@ function userDto(row) {
     organizationName: row.organization_name || "",
     signature: normalizeSignature(row),
     lastLoginAt: row.last_login_at,
+    applicationOwner: Boolean(row.application_owner),
   };
 }
 function templateDto(row) {
@@ -448,7 +461,7 @@ function workspaceDto(row) {
     updatedAt: row.updated_at,
   };
 }
-function subscriptionDto(row) {
+function subscriptionDto(row, includeProvider = false) {
   return row
     ? {
         plan: row.plan,
@@ -456,7 +469,13 @@ function subscriptionDto(row) {
         seats: row.seats,
         trialEndsAt: row.trial_ends_at,
         currentPeriodEnd: row.current_period_end,
-        stripeCustomerId: row.stripe_customer_id || null,
+        ...(includeProvider
+          ? {
+              stripeCustomerId: row.stripe_customer_id || null,
+              stripeSubscriptionId: row.stripe_subscription_id || null,
+              stripePriceId: row.stripe_price_id || null,
+            }
+          : {}),
       }
     : null;
 }
@@ -466,10 +485,27 @@ function auditDto(row) {
     action: row.action,
     targetType: row.target_type,
     targetId: row.target_id,
+    organizationId: row.organization_id || null,
     actorName: row.actor_name || "System",
+    reason: row.reason || "",
     metadata: safeJson(row.metadata_json),
     createdAt: row.created_at,
   };
+}
+function microsoftConnectionDto(row) {
+  return row
+    ? {
+        organizationId: row.organization_id,
+        tenantId: row.tenant_id,
+        tenantName: row.tenant_name,
+        status: row.status,
+        senderEmail: row.sender_email,
+        consentedAt: row.consented_at,
+        lastVerifiedAt: row.last_verified_at,
+        lastSyncAt: row.last_sync_at,
+        lastError: row.last_error,
+      }
+    : null;
 }
 
 function createSignaturePortal({
@@ -491,10 +527,9 @@ function createSignaturePortal({
       })
     : null;
   const microsoftAvailable = Boolean(
-    signature.microsoftClientId &&
-    signature.microsoftClientSecret &&
-    signature.microsoftTenantId,
+    signature.microsoftClientId && signature.microsoftClientSecret,
   );
+  let microsoftJwksCache = { expiresAt: 0, keys: [] };
   const memberSelect = `SELECT u.id,u.email,u.password_hash,u.display_name,u.role,u.status,u.created_at,u.updated_at,u.last_login_at,u.email_verified_at,m.signature_json,m.role AS membership_role,m.status AS membership_status,o.id AS organization_id,o.name AS organization_name,o.slug AS organization_slug,o.status AS organization_status,o.settings_json AS organization_settings FROM signature_users u JOIN organization_memberships m ON m.user_id=u.id JOIN organizations o ON o.id=m.organization_id`;
   const builtinTemplates = Object.entries(TEMPLATES).map(([id, item]) => ({
     id,
@@ -601,6 +636,53 @@ function createSignaturePortal({
       JSON.stringify(metadata),
     );
   }
+  function isApplicationOwner(userId) {
+    return Boolean(
+      db
+        .prepare(
+          "SELECT 1 FROM application_owners WHERE user_id=? AND status='active'",
+        )
+        .get(userId),
+    );
+  }
+  function requireApplicationOwner(user) {
+    if (!isApplicationOwner(user.id))
+      throw Object.assign(new Error("Application Owner access required."), {
+        status: 403,
+        code: "APPLICATION_OWNER_REQUIRED",
+      });
+  }
+  function recordApplicationAudit(
+    user,
+    action,
+    targetType,
+    targetId = null,
+    organizationId = null,
+    reason = "",
+    metadata = {},
+    requestId = null,
+  ) {
+    db.prepare(
+      "INSERT INTO application_audit_logs(id,actor_user_id,organization_id,action,target_type,target_id,reason,metadata_json,request_id) VALUES (?,?,?,?,?,?,?,?,?)",
+    ).run(
+      randomUUID(),
+      user.id,
+      organizationId,
+      action,
+      targetType,
+      targetId,
+      limited(reason, 500),
+      JSON.stringify(metadata),
+      requestId,
+    );
+  }
+  function microsoftConnection(organizationId, connectedOnly = false) {
+    return db
+      .prepare(
+        `SELECT * FROM organization_microsoft_connections WHERE organization_id=?${connectedOnly ? " AND status='connected'" : ""}`,
+      )
+      .get(organizationId);
+  }
   function requireSession(req) {
     const token = cookie(req, "sig_session");
     if (!token) {
@@ -624,6 +706,40 @@ function createSignaturePortal({
       `UPDATE signature_sessions SET last_seen_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE id=?`,
     ).run(row.session_id);
     const user = userDto(row);
+    user.applicationOwner = isApplicationOwner(user.id);
+    Object.defineProperties(user, {
+      sessionId: { value: row.session_id },
+      csrfTokenHash: { value: row.csrf_token_hash || "" },
+    });
+    return user;
+  }
+  function requireApplicationSession(req) {
+    const token = cookie(req, "sig_session");
+    if (!token)
+      throw Object.assign(new Error("Not signed in."), {
+        status: 401,
+        code: "AUTH_REQUIRED",
+      });
+    const row = db
+      .prepare(
+        `SELECT u.*,s.id AS session_id,s.organization_id,s.csrf_token_hash FROM signature_sessions s JOIN signature_users u ON u.id=s.user_id WHERE s.token_hash=? AND s.expires_at>strftime('%Y-%m-%dT%H:%M:%fZ','now') AND u.status='active'`,
+      )
+      .get(tokenHash(token));
+    if (!row)
+      throw Object.assign(new Error("Application Owner session expired."), {
+        status: 401,
+        code: "SESSION_EXPIRED",
+      });
+    db.prepare(
+      `UPDATE signature_sessions SET last_seen_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE id=?`,
+    ).run(row.session_id);
+    const user = {
+      id: row.id,
+      email: row.email,
+      displayName: row.display_name,
+      applicationOwner: isApplicationOwner(row.id),
+      organizationId: row.organization_id,
+    };
     Object.defineProperties(user, {
       sessionId: { value: row.session_id },
       csrfTokenHash: { value: row.csrf_token_hash || "" },
@@ -659,6 +775,7 @@ function createSignaturePortal({
       token = randomBytes(32).toString("base64url"),
       csrf = randomBytes(32).toString("base64url"),
       expires = new Date(Date.now() + hours * 3600000).toISOString();
+    user.applicationOwner = isApplicationOwner(user.id);
     db.exec(`DELETE FROM signature_sessions WHERE expires_at<=strftime('%Y-%m-%dT%H:%M:%fZ','now');
       DELETE FROM password_reset_tokens WHERE expires_at<=strftime('%Y-%m-%dT%H:%M:%fZ','now') OR used_at IS NOT NULL;
       DELETE FROM email_verification_tokens WHERE expires_at<=strftime('%Y-%m-%dT%H:%M:%fZ','now') OR used_at IS NOT NULL;
@@ -729,13 +846,22 @@ function createSignaturePortal({
     ).run(randomUUID(), userId, tokenHash(token), expires);
     return token;
   }
-  function mailAvailable() {
-    return Boolean(
-      signature.microsoftClientId &&
-      signature.microsoftClientSecret &&
-      signature.microsoftTenantId &&
-      signature.microsoftSenderEmail,
-    );
+  function mailAvailable(organizationId) {
+    if (!organizationId)
+      return Boolean(
+        microsoftAvailable &&
+        signature.microsoftTenantId &&
+        signature.microsoftSenderEmail,
+      );
+    const connection = microsoftConnection(organizationId, true);
+    return Boolean(microsoftAvailable && connection?.sender_email);
+  }
+  function mailOrganizationForUser(userId) {
+    return db
+      .prepare(
+        `SELECT c.organization_id FROM organization_microsoft_connections c JOIN organization_memberships m ON m.organization_id=c.organization_id JOIN organizations o ON o.id=c.organization_id WHERE m.user_id=? AND m.status='active' AND o.status='active' AND c.status='connected' AND c.sender_email<>'' ORDER BY m.created_at LIMIT 1`,
+      )
+      .get(userId)?.organization_id;
   }
   function billingAvailable() {
     return Boolean(
@@ -1043,12 +1169,72 @@ function createSignaturePortal({
     );
   }
 
-  async function graphAppToken() {
+  async function verifyMicrosoftIdToken(token, expectedNonce) {
+    const parts = String(token || "").split("."),
+      header = safeJson(
+        parts[0] ? Buffer.from(parts[0], "base64url").toString("utf8") : "{}",
+      ),
+      payload = jwtPayload(token);
+    if (parts.length !== 3 || header.alg !== "RS256" || !header.kid)
+      throw Object.assign(
+        new Error("Microsoft returned an invalid ID token."),
+        {
+          status: 502,
+          code: "MICROSOFT_ID_TOKEN_INVALID",
+        },
+      );
+    if (microsoftJwksCache.expiresAt <= Date.now()) {
+      const response = await fetchWithRetry(
+          "https://login.microsoftonline.com/common/discovery/v2.0/keys",
+        ),
+        data = await response.json();
+      if (!response.ok || !Array.isArray(data.keys))
+        throw Object.assign(
+          new Error("Microsoft signing keys could not be loaded."),
+          { status: 502, code: "MICROSOFT_JWKS_FAILED" },
+        );
+      microsoftJwksCache = {
+        expiresAt: Date.now() + 60 * 60 * 1000,
+        keys: data.keys,
+      };
+    }
+    const jwk = microsoftJwksCache.keys.find(
+      (candidate) => candidate.kid === header.kid,
+    );
     if (
-      !signature.microsoftClientId ||
-      !signature.microsoftClientSecret ||
-      !signature.microsoftTenantId
+      !jwk ||
+      !verifySignature(
+        "RSA-SHA256",
+        Buffer.from(`${parts[0]}.${parts[1]}`),
+        createPublicKey({ key: jwk, format: "jwk" }),
+        Buffer.from(parts[2], "base64url"),
+      )
     )
+      throw Object.assign(
+        new Error("Microsoft ID token signature verification failed."),
+        { status: 502, code: "MICROSOFT_ID_TOKEN_INVALID" },
+      );
+    const tenantId = String(payload.tid || ""),
+      audience = Array.isArray(payload.aud) ? payload.aud : [payload.aud],
+      expectedIssuer = `https://login.microsoftonline.com/${tenantId}/v2.0`,
+      now = Math.floor(Date.now() / 1000);
+    if (
+      !audience.includes(signature.microsoftClientId) ||
+      payload.iss !== expectedIssuer ||
+      payload.nonce !== expectedNonce ||
+      !Number.isFinite(payload.exp) ||
+      payload.exp <= now - 60 ||
+      (Number.isFinite(payload.nbf) && payload.nbf > now + 60)
+    )
+      throw Object.assign(
+        new Error("Microsoft ID token claims failed validation."),
+        { status: 502, code: "MICROSOFT_ID_TOKEN_INVALID" },
+      );
+    return payload;
+  }
+
+  async function graphTokenForTenant(tenantId) {
+    if (!microsoftAvailable)
       throw Object.assign(new Error("Microsoft 365 is not configured."), {
         status: 400,
         code: "MICROSOFT_NOT_CONFIGURED",
@@ -1060,7 +1246,7 @@ function createSignaturePortal({
       grant_type: "client_credentials",
     });
     const response = await fetchWithRetry(
-      `https://login.microsoftonline.com/${encodeURIComponent(signature.microsoftTenantId)}/oauth2/v2.0/token`,
+      `https://login.microsoftonline.com/${encodeURIComponent(tenantId)}/oauth2/v2.0/token`,
       {
         method: "POST",
         headers: { "Content-Type": "application/x-www-form-urlencoded" },
@@ -1074,6 +1260,47 @@ function createSignaturePortal({
         { status: 502, code: "MICROSOFT_AUTH_FAILED" },
       );
     return data.access_token;
+  }
+  async function graphAppToken(organizationId) {
+    const connection = organizationId
+      ? microsoftConnection(organizationId, true)
+      : signature.microsoftTenantId
+        ? {
+            tenant_id: signature.microsoftTenantId,
+            sender_email: signature.microsoftSenderEmail || "",
+          }
+        : null;
+    if (!connection)
+      throw Object.assign(
+        new Error("Connect this tenant to Microsoft 365 before continuing."),
+        { status: 409, code: "MICROSOFT_TENANT_NOT_CONNECTED" },
+      );
+    return {
+      token: await graphTokenForTenant(connection.tenant_id),
+      connection,
+    };
+  }
+  async function verifyMicrosoftTenant(tenantId) {
+    const token = await graphTokenForTenant(tenantId),
+      response = await fetchWithRetry(
+        "https://graph.microsoft.com/v1.0/organization?$select=id,displayName,verifiedDomains",
+        { headers: { Authorization: `Bearer ${token}` } },
+      ),
+      data = await response.json();
+    if (!response.ok || !Array.isArray(data.value) || !data.value[0])
+      throw Object.assign(
+        new Error(
+          data.error?.message ||
+            "Microsoft 365 consent could not be verified. Confirm the configured application permissions and grant consent again.",
+        ),
+        { status: 502, code: "MICROSOFT_CONSENT_VERIFICATION_FAILED" },
+      );
+    if (String(data.value[0].id).toLowerCase() !== tenantId.toLowerCase())
+      throw Object.assign(new Error("Microsoft returned a different tenant."), {
+        status: 400,
+        code: "MICROSOFT_TENANT_MISMATCH",
+      });
+    return { token, organization: data.value[0] };
   }
   async function graphDirectoryUsers(token) {
     const users = [];
@@ -1117,9 +1344,9 @@ function createSignaturePortal({
     }
     return users;
   }
-  async function sendGraphMail(to, subject, html) {
-    const token = await graphAppToken(),
-      sender = signature.microsoftSenderEmail;
+  async function sendGraphMail(organizationId, to, subject, html) {
+    const { token, connection } = await graphAppToken(organizationId),
+      sender = connection.sender_email;
     if (!sender)
       throw Object.assign(
         new Error("Microsoft sender mailbox is not configured."),
@@ -1222,13 +1449,137 @@ function createSignaturePortal({
       }
       return json(res, 200, { received: true }, requestId);
     }
+    if (
+      url.pathname === "/auth/microsoft/admin-consent" &&
+      req.method === "GET"
+    ) {
+      const user = requireSession(req);
+      requireAdmin(user);
+      if (!microsoftAvailable)
+        return redirect(res, "/admin.html?microsoft=unavailable#settings");
+      const state = randomBytes(24).toString("base64url");
+      db.prepare(
+        "INSERT INTO oauth_states(token_hash,provider,expires_at,purpose,organization_id,user_id) VALUES (?,'microsoft',?,'admin_consent',?,?)",
+      ).run(
+        tokenHash(state),
+        new Date(Date.now() + 600000).toISOString(),
+        user.organizationId,
+        user.id,
+      );
+      const callback = `${publicBase(req, user)}/auth/microsoft/admin-consent/callback`,
+        params = new URLSearchParams({
+          client_id: signature.microsoftClientId,
+          scope: "https://graph.microsoft.com/.default",
+          redirect_uri: callback,
+          state,
+        });
+      return redirect(
+        res,
+        `https://login.microsoftonline.com/organizations/v2.0/adminconsent?${params}`,
+        { "Set-Cookie": oauthStateCookie(state, 600, production) },
+      );
+    }
+    if (
+      url.pathname === "/auth/microsoft/admin-consent/callback" &&
+      req.method === "GET"
+    ) {
+      const clearOauthCookie = oauthStateCookie("", 0, production),
+        state = url.searchParams.get("state"),
+        stateCookie = cookie(req, "sig_oauth_state");
+      if (!state || !stateCookie || tokenHash(state) !== tokenHash(stateCookie))
+        return textResponse(
+          res,
+          400,
+          "Microsoft consent state expired.",
+          "text/plain; charset=utf-8",
+          { "Set-Cookie": clearOauthCookie },
+        );
+      const storedState = db
+        .prepare(
+          `DELETE FROM oauth_states WHERE token_hash=? AND provider='microsoft' AND purpose='admin_consent' AND expires_at>strftime('%Y-%m-%dT%H:%M:%fZ','now') RETURNING *`,
+        )
+        .get(tokenHash(state));
+      if (!storedState)
+        return textResponse(
+          res,
+          400,
+          "Microsoft consent state expired.",
+          "text/plain; charset=utf-8",
+          { "Set-Cookie": clearOauthCookie },
+        );
+      const user = requireSession(req);
+      requireAdmin(user);
+      if (
+        user.id !== storedState.user_id ||
+        user.organizationId !== storedState.organization_id
+      )
+        throw Object.assign(new Error("Consent session does not match."), {
+          status: 403,
+          code: "MICROSOFT_CONSENT_SESSION_MISMATCH",
+        });
+      if (
+        url.searchParams.get("error") ||
+        String(url.searchParams.get("admin_consent")).toLowerCase() !== "true"
+      )
+        return redirect(res, "/admin.html?microsoft=canceled#settings", {
+          "Set-Cookie": clearOauthCookie,
+        });
+      const tenantId = String(url.searchParams.get("tenant") || "").trim();
+      if (
+        !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(
+          tenantId,
+        )
+      )
+        throw Object.assign(
+          new Error("Microsoft returned an invalid tenant ID."),
+          {
+            status: 400,
+            code: "MICROSOFT_TENANT_INVALID",
+          },
+        );
+      const existing = db
+        .prepare(
+          "SELECT organization_id FROM organization_microsoft_connections WHERE tenant_id=? AND organization_id<>?",
+        )
+        .get(tenantId, user.organizationId);
+      if (existing)
+        throw Object.assign(
+          new Error(
+            "This Microsoft 365 tenant is already connected to another Signify tenant.",
+          ),
+          { status: 409, code: "MICROSOFT_TENANT_ALREADY_CONNECTED" },
+        );
+      const verified = await verifyMicrosoftTenant(tenantId);
+      db.prepare(
+        `INSERT INTO organization_microsoft_connections(organization_id,tenant_id,tenant_name,status,connected_by,consented_at,last_verified_at,last_error) VALUES (?,?,?,'connected',?,strftime('%Y-%m-%dT%H:%M:%fZ','now'),strftime('%Y-%m-%dT%H:%M:%fZ','now'),'') ON CONFLICT(organization_id) DO UPDATE SET tenant_id=excluded.tenant_id,tenant_name=excluded.tenant_name,status='connected',connected_by=excluded.connected_by,consented_at=excluded.consented_at,last_verified_at=excluded.last_verified_at,last_error='',updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now')`,
+      ).run(
+        user.organizationId,
+        tenantId,
+        limited(verified.organization.displayName, 180),
+        user.id,
+      );
+      recordAudit(user, "microsoft.connected", "microsoft_tenant", tenantId, {
+        tenantName: verified.organization.displayName,
+      });
+      return redirect(res, "/admin.html?microsoft=connected#settings", {
+        "Set-Cookie": clearOauthCookie,
+      });
+    }
     if (url.pathname === "/auth/microsoft" && req.method === "GET") {
       if (!microsoftAvailable)
         return redirect(res, "/signature.html?auth=microsoft-unavailable");
-      const state = randomBytes(24).toString("base64url");
+      const state = randomBytes(24).toString("base64url"),
+        nonce = randomBytes(24).toString("base64url"),
+        codeVerifier = randomBytes(48).toString("base64url"),
+        codeChallenge = createHash("sha256")
+          .update(codeVerifier)
+          .digest("base64url");
       db.prepare(
-        "INSERT INTO oauth_states(token_hash,provider,expires_at) VALUES (?,'microsoft',?)",
+        "INSERT INTO oauth_states(token_hash,provider,expires_at,purpose) VALUES (?,'microsoft',?,'login')",
       ).run(tokenHash(state), new Date(Date.now() + 600000).toISOString());
+      db.prepare(
+        "INSERT INTO oauth_state_security(token_hash,code_verifier,nonce) VALUES (?,?,?)",
+      ).run(tokenHash(state), codeVerifier, nonce);
       const callback = `${cleanUrl(signature.publicUrl || requestBase(req))}/auth/microsoft/callback`,
         params = new URLSearchParams({
           client_id: signature.microsoftClientId,
@@ -1237,10 +1588,13 @@ function createSignaturePortal({
           response_mode: "query",
           scope: "openid profile email User.Read",
           state,
+          nonce,
+          code_challenge: codeChallenge,
+          code_challenge_method: "S256",
         });
       return redirect(
         res,
-        `https://login.microsoftonline.com/${encodeURIComponent(signature.microsoftTenantId)}/oauth2/v2.0/authorize?${params}`,
+        `https://login.microsoftonline.com/organizations/oauth2/v2.0/authorize?${params}`,
         { "Set-Cookie": oauthStateCookie(state, 600, production) },
       );
     }
@@ -1258,7 +1612,7 @@ function createSignaturePortal({
         );
       const storedState = db
         .prepare(
-          `DELETE FROM oauth_states WHERE token_hash=? AND provider='microsoft' AND expires_at>strftime('%Y-%m-%dT%H:%M:%fZ','now') RETURNING token_hash`,
+          `SELECT o.*,s.code_verifier,s.nonce FROM oauth_states o JOIN oauth_state_security s ON s.token_hash=o.token_hash WHERE o.token_hash=? AND o.provider='microsoft' AND o.purpose='login' AND o.expires_at>strftime('%Y-%m-%dT%H:%M:%fZ','now')`,
         )
         .get(tokenHash(state || ""));
       if (!storedState)
@@ -1269,6 +1623,9 @@ function createSignaturePortal({
           "text/plain; charset=utf-8",
           { "Set-Cookie": clearOauthCookie },
         );
+      db.prepare("DELETE FROM oauth_states WHERE token_hash=?").run(
+        storedState.token_hash,
+      );
       if (url.searchParams.get("error"))
         return textResponse(
           res,
@@ -1285,9 +1642,10 @@ function createSignaturePortal({
           redirect_uri: callback,
           grant_type: "authorization_code",
           scope: "openid profile email User.Read",
+          code_verifier: storedState.code_verifier,
         }),
         tokenRes = await fetchWithRetry(
-          `https://login.microsoftonline.com/${encodeURIComponent(signature.microsoftTenantId)}/oauth2/v2.0/token`,
+          `https://login.microsoftonline.com/organizations/oauth2/v2.0/token`,
           {
             method: "POST",
             headers: { "Content-Type": "application/x-www-form-urlencoded" },
@@ -1303,10 +1661,14 @@ function createSignaturePortal({
           "text/plain; charset=utf-8",
           { "Set-Cookie": clearOauthCookie },
         );
-      const meRes = await fetchWithRetry(
-        "https://graph.microsoft.com/v1.0/me?$select=id,displayName,mail,userPrincipalName,jobTitle,department,businessPhones,mobilePhone",
-        { headers: { Authorization: `Bearer ${tokens.access_token}` } },
-      );
+      const idToken = await verifyMicrosoftIdToken(
+          tokens.id_token,
+          storedState.nonce,
+        ),
+        meRes = await fetchWithRetry(
+          "https://graph.microsoft.com/v1.0/me?$select=id,displayName,mail,userPrincipalName,jobTitle,department,businessPhones,mobilePhone",
+          { headers: { Authorization: `Bearer ${tokens.access_token}` } },
+        );
       if (!meRes.ok)
         return textResponse(
           res,
@@ -1316,6 +1678,7 @@ function createSignaturePortal({
           { "Set-Cookie": clearOauthCookie },
         );
       const profile = await meRes.json(),
+        microsoftTenantId = String(idToken.tid || ""),
         email = String(
           profile.mail || profile.userPrincipalName || "",
         ).toLowerCase();
@@ -1327,11 +1690,19 @@ function createSignaturePortal({
           "text/plain; charset=utf-8",
           { "Set-Cookie": clearOauthCookie },
         );
+      if (!microsoftTenantId)
+        return textResponse(
+          res,
+          502,
+          "Microsoft sign-in did not identify an organization tenant.",
+          "text/plain; charset=utf-8",
+          { "Set-Cookie": clearOauthCookie },
+        );
       let row = db
         .prepare(
-          `${memberSelect} WHERE lower(u.email)=lower(?) ORDER BY m.created_at LIMIT 1`,
+          `${memberSelect} JOIN organization_microsoft_connections mc ON mc.organization_id=o.id AND mc.status='connected' WHERE lower(u.email)=lower(?) AND lower(mc.tenant_id)=lower(?) ORDER BY m.created_at LIMIT 1`,
         )
-        .get(email);
+        .get(email, microsoftTenantId);
       if (!row) {
         return redirect(res, "/signature.html?auth=account-required", {
           "Set-Cookie": clearOauthCookie,
@@ -1411,6 +1782,580 @@ function createSignaturePortal({
         "Content-Disposition": `attachment; filename="${slug(f.name)}.vcf"`,
       });
     }
+    if (url.pathname.startsWith("/api/platform/")) {
+      const owner = requireApplicationSession(req);
+      requireApplicationOwner(owner);
+      if (!["GET", "HEAD", "OPTIONS"].includes(req.method))
+        enforceCsrf(req, owner);
+      if (url.pathname === "/api/platform/session" && req.method === "GET") {
+        const counts = db
+          .prepare(
+            `SELECT COUNT(*) organizations,SUM(CASE WHEN status='active' THEN 1 ELSE 0 END) active,SUM(CASE WHEN status='suspended' THEN 1 ELSE 0 END) suspended FROM organizations`,
+          )
+          .get();
+        return json(
+          res,
+          200,
+          {
+            user: owner,
+            stats: {
+              organizations: counts.organizations || 0,
+              active: counts.active || 0,
+              suspended: counts.suspended || 0,
+              microsoftConnected: db
+                .prepare(
+                  "SELECT COUNT(*) count FROM organization_microsoft_connections WHERE status='connected'",
+                )
+                .get().count,
+            },
+            stripe: {
+              configured: billingAvailable(),
+              plans: Object.entries(signature.stripePrices || {})
+                .filter(([, price]) => Boolean(price))
+                .map(([plan]) => plan),
+            },
+          },
+          requestId,
+          refreshCsrf(owner),
+        );
+      }
+      if (
+        url.pathname === "/api/platform/organizations" &&
+        req.method === "GET"
+      ) {
+        const search = limited(url.searchParams.get("search"), 120),
+          status = String(url.searchParams.get("status") || ""),
+          page = Math.max(1, Number(url.searchParams.get("page")) || 1),
+          pageSize = Math.min(
+            100,
+            Math.max(1, Number(url.searchParams.get("pageSize")) || 25),
+          ),
+          where = ["1=1"],
+          params = [];
+        if (search) {
+          where.push(
+            "(lower(o.name) LIKE lower(?) OR lower(o.slug) LIKE lower(?))",
+          );
+          params.push(`%${search}%`, `%${search}%`);
+        }
+        if (["active", "suspended"].includes(status)) {
+          where.push("o.status=?");
+          params.push(status);
+        }
+        const filter = where.join(" AND "),
+          total = db
+            .prepare(
+              `SELECT COUNT(*) count FROM organizations o WHERE ${filter}`,
+            )
+            .get(...params).count,
+          rows = db
+            .prepare(
+              `SELECT o.*,s.plan,s.status subscription_status,s.seats,s.trial_ends_at,s.current_period_end,s.stripe_customer_id,s.stripe_subscription_id,mc.tenant_id microsoft_tenant_id,mc.tenant_name microsoft_tenant_name,mc.status microsoft_status,mc.sender_email,(SELECT COUNT(*) FROM organization_memberships m WHERE m.organization_id=o.id AND m.status='active') member_count FROM organizations o LEFT JOIN organization_subscriptions s ON s.organization_id=o.id LEFT JOIN organization_microsoft_connections mc ON mc.organization_id=o.id WHERE ${filter} ORDER BY o.created_at DESC LIMIT ? OFFSET ?`,
+            )
+            .all(...params, pageSize, (page - 1) * pageSize);
+        return json(
+          res,
+          200,
+          {
+            organizations: rows.map((row) => ({
+              ...workspaceDto(row),
+              memberCount: row.member_count,
+              subscription: {
+                plan: row.plan,
+                status: row.subscription_status,
+                seats: row.seats,
+                trialEndsAt: row.trial_ends_at,
+                currentPeriodEnd: row.current_period_end,
+                stripeCustomerId: row.stripe_customer_id || null,
+                stripeSubscriptionId: row.stripe_subscription_id || null,
+              },
+              microsoft: row.microsoft_tenant_id
+                ? {
+                    tenantId: row.microsoft_tenant_id,
+                    tenantName: row.microsoft_tenant_name,
+                    status: row.microsoft_status,
+                    senderEmail: row.sender_email,
+                  }
+                : null,
+            })),
+            pagination: {
+              page,
+              pageSize,
+              total,
+              pages: Math.max(1, Math.ceil(total / pageSize)),
+            },
+          },
+          requestId,
+        );
+      }
+      if (
+        url.pathname === "/api/platform/organizations" &&
+        req.method === "POST"
+      ) {
+        const body = await readJsonBody(req, { limit: 16384 }),
+          name = limited(body.name, 180).trim(),
+          adminEmail = limited(body.adminEmail, 180).trim().toLowerCase(),
+          plan = ["starter", "team", "business"].includes(body.plan)
+            ? body.plan
+            : "starter",
+          seats = Math.min(
+            10000,
+            Math.max(1, Number(body.seats) || seatsForPlan(plan)),
+          );
+        if (name.length < 2 || !validEmail(adminEmail))
+          return json(
+            res,
+            400,
+            {
+              error: {
+                code: "TENANT_INVALID",
+                message: "Enter a tenant name and valid administrator email.",
+              },
+            },
+            requestId,
+          );
+        const organizationId = randomUUID(),
+          invitationId = randomUUID(),
+          invitationToken = randomBytes(32).toString("base64url"),
+          organizationSlug = `${slug(name)}-${organizationId.slice(0, 8)}`,
+          expires = new Date(Date.now() + 7 * 86400000).toISOString(),
+          settings = {
+            publicUrl: signature.publicUrl || "",
+            assetBaseUrl: signature.assetBaseUrl || signature.publicUrl || "",
+            mediaBaseUrl: signature.mediaBaseUrl || signature.publicUrl || "",
+            sessionHours: signature.sessionHours || 12,
+            requireApproval: false,
+            brand: {
+              locked: false,
+              accent: "#2563eb",
+              font: "system",
+              companyName: name,
+              logoUrl: "",
+            },
+          };
+        db.exec("BEGIN IMMEDIATE");
+        try {
+          db.prepare(
+            "INSERT INTO organizations(id,name,slug,status,settings_json) VALUES (?,?,?,'active',?)",
+          ).run(
+            organizationId,
+            name,
+            organizationSlug,
+            JSON.stringify(settings),
+          );
+          db.prepare(
+            "INSERT INTO organization_subscriptions(organization_id,plan,status,seats,trial_ends_at) VALUES (?,?,'trialing',?,strftime('%Y-%m-%dT%H:%M:%fZ','now','+30 days'))",
+          ).run(organizationId, plan, seats);
+          db.prepare(
+            "INSERT INTO organization_invitations(id,organization_id,email,role,token_hash,invited_by,expires_at) VALUES (?,?,?,'admin',?,?,?)",
+          ).run(
+            invitationId,
+            organizationId,
+            adminEmail,
+            tokenHash(invitationToken),
+            owner.id,
+            expires,
+          );
+          recordApplicationAudit(
+            owner,
+            "tenant.created",
+            "organization",
+            organizationId,
+            organizationId,
+            limited(body.reason || "New customer onboarding", 500),
+            { name, adminEmail, plan, seats },
+            requestId,
+          );
+          db.exec("COMMIT");
+        } catch (error) {
+          db.exec("ROLLBACK");
+          throw error;
+        }
+        return json(
+          res,
+          201,
+          {
+            organization: {
+              id: organizationId,
+              name,
+              slug: organizationSlug,
+              status: "active",
+            },
+            adminEmail,
+            invitationUrl: `${cleanUrl(signature.publicUrl || requestBase(req))}/signature.html?invite=${encodeURIComponent(invitationToken)}`,
+            invitationExpiresAt: expires,
+          },
+          requestId,
+        );
+      }
+      const organizationMatch = url.pathname.match(
+        /^\/api\/platform\/organizations\/([^/]+)$/,
+      );
+      if (organizationMatch && req.method === "GET") {
+        const organizationId = organizationMatch[1],
+          organization = db
+            .prepare("SELECT * FROM organizations WHERE id=?")
+            .get(organizationId);
+        if (!organization)
+          return json(
+            res,
+            404,
+            { error: { code: "NOT_FOUND", message: "Tenant not found." } },
+            requestId,
+          );
+        const members = db
+            .prepare(
+              `SELECT u.id,u.email,u.display_name,m.role,m.status,m.created_at FROM organization_memberships m JOIN signature_users u ON u.id=m.user_id WHERE m.organization_id=? ORDER BY m.role,u.display_name`,
+            )
+            .all(organizationId),
+          subscription = db
+            .prepare(
+              "SELECT * FROM organization_subscriptions WHERE organization_id=?",
+            )
+            .get(organizationId),
+          microsoft = microsoftConnection(organizationId),
+          audit = db
+            .prepare(
+              `SELECT a.*,u.display_name actor_name FROM application_audit_logs a LEFT JOIN signature_users u ON u.id=a.actor_user_id WHERE a.organization_id=? ORDER BY a.created_at DESC LIMIT 50`,
+            )
+            .all(organizationId);
+        return json(
+          res,
+          200,
+          {
+            organization: workspaceDto(organization),
+            members: members.map((member) => ({
+              id: member.id,
+              email: member.email,
+              displayName: member.display_name,
+              role: member.role,
+              status: member.status,
+              createdAt: member.created_at,
+            })),
+            subscription: subscription
+              ? {
+                  ...subscriptionDto(subscription, true),
+                }
+              : null,
+            microsoft: microsoftConnectionDto(microsoft),
+            audit: audit.map(auditDto),
+          },
+          requestId,
+        );
+      }
+      const statusMatch = url.pathname.match(
+        /^\/api\/platform\/organizations\/([^/]+)\/status$/,
+      );
+      if (statusMatch && req.method === "PUT") {
+        const body = await readJsonBody(req, { limit: 8192 }),
+          status = String(body.status || ""),
+          reason = limited(body.reason, 500).trim();
+        if (!["active", "suspended"].includes(status) || reason.length < 3)
+          return json(
+            res,
+            400,
+            {
+              error: {
+                code: "TENANT_STATUS_INVALID",
+                message: "Choose a valid status and provide a reason.",
+              },
+            },
+            requestId,
+          );
+        const changed = db
+          .prepare(
+            `UPDATE organizations SET status=?,updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE id=? RETURNING id,name,status`,
+          )
+          .get(status, statusMatch[1]);
+        if (!changed)
+          return json(
+            res,
+            404,
+            { error: { code: "NOT_FOUND", message: "Tenant not found." } },
+            requestId,
+          );
+        if (status === "suspended")
+          db.prepare(
+            "DELETE FROM signature_sessions WHERE organization_id=? AND user_id NOT IN (SELECT user_id FROM application_owners WHERE status='active')",
+          ).run(changed.id);
+        recordApplicationAudit(
+          owner,
+          `tenant.${status}`,
+          "organization",
+          changed.id,
+          changed.id,
+          reason,
+          {},
+          requestId,
+        );
+        return json(res, 200, { organization: changed }, requestId);
+      }
+      const subscriptionMatch = url.pathname.match(
+        /^\/api\/platform\/organizations\/([^/]+)\/subscription$/,
+      );
+      if (subscriptionMatch && req.method === "PUT") {
+        const body = await readJsonBody(req, { limit: 8192 }),
+          plan = String(body.plan || ""),
+          status = String(body.status || ""),
+          seats = Number(body.seats),
+          reason = limited(body.reason, 500).trim();
+        if (
+          !["starter", "team", "business"].includes(plan) ||
+          !["trialing", "active", "past_due", "canceled"].includes(status) ||
+          !Number.isInteger(seats) ||
+          seats < 1 ||
+          seats > 10000 ||
+          reason.length < 3
+        )
+          return json(
+            res,
+            400,
+            {
+              error: {
+                code: "SUBSCRIPTION_INVALID",
+                message: "Choose a valid plan, status, seat count, and reason.",
+              },
+            },
+            requestId,
+          );
+        const subscription = db
+          .prepare(
+            `UPDATE organization_subscriptions SET plan=?,status=?,seats=?,stripe_customer_id=?,stripe_subscription_id=?,stripe_price_id=?,current_period_end=?,updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE organization_id=? RETURNING *`,
+          )
+          .get(
+            plan,
+            status,
+            seats,
+            limited(body.stripeCustomerId, 255) || null,
+            limited(body.stripeSubscriptionId, 255) || null,
+            limited(body.stripePriceId, 255) || null,
+            body.currentPeriodEnd || null,
+            subscriptionMatch[1],
+          );
+        if (!subscription)
+          return json(
+            res,
+            404,
+            { error: { code: "NOT_FOUND", message: "Tenant not found." } },
+            requestId,
+          );
+        recordApplicationAudit(
+          owner,
+          "subscription.updated",
+          "organization_subscription",
+          subscriptionMatch[1],
+          subscriptionMatch[1],
+          reason,
+          { plan, status, seats },
+          requestId,
+        );
+        return json(
+          res,
+          200,
+          { subscription: subscriptionDto(subscription) },
+          requestId,
+        );
+      }
+      const checkoutMatch = url.pathname.match(
+        /^\/api\/platform\/organizations\/([^/]+)\/billing\/checkout$/,
+      );
+      if (checkoutMatch && req.method === "POST") {
+        if (!billingAvailable())
+          return json(
+            res,
+            503,
+            {
+              error: {
+                code: "STRIPE_NOT_CONFIGURED",
+                message: "Stripe is not configured.",
+              },
+            },
+            requestId,
+          );
+        const body = await readJsonBody(req, { limit: 8192 }),
+          plan = String(body.plan || "starter"),
+          price = signature.stripePrices?.[plan],
+          customerEmail = limited(body.customerEmail, 180).toLowerCase(),
+          subscription = db
+            .prepare(
+              "SELECT * FROM organization_subscriptions WHERE organization_id=?",
+            )
+            .get(checkoutMatch[1]);
+        if (
+          !price ||
+          !subscription ||
+          (!subscription.stripe_customer_id && !validEmail(customerEmail))
+        )
+          return json(
+            res,
+            400,
+            {
+              error: {
+                code: "CHECKOUT_INVALID",
+                message: "Choose an available plan and customer email.",
+              },
+            },
+            requestId,
+          );
+        const base = cleanUrl(signature.publicUrl || requestBase(req)),
+          checkout = await stripe.checkout.sessions.create({
+            mode: "subscription",
+            client_reference_id: checkoutMatch[1],
+            ...(subscription.stripe_customer_id
+              ? { customer: subscription.stripe_customer_id }
+              : { customer_email: customerEmail }),
+            line_items: [{ price, quantity: 1 }],
+            allow_promotion_codes: true,
+            success_url: `${base}/platform.html?billing=success`,
+            cancel_url: `${base}/platform.html?billing=canceled`,
+            metadata: { organization_id: checkoutMatch[1], plan },
+            subscription_data: {
+              metadata: { organization_id: checkoutMatch[1], plan },
+            },
+          });
+        recordApplicationAudit(
+          owner,
+          "stripe.checkout_created",
+          "organization_subscription",
+          checkoutMatch[1],
+          checkoutMatch[1],
+          limited(body.reason || "Subscription checkout", 500),
+          { plan },
+          requestId,
+        );
+        return json(res, 201, { url: checkout.url }, requestId);
+      }
+      if (url.pathname === "/api/platform/owners" && req.method === "GET") {
+        const owners = db
+          .prepare(
+            `SELECT u.id,u.email,u.display_name,a.status,a.created_at FROM application_owners a JOIN signature_users u ON u.id=a.user_id ORDER BY u.display_name`,
+          )
+          .all();
+        return json(
+          res,
+          200,
+          {
+            owners: owners.map((item) => ({
+              id: item.id,
+              email: item.email,
+              displayName: item.display_name,
+              status: item.status,
+              createdAt: item.created_at,
+            })),
+          },
+          requestId,
+        );
+      }
+      if (url.pathname === "/api/platform/owners" && req.method === "POST") {
+        const body = await readJsonBody(req, { limit: 8192 }),
+          email = limited(body.email, 180).trim().toLowerCase(),
+          account = db
+            .prepare(
+              "SELECT id,email,display_name FROM signature_users WHERE lower(email)=lower(?)",
+            )
+            .get(email);
+        if (!account)
+          return json(
+            res,
+            404,
+            {
+              error: {
+                code: "ACCOUNT_NOT_FOUND",
+                message:
+                  "The account must exist before it can become an Application Owner.",
+              },
+            },
+            requestId,
+          );
+        db.prepare(
+          `INSERT INTO application_owners(user_id,status,granted_by) VALUES (?,'active',?) ON CONFLICT(user_id) DO UPDATE SET status='active',granted_by=excluded.granted_by,updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now')`,
+        ).run(account.id, owner.id);
+        recordApplicationAudit(
+          owner,
+          "application_owner.granted",
+          "user",
+          account.id,
+          null,
+          limited(body.reason || "Application Owner access granted", 500),
+          { email: account.email },
+          requestId,
+        );
+        return json(res, 201, { owner: account }, requestId);
+      }
+      const ownerMatch = url.pathname.match(
+        /^\/api\/platform\/owners\/([^/]+)$/,
+      );
+      if (ownerMatch && req.method === "DELETE") {
+        const body = await readJsonBody(req, { limit: 8192 }),
+          reason = limited(body.reason, 500).trim(),
+          activeOwners = db
+            .prepare(
+              "SELECT COUNT(*) count FROM application_owners WHERE status='active'",
+            )
+            .get().count;
+        if (
+          ownerMatch[1] === owner.id ||
+          activeOwners <= 1 ||
+          reason.length < 3
+        )
+          return json(
+            res,
+            409,
+            {
+              error: {
+                code: "APPLICATION_OWNER_REQUIRED",
+                message:
+                  "You cannot remove yourself or the final Application Owner. A reason is required.",
+              },
+            },
+            requestId,
+          );
+        const changed = db
+          .prepare(
+            `UPDATE application_owners SET status='disabled',updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE user_id=? AND status='active' RETURNING user_id`,
+          )
+          .get(ownerMatch[1]);
+        if (!changed)
+          return json(
+            res,
+            404,
+            {
+              error: {
+                code: "NOT_FOUND",
+                message: "Application Owner not found.",
+              },
+            },
+            requestId,
+          );
+        recordApplicationAudit(
+          owner,
+          "application_owner.revoked",
+          "user",
+          changed.user_id,
+          null,
+          reason,
+          {},
+          requestId,
+        );
+        return json(res, 200, { ok: true }, requestId);
+      }
+      if (url.pathname === "/api/platform/audit" && req.method === "GET") {
+        const rows = db
+          .prepare(
+            `SELECT a.*,u.display_name actor_name FROM application_audit_logs a LEFT JOIN signature_users u ON u.id=a.actor_user_id ORDER BY a.created_at DESC LIMIT 250`,
+          )
+          .all();
+        return json(res, 200, { audit: rows.map(auditDto) }, requestId);
+      }
+      return json(
+        res,
+        405,
+        {
+          error: { code: "METHOD_NOT_ALLOWED", message: "Method not allowed." },
+        },
+        requestId,
+      );
+    }
     if (!url.pathname.startsWith("/api/signature/")) return false;
     if (url.pathname === "/api/signature/capabilities" && req.method === "GET")
       return json(
@@ -1419,7 +2364,16 @@ function createSignaturePortal({
         {
           registration: signature.allowRegistration,
           microsoft: microsoftAvailable,
-          passwordReset: mailAvailable() || !production,
+          passwordReset:
+            mailAvailable() ||
+            Boolean(
+              db
+                .prepare(
+                  "SELECT 1 FROM organization_microsoft_connections WHERE status='connected' AND sender_email<>'' LIMIT 1",
+                )
+                .get(),
+            ) ||
+            !production,
         },
         requestId,
       );
@@ -1478,18 +2432,6 @@ function createSignaturePortal({
       url.pathname === "/api/signature/password/forgot" &&
       req.method === "POST"
     ) {
-      if (production && !mailAvailable())
-        return json(
-          res,
-          503,
-          {
-            error: {
-              code: "MAIL_NOT_CONFIGURED",
-              message: "Password recovery is temporarily unavailable.",
-            },
-          },
-          requestId,
-        );
       const body = await readJsonBody(req, { limit: 8192 }),
         account = db
           .prepare(
@@ -1508,8 +2450,17 @@ function createSignaturePortal({
             30,
           ),
           link = `${cleanUrl(signature.publicUrl || requestBase(req))}/signature.html?reset=${encodeURIComponent(token)}`;
-        if (mailAvailable())
+        const mailOrganizationId = mailOrganizationForUser(account.id);
+        if (mailAvailable(mailOrganizationId))
           await sendGraphMail(
+            mailOrganizationId,
+            account.email,
+            "Reset your Signify password",
+            `<p>A password reset was requested for your Signify account.</p><p><a href="${link}">Reset password</a></p><p>This link expires in 30 minutes.</p>`,
+          );
+        else if (mailAvailable())
+          await sendGraphMail(
+            null,
             account.email,
             "Reset your Signify password",
             `<p>A password reset was requested for your Signify account.</p><p><a href="${link}">Reset password</a></p><p>This link expires in 30 minutes.</p>`,
@@ -1777,8 +2728,12 @@ function createSignaturePortal({
               24 * 60,
             ),
             link = `${cleanUrl(signature.publicUrl || requestBase(req))}/signature.html?verify=${encodeURIComponent(verificationToken)}`;
-          if (mailAvailable())
+          const mailOrganizationId = mailOrganizationForUser(
+            existingAccount.id,
+          );
+          if (mailAvailable(mailOrganizationId))
             await sendGraphMail(
+              mailOrganizationId,
               email,
               "Verify your Signify email",
               `<p>Verify your email to activate your Signify workspace.</p><p><a href="${link}">Verify email</a></p><p>This link expires in 24 hours.</p>`,
@@ -1866,6 +2821,7 @@ function createSignaturePortal({
       });
       if (mailAvailable())
         await sendGraphMail(
+          null,
           email,
           "Verify your Signify email",
           `<p>Verify your email to activate your Signify workspace.</p><p><a href="${link}">Verify email</a></p><p>This link expires in 24 hours.</p>`,
@@ -1884,10 +2840,22 @@ function createSignaturePortal({
       const body = await readJsonBody(req, { limit: 8192 }),
         email = String(body.email || "")
           .trim()
-          .toLowerCase(),
+          .toLowerCase();
+      let row = db
+        .prepare(
+          `${memberSelect} WHERE lower(u.email)=lower(?) AND u.status='active' AND m.status='active' AND o.status='active' ORDER BY m.created_at LIMIT 1`,
+        )
+        .get(email);
+      if (!row)
         row = db
           .prepare(
-            `${memberSelect} WHERE lower(u.email)=lower(?) AND u.status='active' AND m.status='active' AND o.status='active' ORDER BY m.created_at LIMIT 1`,
+            `${memberSelect} JOIN application_owners ao ON ao.user_id=u.id AND ao.status='active' WHERE lower(u.email)=lower(?) AND u.status='active' ORDER BY m.created_at LIMIT 1`,
+          )
+          .get(email);
+      if (!row)
+        row = db
+          .prepare(
+            `SELECT u.id,u.email,u.password_hash,u.display_name,u.role,u.status,u.created_at,u.updated_at,u.last_login_at,u.email_verified_at,u.signature_json,NULL AS membership_role,NULL AS membership_status,NULL AS organization_id,'' AS organization_name,'' AS organization_slug,'active' AS organization_status,'{}' AS organization_settings FROM signature_users u JOIN application_owners ao ON ao.user_id=u.id AND ao.status='active' WHERE lower(u.email)=lower(?) AND u.status='active' LIMIT 1`,
           )
           .get(email);
       if (!row || !verifyPassword(body.password, row.password_hash))
@@ -1915,7 +2883,19 @@ function createSignaturePortal({
           requestId,
         );
       const session = createSession(req, row);
-      recordAudit(session.user, "session.login", "user", session.user.id);
+      if (session.user.organizationId)
+        recordAudit(session.user, "session.login", "user", session.user.id);
+      else
+        recordApplicationAudit(
+          session.user,
+          "session.login",
+          "user",
+          session.user.id,
+          null,
+          "Application Owner login",
+          {},
+          requestId,
+        );
       return json(res, 200, { user: session.user }, requestId, session.header);
     }
     if (url.pathname === "/api/signature/logout" && req.method === "POST") {
@@ -2017,127 +2997,132 @@ function createSignaturePortal({
           capabilities: {
             microsoft: microsoftAvailable,
             directorySync: Boolean(
-              signature.microsoftClientId &&
-              signature.microsoftClientSecret &&
-              signature.microsoftTenantId,
+              microsoftAvailable &&
+              microsoftConnection(user.organizationId, true),
             ),
-            mail: mailAvailable(),
-            billing: billingAvailable(),
-            billingPlans: Object.entries(signature.stripePrices || {})
-              .filter(([, price]) => Boolean(price))
-              .map(([plan]) => plan),
+            mail: mailAvailable(user.organizationId),
           },
         },
         requestId,
       );
     }
     if (
-      url.pathname === "/api/signature/billing/checkout" &&
-      req.method === "POST"
+      url.pathname === "/api/signature/microsoft-connection" &&
+      req.method === "PUT"
     ) {
       requireAdmin(user);
-      if (!billingAvailable())
-        return json(
-          res,
-          503,
-          {
-            error: {
-              code: "STRIPE_NOT_CONFIGURED",
-              message: "Billing is not configured.",
-            },
-          },
-          requestId,
-        );
       const body = await readJsonBody(req, { limit: 8192 }),
-        plan = String(body.plan || "starter"),
-        price = signature.stripePrices?.[plan];
-      if (!price)
-        return json(
-          res,
-          400,
-          {
-            error: {
-              code: "PLAN_INVALID",
-              message: "Choose an available plan.",
-            },
-          },
-          requestId,
-        );
-      const subscription = db
-          .prepare(
-            "SELECT * FROM organization_subscriptions WHERE organization_id=?",
-          )
-          .get(user.organizationId),
-        base = publicBase(req, user),
-        checkout = await stripe.checkout.sessions.create({
-          mode: "subscription",
-          client_reference_id: user.organizationId,
-          ...(subscription?.stripe_customer_id
-            ? { customer: subscription.stripe_customer_id }
-            : { customer_email: user.email }),
-          line_items: [{ price, quantity: 1 }],
-          allow_promotion_codes: true,
-          success_url: `${base}/admin.html?billing=success#settings`,
-          cancel_url: `${base}/admin.html?billing=canceled#settings`,
-          metadata: { organization_id: user.organizationId, plan },
-          subscription_data: {
-            metadata: { organization_id: user.organizationId, plan },
-          },
-        });
-      recordAudit(
-        user,
-        "billing.checkout_created",
-        "organization",
-        user.organizationId,
-        {
-          plan,
-        },
-      );
-      return json(res, 201, { url: checkout.url }, requestId);
-    }
-    if (
-      url.pathname === "/api/signature/billing/portal" &&
-      req.method === "POST"
-    ) {
-      requireAdmin(user);
-      if (!stripe)
-        return json(
-          res,
-          503,
-          {
-            error: {
-              code: "STRIPE_NOT_CONFIGURED",
-              message: "Billing is not configured.",
-            },
-          },
-          requestId,
-        );
-      const subscription = db
-        .prepare(
-          "SELECT * FROM organization_subscriptions WHERE organization_id=?",
-        )
-        .get(user.organizationId);
-      if (!subscription?.stripe_customer_id)
+        senderEmail = limited(body.senderEmail, 180).trim().toLowerCase(),
+        connection = microsoftConnection(user.organizationId, true);
+      if (!connection)
         return json(
           res,
           409,
           {
             error: {
-              code: "BILLING_CUSTOMER_REQUIRED",
-              message: "Start a paid plan before opening billing management.",
+              code: "MICROSOFT_TENANT_NOT_CONNECTED",
+              message:
+                "Connect Microsoft 365 before choosing a sender mailbox.",
             },
           },
           requestId,
         );
-      const portal = await stripe.billingPortal.sessions.create({
-        customer: subscription.stripe_customer_id,
-        return_url: `${publicBase(req, user)}/admin.html#settings`,
-      });
-      return json(res, 201, { url: portal.url }, requestId);
+      if (!validEmail(senderEmail))
+        return json(
+          res,
+          400,
+          {
+            error: {
+              code: "MICROSOFT_SENDER_INVALID",
+              message: "Enter a valid Microsoft 365 sender email.",
+            },
+          },
+          requestId,
+        );
+      const { token } = await graphAppToken(user.organizationId),
+        response = await fetchWithRetry(
+          `https://graph.microsoft.com/v1.0/users/${encodeURIComponent(senderEmail)}?$select=id,mail,userPrincipalName`,
+          { headers: { Authorization: `Bearer ${token}` } },
+        );
+      if (!response.ok)
+        return json(
+          res,
+          400,
+          {
+            error: {
+              code: "MICROSOFT_SENDER_NOT_FOUND",
+              message: "Microsoft Graph could not access that sender mailbox.",
+            },
+          },
+          requestId,
+        );
+      db.prepare(
+        `UPDATE organization_microsoft_connections SET sender_email=?,last_verified_at=strftime('%Y-%m-%dT%H:%M:%fZ','now'),last_error='',updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE organization_id=?`,
+      ).run(senderEmail, user.organizationId);
+      recordAudit(
+        user,
+        "microsoft.sender_updated",
+        "microsoft_tenant",
+        connection.tenant_id,
+        { senderEmail },
+      );
+      return json(
+        res,
+        200,
+        {
+          microsoft: microsoftConnectionDto(
+            microsoftConnection(user.organizationId),
+          ),
+        },
+        requestId,
+      );
+    }
+    if (
+      url.pathname === "/api/signature/microsoft-connection" &&
+      req.method === "DELETE"
+    ) {
+      requireAdmin(user);
+      const body = await readJsonBody(req, { limit: 8192 }),
+        reason = limited(body.reason, 500).trim(),
+        connection = microsoftConnection(user.organizationId);
+      if (!connection)
+        return json(
+          res,
+          404,
+          {
+            error: {
+              code: "NOT_FOUND",
+              message: "Microsoft 365 is not connected.",
+            },
+          },
+          requestId,
+        );
+      if (reason.length < 3)
+        return json(
+          res,
+          400,
+          {
+            error: {
+              code: "REASON_REQUIRED",
+              message: "Provide a reason for disconnecting Microsoft 365.",
+            },
+          },
+          requestId,
+        );
+      db.prepare(
+        "DELETE FROM organization_microsoft_connections WHERE organization_id=?",
+      ).run(user.organizationId);
+      recordAudit(
+        user,
+        "microsoft.disconnected",
+        "microsoft_tenant",
+        connection.tenant_id,
+        { reason },
+      );
+      return json(res, 200, { ok: true }, requestId);
     }
     if (
       !["GET", "HEAD", "OPTIONS"].includes(req.method) &&
-      !url.pathname.startsWith("/api/signature/billing/") &&
       url.pathname !== "/api/signature/admin-config"
     )
       requireSubscription(user);
@@ -2146,7 +3131,7 @@ function createSignaturePortal({
       req.method === "POST"
     ) {
       requireAdmin(user);
-      if (production && !mailAvailable())
+      if (production && !mailAvailable(user.organizationId))
         return json(
           res,
           503,
@@ -2199,8 +3184,9 @@ function createSignaturePortal({
         expires,
       );
       const link = `${publicBase(req, user)}/signature.html?invite=${encodeURIComponent(token)}`;
-      if (mailAvailable())
+      if (mailAvailable(user.organizationId))
         await sendGraphMail(
+          user.organizationId,
           email,
           `Join ${workspaceRow(user).name} on Signify`,
           `<p>You were invited to manage your email signature in ${workspaceRow(user).name}.</p><p><a href="${link}">Accept invitation</a></p><p>This invitation expires in 7 days.</p>`,
@@ -3213,7 +4199,7 @@ function createSignaturePortal({
         updated = [],
         skipped = [],
         errors = [];
-      if (sendEmail && !mailAvailable())
+      if (sendEmail && !mailAvailable(user.organizationId))
         return json(
           res,
           503,
@@ -3261,6 +4247,7 @@ function createSignaturePortal({
               const target = userDto(memberById(user.organizationId, row.id)),
                 rendered = await renderSignature(req, target, target.signature);
               await sendGraphMail(
+                user.organizationId,
                 target.email,
                 "Your email signature is ready",
                 installEmailBody(rendered.html),
@@ -3348,7 +4335,7 @@ function createSignaturePortal({
       ).run(runId, user.organizationId, user.id);
       let transactionStarted = false;
       try {
-        const token = await graphAppToken(),
+        const { token } = await graphAppToken(user.organizationId),
           people = (await graphDirectoryUsers(token)).filter(
             (item) => item.assignedLicenses?.length,
           );
@@ -3417,6 +4404,9 @@ function createSignaturePortal({
         db.prepare(
           `UPDATE directory_sync_runs SET status='completed',users_seen=?,users_added=?,completed_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE id=?`,
         ).run(people.length, added, runId);
+        db.prepare(
+          `UPDATE organization_microsoft_connections SET last_sync_at=strftime('%Y-%m-%dT%H:%M:%fZ','now'),last_verified_at=strftime('%Y-%m-%dT%H:%M:%fZ','now'),last_error='',updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE organization_id=?`,
+        ).run(user.organizationId);
         recordAudit(
           user,
           "directory.synced",
@@ -3432,6 +4422,9 @@ function createSignaturePortal({
         db.prepare(
           `UPDATE directory_sync_runs SET status='failed',error_message=?,completed_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE id=?`,
         ).run(String(error.message).slice(0, 500), runId);
+        db.prepare(
+          `UPDATE organization_microsoft_connections SET last_error=?,updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE organization_id=?`,
+        ).run(String(error.message).slice(0, 500), user.organizationId);
         throw error;
       }
     }
@@ -3440,7 +4433,7 @@ function createSignaturePortal({
       req.method === "POST"
     ) {
       requireEditor(user);
-      if (!mailAvailable())
+      if (!mailAvailable(user.organizationId))
         return json(
           res,
           503,
@@ -3468,6 +4461,7 @@ function createSignaturePortal({
           requestId,
         );
       await sendGraphMail(
+        user.organizationId,
         target.email,
         "Your email signature is ready to install",
         installEmailBody(rendered.html),
@@ -3477,7 +4471,7 @@ function createSignaturePortal({
     }
     if (url.pathname === "/api/signature/send" && req.method === "POST") {
       requireAdmin(user);
-      if (!mailAvailable())
+      if (!mailAvailable(user.organizationId))
         return json(
           res,
           503,
@@ -3504,6 +4498,7 @@ function createSignaturePortal({
         rendered = await renderSignature(req, targetUser, targetUser.signature),
         mail = installEmailBody(rendered.html);
       await sendGraphMail(
+        user.organizationId,
         targetUser.email,
         "Your email signature is ready",
         mail,
@@ -3651,18 +4646,14 @@ function createSignaturePortal({
           stats,
           audit,
           lastDirectorySync: sync || null,
-          billing: {
-            available: billingAvailable(),
-            plans: Object.entries(signature.stripePrices || {})
-              .filter(([, price]) => Boolean(price))
-              .map(([plan]) => plan),
-          },
           integrations: {
-            mail: mailAvailable(),
+            mail: mailAvailable(user.organizationId),
             microsoftDirectory: Boolean(
-              signature.microsoftClientId &&
-              signature.microsoftClientSecret &&
-              signature.microsoftTenantId,
+              microsoftAvailable &&
+              microsoftConnection(user.organizationId, true),
+            ),
+            microsoft: microsoftConnectionDto(
+              microsoftConnection(user.organizationId),
             ),
           },
           readiness: {
@@ -3689,9 +4680,8 @@ function createSignaturePortal({
                 id: "microsoft",
                 label: "Microsoft 365 connected",
                 ok: Boolean(
-                  signature.microsoftClientId &&
-                  signature.microsoftClientSecret &&
-                  signature.microsoftTenantId,
+                  microsoftAvailable &&
+                  microsoftConnection(user.organizationId, true),
                 ),
               },
             ],
@@ -3787,6 +4777,39 @@ function seed(db, signature = {}) {
       user.role,
       user.status,
       user.signature_json,
+    );
+  if (!db.prepare("SELECT 1 FROM application_owners LIMIT 1").get()) {
+    let owner = db
+      .prepare(
+        `SELECT id FROM signature_users WHERE lower(email)=lower(?) LIMIT 1`,
+      )
+      .get(signature.applicationOwnerEmail || signature.bootstrapEmail || "");
+    if (!owner && signature.allowDefaultAdmin)
+      owner = db
+        .prepare(
+          `SELECT u.id FROM signature_users u JOIN organization_memberships m ON m.user_id=u.id WHERE m.role='admin' ORDER BY u.created_at LIMIT 1`,
+        )
+        .get();
+    if (owner)
+      db.prepare(
+        "INSERT INTO application_owners(user_id,status) VALUES (?,'active')",
+      ).run(owner.id);
+  }
+  if (
+    signature.microsoftTenantId &&
+    !db
+      .prepare(
+        "SELECT 1 FROM organization_microsoft_connections WHERE organization_id=?",
+      )
+      .get(organization.id)
+  )
+    db.prepare(
+      `INSERT INTO organization_microsoft_connections(organization_id,tenant_id,tenant_name,status,sender_email,consented_at,last_verified_at) VALUES (?,?,?,'connected',?,strftime('%Y-%m-%dT%H:%M:%fZ','now'),strftime('%Y-%m-%dT%H:%M:%fZ','now'))`,
+    ).run(
+      organization.id,
+      signature.microsoftTenantId,
+      "Legacy Microsoft 365 tenant",
+      signature.microsoftSenderEmail || "",
     );
   db.prepare(
     `UPDATE signature_templates SET organization_id=? WHERE organization_id IS NULL`,
