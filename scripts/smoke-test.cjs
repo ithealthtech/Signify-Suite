@@ -303,6 +303,23 @@ async function main() {
       result.response.status === 200 && result.body?.database === "ready",
       "health check failed",
     );
+    result = await request(baseUrl, "/api/live");
+    assert(
+      result.response.status === 200 && result.body?.status === "ok",
+      "liveness check failed",
+    );
+    result = await request(baseUrl, "/api/ready");
+    assert(
+      result.response.status === 200 && result.body?.database === "ready",
+      "readiness check failed",
+    );
+    result = await request(baseUrl, "/api/metrics");
+    assert(
+      result.response.status === 200 &&
+        result.body?.requests >= 3 &&
+        Number.isFinite(result.body?.averageDurationMs),
+      "runtime metrics check failed",
+    );
     assert(
       result.response.headers.get("content-security-policy") &&
         !result.response.headers.has("strict-transport-security"),

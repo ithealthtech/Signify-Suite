@@ -211,7 +211,14 @@ function createApplication(options = {}) {
     fetchImpl: options.fetchImpl,
     stripeFactory: options.stripeFactory,
   });
-  const rateBuckets = new Map();
+  const rateBuckets = new Map(),
+    metrics = {
+      startedAt: new Date().toISOString(),
+      requests: 0,
+      errors: 0,
+      durationMs: 0,
+      status: { success: 0, redirect: 0, clientError: 0, serverError: 0 },
+    };
   function clientIp(req) {
     if (config.trustProxy) {
       const forwarded = String(req.headers["x-forwarded-for"] || "")
@@ -273,7 +280,16 @@ function createApplication(options = {}) {
     ))
       res.setHeader(name, value);
     res.setHeader("X-Request-Id", requestId);
-    res.once("finish", () =>
+    res.once("finish", () => {
+      const durationMs = Date.now() - startedAt;
+      metrics.requests += 1;
+      metrics.durationMs += durationMs;
+      if (res.statusCode >= 500) {
+        metrics.status.serverError += 1;
+        metrics.errors += 1;
+      } else if (res.statusCode >= 400) metrics.status.clientError += 1;
+      else if (res.statusCode >= 300) metrics.status.redirect += 1;
+      else metrics.status.success += 1;
       log(
         res.statusCode >= 500
           ? "error"
@@ -286,11 +302,11 @@ function createApplication(options = {}) {
           method: req.method,
           path: String(req.url || "").split("?")[0],
           status: res.statusCode,
-          durationMs: Date.now() - startedAt,
+          durationMs,
           ip: clientIp(req),
         },
-      ),
-    );
+      );
+    });
     try {
       const url = new URL(req.url || "/", "http://signature.local");
       const retryAfter = checkRateLimit(req, url.pathname);
@@ -307,7 +323,61 @@ function createApplication(options = {}) {
           requestId,
           { "Retry-After": String(retryAfter) },
         );
-      if (url.pathname === "/api/health") {
+      if (url.pathname === "/api/live") {
+        if (req.method !== "GET")
+          return json(
+            res,
+            405,
+            {
+              error: {
+                code: "METHOD_NOT_ALLOWED",
+                message: "Method not allowed.",
+              },
+            },
+            requestId,
+            { Allow: "GET" },
+          );
+        return json(
+          res,
+          200,
+          {
+            status: "ok",
+            service: "signify-creator",
+            time: new Date().toISOString(),
+          },
+          requestId,
+        );
+      }
+      if (url.pathname === "/api/metrics") {
+        if (req.method !== "GET")
+          return json(
+            res,
+            405,
+            {
+              error: {
+                code: "METHOD_NOT_ALLOWED",
+                message: "Method not allowed.",
+              },
+            },
+            requestId,
+            { Allow: "GET" },
+          );
+        return json(
+          res,
+          200,
+          {
+            startedAt: metrics.startedAt,
+            requests: metrics.requests,
+            errors: metrics.errors,
+            averageDurationMs: metrics.requests
+              ? Number((metrics.durationMs / metrics.requests).toFixed(2))
+              : 0,
+            status: metrics.status,
+          },
+          requestId,
+        );
+      }
+      if (["/api/health", "/api/ready"].includes(url.pathname)) {
         if (req.method !== "GET")
           return json(
             res,
@@ -387,6 +457,20 @@ function startServer(options = {}) {
   server.requestTimeout = 30000;
   server.headersTimeout = 15000;
   server.keepAliveTimeout = 5000;
+  server.once("error", async (error) => {
+    console.error(
+      JSON.stringify({
+        time: new Date().toISOString(),
+        level: "error",
+        event: "server.start_failed",
+        code: error.code || "LISTEN_FAILED",
+        message: error.message,
+      }),
+    );
+    await jobs.stop();
+    application.db.close();
+    process.exitCode = 1;
+  });
   server.listen(application.config.port, application.config.host, () =>
     console.log(
       JSON.stringify({
@@ -397,10 +481,14 @@ function startServer(options = {}) {
       }),
     ),
   );
+  let shuttingDown = false;
   async function shutdown(signal) {
+    if (shuttingDown) return;
+    shuttingDown = true;
     console.log(`${signal} received; closing Signify Creator.`);
     const forceClose = setTimeout(() => server.closeAllConnections(), 10000);
     forceClose.unref();
+    server.closeIdleConnections();
     server.close(async () => {
       clearTimeout(forceClose);
       await jobs.stop();
