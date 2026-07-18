@@ -1,5 +1,38 @@
 # Changelog
 
+## 0.4.0 - 2026-07-18
+
+### Added
+
+- Durable SQLite background jobs with atomic claims, retry backoff,
+  deduplication, stale-lock recovery, and graceful worker shutdown.
+- Tenant media quotas, atomic media writes, immutable caching, and conservative
+  cleanup for aged unreferenced assets.
+- Dedicated liveness, readiness, and aggregate runtime metrics endpoints.
+- Query-plan, job, media, frontend client, SBOM, and service-level test suites.
+- CycloneDX production SBOM and a production operations runbook.
+
+### Changed
+
+- Consolidated browser request, CSRF, escaping, initials, and exact shared style
+  primitives across all three portals without changing the login design.
+- Extracted authentication security, authorization, validation, HTTP response,
+  media, and job services from the backend portal module.
+- Added SQLite indexes for email lookup, workspace selection, approval queues,
+  tenant pagination, and Application Owner checks.
+- Added GET request coalescing, bounded browser request timeouts, and cancellation
+  for superseded signature previews.
+- Hardened listener startup diagnostics and idempotent HTTP/job/database
+  shutdown.
+
+### Security
+
+- Production release artifacts use an explicit static asset allowlist and reject
+  runtime data, local configuration, databases, logs, backups, archives, and
+  populated provider secrets.
+- Tenant storage identifiers are validated before filesystem access, and
+  production dependency auditing reports no known vulnerabilities.
+
 ## 0.3.1 - 2026-07-18
 
 ### Security
