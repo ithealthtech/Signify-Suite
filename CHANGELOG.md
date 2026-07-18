@@ -1,15 +1,6 @@
 # Changelog
 
-## Unreleased
-
-- Added an Application Owner first-time setup and readiness workflow.
-- Added encrypted Microsoft and Stripe credential storage with atomic key rotation.
-- Added Microsoft application credential, tenant, Graph, and permission validation.
-- Added Stripe account discovery, recurring-price mapping, automatic webhook registration, and sandbox-ready onboarding.
-- Added Stripe billing portal, provider-backed plan changes, cancellation, and reactivation controls.
-- Added live read-only provider acceptance verification and expanded regression coverage.
-
-## Unreleased
+## 0.3.0-rc.1 - 2026-07-18
 
 ### Added
 
@@ -17,12 +8,22 @@
 - Application Owner control plane for tenant lifecycle, onboarding invitations, subscriptions, Stripe checkout, owner grants, and global audit history.
 - Per-tenant Microsoft 365 admin consent, tenant verification, sender validation, directory sync status, and tenant-bound Microsoft sign-in.
 - Offline Application Owner recovery command.
+- Application Owner first-time setup and readiness workflow.
+- Encrypted Microsoft and Stripe credential storage with atomic key rotation.
+- Microsoft application, tenant, Graph, and permission validation.
+- Stripe account discovery, recurring-price mapping, automatic webhook registration, and sandbox-ready onboarding.
+- Stripe billing portal, provider-backed plan changes, cancellation, and reactivation controls.
+- Live read-only provider acceptance verification and expanded regression coverage.
 
 ### Changed
 
 - Removed Stripe Checkout and customer portal controls and routes from tenant administration.
 - Routed Graph directory and mail operations through each organization's registered Microsoft tenant.
 - Preserved the original login page and existing signature, campaign, banner, approval, analytics, and rollout features.
+
+### Fixed
+
+- Included the documented Tenant Admin reset command in production artifacts.
 
 ## 0.2.0 - 2026-07-17
 

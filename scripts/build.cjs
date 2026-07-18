@@ -25,6 +25,7 @@ const root = path.join(__dirname, ".."),
     "public",
     "scripts/backup.cjs",
     "scripts/grant-application-owner.cjs",
+    "scripts/reset-signature-admin.cjs",
     "scripts/rotate-integration-credentials.cjs",
     "scripts/verify-provider-integrations.cjs",
     "start-production.cmd",
@@ -34,7 +35,12 @@ for (const entry of entries) {
   if (!fs.existsSync(path.join(root, entry)))
     throw new Error(`Required release file is missing: ${entry}`);
 }
-fs.rmSync(destination, { recursive: true, force: true });
+fs.rmSync(destination, {
+  recursive: true,
+  force: true,
+  maxRetries: 5,
+  retryDelay: 250,
+});
 fs.mkdirSync(destination, { recursive: true });
 for (const entry of entries) {
   const source = path.join(root, entry),
