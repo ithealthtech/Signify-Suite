@@ -1,13 +1,13 @@
 {
   "schemaVersion": 1,
-  "capturedAt": "2026-07-18T09:05:47.046Z",
+  "capturedAt": "2026-07-18T09:09:45.889Z",
   "runtime": {
     "node": "v24.18.0",
     "platform": "win32",
     "arch": "x64"
   },
   "source": {
-    "measuredBytes": 448370,
+    "measuredBytes": 449923,
     "files": [
       {
         "path": "server.cjs",
@@ -56,13 +56,13 @@
       },
       {
         "path": "signature.js",
-        "bytes": 27242,
-        "lines": 856
+        "bytes": 27599,
+        "lines": 865
       },
       {
         "path": "signify-shared.js",
-        "bytes": 1768,
-        "lines": 69
+        "bytes": 2964,
+        "lines": 102
       },
       {
         "path": "admin.css",
@@ -97,24 +97,24 @@
     ]
   },
   "production": {
-    "artifactBytes": 13534097,
+    "artifactBytes": 13535739,
     "dependencyCount": 63
   },
   "tests": {
     "durationMs": {
-      "setup": 1259.293,
-      "smoke": 1929.281,
-      "build": 178.106
+      "setup": 1280.537,
+      "smoke": 1857.403,
+      "build": 180.165
     }
   },
   "server": {
-    "initializationMs": 66.526,
+    "initializationMs": 70.009,
     "healthRequests": 100,
     "healthLatencyMs": {
-      "min": 0.483,
-      "p50": 15.472,
-      "p95": 16.238,
-      "max": 16.949
+      "min": 0.485,
+      "p50": 15.503,
+      "p95": 16.326,
+      "max": 16.94
     }
   }
 }

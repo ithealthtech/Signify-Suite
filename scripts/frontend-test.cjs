@@ -1,0 +1,75 @@
+"use strict";
+
+const assert = require("node:assert/strict");
+const fs = require("node:fs");
+const path = require("node:path");
+const vm = require("node:vm");
+
+async function main() {
+  let requests = 0,
+    mode = "success";
+  const context = {
+    AbortController,
+    clearTimeout,
+    document: {
+      cookie: "sig_csrf=csrf-token",
+      querySelector: () => null,
+      querySelectorAll: () => [],
+    },
+    fetch: (_path, options) => {
+      requests += 1;
+      if (mode === "timeout")
+        return new Promise((_resolve, reject) =>
+          options.signal.addEventListener("abort", () =>
+            reject(new DOMException("Aborted", "AbortError")),
+          ),
+        );
+      const ok = mode !== "error";
+      return Promise.resolve({
+        ok,
+        status: ok ? 200 : 409,
+        json: async () =>
+          ok
+            ? { value: 42 }
+            : { error: { code: "CONFLICT", message: "Conflict" } },
+      });
+    },
+    setTimeout,
+    window: {},
+  };
+  vm.runInNewContext(
+    fs.readFileSync(path.join(__dirname, "..", "signify-shared.js"), "utf8"),
+    context,
+  );
+  const { api } = context.window.Signify,
+    [first, second] = await Promise.all([api("/same"), api("/same")]);
+  assert.equal(first.value, 42);
+  assert.equal(second.value, 42);
+  assert.equal(requests, 1);
+  await api("/same");
+  assert.equal(requests, 2);
+  await api("/write", { method: "POST", body: "{}" });
+  assert.equal(requests, 3);
+
+  mode = "error";
+  await assert.rejects(
+    api("/error"),
+    (error) =>
+      error.message === "Conflict" &&
+      error.status === 409 &&
+      error.code === "CONFLICT",
+  );
+  mode = "timeout";
+  await assert.rejects(
+    api("/slow", { timeoutMs: 10 }),
+    (error) => error.code === "REQUEST_TIMEOUT",
+  );
+  console.log(
+    "Frontend tests passed: GET deduplication, write isolation, structured errors, and timeouts",
+  );
+}
+
+main().catch((error) => {
+  console.error(error);
+  process.exitCode = 1;
+});

@@ -34,6 +34,7 @@ let state = {
   dirty: false,
   previewTimer: null,
   previewSequence: 0,
+  previewController: null,
 };
 
 function toast(message) {
@@ -300,14 +301,19 @@ function renderWorkflow() {
 }
 function schedulePreview(delay = 220) {
   clearTimeout(state.previewTimer);
+  state.previewController?.abort();
   state.previewTimer = setTimeout(updatePreview, delay);
 }
 async function updatePreview() {
-  const sequence = ++state.previewSequence;
+  const sequence = ++state.previewSequence,
+    controller = new AbortController();
+  state.previewController?.abort();
+  state.previewController = controller;
   state.signature = collectForm();
   try {
     const rendered = await api("/api/signature/preview", {
       method: "POST",
+      signal: controller.signal,
       body: JSON.stringify({
         userId: state.selectedUserId,
         signature: state.signature,
@@ -321,9 +327,12 @@ async function updatePreview() {
     renderWorkflow();
     return true;
   } catch (error) {
+    if (error.name === "AbortError") return false;
     if (sequence === state.previewSequence)
       els.preview.innerHTML = `<span class="loading">${escapeHtml(error.message)}</span>`;
     return false;
+  } finally {
+    if (state.previewController === controller) state.previewController = null;
   }
 }
 
