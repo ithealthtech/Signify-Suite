@@ -1,5 +1,13 @@
 # Changelog
 
+## Unreleased
+
+### Changed
+
+- Setup now detects absolute application, persistent-storage, database, backup,
+  host, port, proxy, and public URL values from common managed Node.js hosting
+  environments while retaining explicit environment overrides.
+
 ## 0.3.0-rc.2 - 2026-07-18
 
 ### Added

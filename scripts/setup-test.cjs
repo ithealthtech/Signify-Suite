@@ -7,7 +7,7 @@ const path = require("node:path");
 const { spawnSync } = require("node:child_process");
 const { parseEnv } = require("node:util");
 const { DatabaseSync } = require("node:sqlite");
-const { validateNodeVersion } = require("./setup.cjs");
+const { detectEnvironment, validateNodeVersion } = require("./setup.cjs");
 
 const root = path.join(__dirname, ".."),
   temporary = fs.mkdtempSync(path.join(os.tmpdir(), "signify-setup-test-")),
@@ -53,6 +53,56 @@ try {
   assert.throws(() => validateNodeVersion("22.12.0"), /22\.13\.0 or newer/);
   assert.doesNotThrow(() => validateNodeVersion("22.13.0"));
   assert.doesNotThrow(() => validateNodeVersion("24.0.0"));
+
+  const localDetection = detectEnvironment({}, temporary);
+  assert.equal(localDetection.HOST, "127.0.0.1");
+  assert.equal(localDetection.PORT, "4173");
+  assert.equal(
+    localDetection.DATABASE_PATH,
+    path.join(temporary, "data", "signify-creator.db"),
+  );
+  assert.equal(localDetection.BACKUP_DIR, path.join(temporary, "backups"));
+
+  const volume = path.join(temporary, "persistent-volume"),
+    hostedDetection = detectEnvironment(
+      {
+        PORT: "8080",
+        WEBSITE_HOSTNAME: "signify.examplehost.com",
+        SIGNIFY_STORAGE_ROOT: volume,
+      },
+      temporary,
+    );
+  assert.equal(hostedDetection.HOST, "0.0.0.0");
+  assert.equal(hostedDetection.PORT, "8080");
+  assert.equal(hostedDetection.TRUST_PROXY, "true");
+  assert.equal(
+    hostedDetection.SIGNIFY_PUBLIC_URL,
+    "https://signify.examplehost.com",
+  );
+  assert.equal(
+    hostedDetection.DATABASE_PATH,
+    path.join(volume, "data", "signify-creator.db"),
+  );
+  assert.equal(hostedDetection.BACKUP_DIR, path.join(volume, "backups"));
+
+  const explicitDatabase = path.join(temporary, "custom", "database.db"),
+    explicitDetection = detectEnvironment(
+      {
+        DATABASE_PATH: explicitDatabase,
+        BACKUP_DIR: path.join(temporary, "custom-backups"),
+        HOST: "10.0.0.8",
+        PORT: "9000",
+        SIGNIFY_PUBLIC_URL: "https://explicit.example.com/",
+      },
+      temporary,
+    );
+  assert.equal(explicitDetection.DATABASE_PATH, explicitDatabase);
+  assert.equal(explicitDetection.HOST, "10.0.0.8");
+  assert.equal(explicitDetection.PORT, "9000");
+  assert.equal(
+    explicitDetection.SIGNIFY_PUBLIC_URL,
+    "https://explicit.example.com",
+  );
 
   let result = run();
   assert.equal(result.status, 0, result.stderr || result.stdout);

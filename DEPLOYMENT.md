@@ -15,6 +15,12 @@ storage, generates credentials, creates `.env.local`, runs migrations, and
 creates the first Application Owner. Never place production secrets in source
 control.
 
+The installer automatically resolves absolute application, database, and
+backup paths. It recognizes common Azure, Railway, Render, Hostinger, and Replit
+domain and volume variables. Set `SIGNIFY_STORAGE_ROOT` when the provider
+exposes a durable volume under a different variable; explicit `DATABASE_PATH`
+and `BACKUP_DIR` values override all detection.
+
 Hosting panels can provide configuration without a local environment file:
 
 ```powershell
