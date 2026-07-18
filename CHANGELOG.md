@@ -1,5 +1,92 @@
 # Changelog
 
+## 0.3.0 - 2026-07-18
+
+Signify Creator 0.3.0 promotes the multi-tenant control plane, guided provider
+onboarding, and self-hosted Node.js installer from the release-candidate line.
+
+### Application control plane
+
+- Added explicit Application Owner, Tenant Admin, and End User access tiers.
+- Added an Application Owner interface for tenant creation, onboarding links,
+  suspension and restoration, plan and seat management, owner grants, provider
+  health, and global audit history.
+- Restricted Stripe configuration, Checkout, billing portal, plan changes,
+  cancellation, and reactivation to Application Owners.
+- Preserved tenant-scoped signature design, campaigns, banner overlays,
+  approvals, analytics, directory sync, and rollout workflows.
+
+### Microsoft 365
+
+- Added per-tenant Microsoft administrator consent, tenant verification,
+  connection health, sender validation, and tenant-bound directory and mail
+  operations.
+- Added multi-tenant Microsoft sign-in resolution so authenticated identities
+  are matched only to the connected Signify tenant.
+- Added application credential, home-tenant, Microsoft Graph, and required
+  permission validation.
+- Hardened callbacks with browser-bound, expiring, one-time state, PKCE S256,
+  nonce verification, cancellation handling, tenant-session matching, and local
+  malformed-code rejection.
+
+### Stripe
+
+- Added guided test/live account verification and recurring-price discovery.
+- Added Signify plan mapping, signed webhook endpoint creation and reuse, test
+  Checkout, customer portal, subscription changes, cancellation, reactivation,
+  and provider disconnect controls.
+- Retained signed, idempotent webhook processing as the subscription authority.
+- Added actionable downstream failure responses without exposing provider
+  credentials.
+
+### Setup and operations
+
+- Added interactive `npm run setup` installation for extracted Node.js release
+  packages.
+- Added noninteractive hosting-panel setup and environment-only validation.
+- Added automatic application, persistent-volume, database, backup, host, port,
+  proxy, and public-domain detection for common managed Node.js hosts.
+- Added safe environment backups and preservation of existing Microsoft,
+  Stripe, Azure, and future Signify settings during setup reruns.
+- Added credential-encryption key generation, writable-storage checks, automatic
+  migrations, first-owner creation, bootstrap disablement, and clear startup
+  instructions.
+- Added offline Application Owner recovery, Tenant Admin reset, provider
+  verification, and atomic integration-key rotation commands to production
+  artifacts.
+
+### Security and reliability
+
+- Added AES-256-GCM provider credential storage with provider-specific
+  authenticated context; secrets are not returned by APIs or audit metadata.
+- Enforced server-side three-tier authorization, tenant isolation, CSRF, request
+  validation, seat limits, and owner-only provider mutations.
+- Added audited provider replacement, disconnect, tenant lifecycle,
+  subscription, and owner-grant operations.
+- Added resilient Windows artifact rebuilds and upgraded CI actions to their
+  supported Node.js 24 runtimes.
+
+### Fixes
+
+- Included all documented recovery and setup scripts in production artifacts.
+- Removed tablet-width page overflow from the signature studio while retaining
+  internal overflow handling for large Outlook-safe signatures.
+- Rejected Microsoft callbacks without authorization codes as malformed client
+  requests instead of reporting misleading downstream provider failures.
+
+### Validation
+
+- Added installer regression coverage for generated credentials, persistent
+  paths, migrations, owner bootstrap, rerun safety, configuration preservation,
+  managed-host detection, and invalid production settings.
+- Expanded integration coverage for OAuth state, PKCE, nonce, callback
+  cancellation, admin consent, tenant registration, Stripe signatures, webhook
+  retries, idempotency, billing transitions, and provider failures.
+- Revalidated role boundaries, tenant isolation, invitations, sessions, CSRF,
+  rate limiting, seat enforcement, campaigns, overlays, approvals, templates,
+  uploads, rollout, analytics, database integrity, backup/recovery, migrations,
+  production startup, security headers, and responsive browser rendering.
+
 ## 0.3.0-rc.4 - 2026-07-18
 
 ### Fixed
