@@ -1,18 +1,18 @@
 {
   "schemaVersion": 1,
-  "capturedAt": "2026-07-18T09:09:45.889Z",
+  "capturedAt": "2026-07-18T09:12:49.589Z",
   "runtime": {
     "node": "v24.18.0",
     "platform": "win32",
     "arch": "x64"
   },
   "source": {
-    "measuredBytes": 449923,
+    "measuredBytes": 452960,
     "files": [
       {
         "path": "server.cjs",
-        "bytes": 12497,
-        "lines": 418
+        "bytes": 14942,
+        "lines": 506
       },
       {
         "path": "server/access-control.cjs",
@@ -86,8 +86,8 @@
       },
       {
         "path": "scripts/smoke-test.cjs",
-        "bytes": 65472,
-        "lines": 1923
+        "bytes": 66064,
+        "lines": 1940
       },
       {
         "path": "scripts/unit-test.cjs",
@@ -97,24 +97,24 @@
     ]
   },
   "production": {
-    "artifactBytes": 13535739,
+    "artifactBytes": 13538375,
     "dependencyCount": 63
   },
   "tests": {
     "durationMs": {
-      "setup": 1280.537,
-      "smoke": 1857.403,
-      "build": 180.165
+      "setup": 1221.957,
+      "smoke": 1970.423,
+      "build": 177.086
     }
   },
   "server": {
-    "initializationMs": 70.009,
+    "initializationMs": 70.102,
     "healthRequests": 100,
     "healthLatencyMs": {
-      "min": 0.485,
-      "p50": 15.503,
-      "p95": 16.326,
-      "max": 16.94
+      "min": 0.435,
+      "p50": 15.505,
+      "p95": 16.309,
+      "max": 16.827
     }
   }
 }

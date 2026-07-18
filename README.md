@@ -355,10 +355,13 @@ After configuring real provider credentials, run read-only provider checks:
 npm run integrations:verify
 ```
 
-The unauthenticated health endpoint is:
+The unauthenticated monitoring endpoints are:
 
 ```text
-GET /api/health
+GET /api/live     process liveness
+GET /api/ready    database readiness
+GET /api/health   backwards-compatible readiness
+GET /api/metrics  aggregate request counts, errors, status classes, and latency
 ```
 
 Application logs are structured JSON and include request IDs, status codes,
