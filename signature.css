@@ -1279,6 +1279,19 @@ button {
   .app-header {
     padding: 0 12px;
   }
+  .app-brand > span:last-child {
+    display: none;
+  }
+  .app-nav {
+    margin-left: 8px;
+  }
+  .app-nav a {
+    padding-inline: 7px;
+    font-size: 12px;
+  }
+  .profile-button {
+    padding-inline: 7px;
+  }
   .studio-controls {
     padding: 22px;
   }

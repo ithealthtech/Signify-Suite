@@ -15,7 +15,8 @@
       >
       <nav class="app-nav">
         <a href="/signature.html">Studio</a
-        ><a class="active" href="/admin.html">Workspace</a>
+        ><a class="active" href="/admin.html">Workspace</a
+        ><a id="platformNav" href="/platform.html" hidden>Application</a>
       </nav>
       <div class="header-spacer"></div>
       <div class="workspace-pill">
@@ -300,8 +301,8 @@
               <span class="eyebrow">Configuration</span>
               <h1>Settings</h1>
               <p>
-                Workspace identity, publishing URLs, approvals, and
-                subscription.
+                Workspace identity, publishing URLs, approvals, and Microsoft
+                365.
               </p>
             </div>
             <button class="button primary" id="saveSettings" type="button">
@@ -347,19 +348,39 @@
               <p id="trialEnd"></p>
               <div class="seat-meter"><span id="seatBar"></span></div>
               <small id="seatLabel"></small>
+              <p class="billing-note">
+                Subscription changes are managed by the Signify Application
+                Owner.
+              </p>
+              <hr />
+              <span class="eyebrow">Microsoft 365</span>
+              <h2 id="microsoftTenantName">Not connected</h2>
+              <strong id="microsoftStatus">Disconnected</strong>
+              <p id="microsoftTenantId"></p>
+              <label
+                >Sender mailbox<input
+                  id="microsoftSenderEmail"
+                  type="email"
+                  placeholder="signatures@company.com"
+              /></label>
               <div class="billing-actions">
-                <select id="billingPlan" aria-label="Choose plan"></select
-                ><button
+                <a
                   class="button primary"
-                  id="startCheckout"
+                  id="connectMicrosoft"
+                  href="/auth/microsoft/admin-consent"
+                  >Connect Microsoft 365</a
+                ><button class="button" id="saveMicrosoftSender" type="button">
+                  Save sender
+                </button>
+                <button
+                  class="button danger"
+                  id="disconnectMicrosoft"
                   type="button"
                 >
-                  Choose plan</button
-                ><button class="button" id="manageBilling" type="button">
-                  Manage billing
+                  Disconnect
                 </button>
               </div>
-              <p class="billing-note" id="billingNote"></p>
+              <p class="billing-note" id="microsoftNote"></p>
             </aside>
           </div>
         </section>

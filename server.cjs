@@ -28,6 +28,9 @@ const publicFiles = new Set([
   "admin.html",
   "admin.css",
   "admin.js",
+  "platform.html",
+  "platform.css",
+  "platform.js",
   "signature-it-banner.png",
 ]);
 

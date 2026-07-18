@@ -68,23 +68,42 @@ function loadConfig(env = process.env, baseDir = path.join(__dirname, "..")) {
     throw new Error(
       "SIGNIFY_PUBLIC_URL must be configured with an HTTPS URL in production.",
     );
-  const microsoft = [
-    env.MICROSOFT_CLIENT_ID || env.AZURE_CLIENT_ID,
-    env.MICROSOFT_CLIENT_SECRET || env.AZURE_CLIENT_SECRET,
-    env.MICROSOFT_TENANT_ID || env.AZURE_TENANT_ID,
-  ].filter(Boolean);
-  if (production && microsoft.length > 0 && microsoft.length < 3)
+  const applicationOwnerEmail = String(
+      env.SIGNIFY_APPLICATION_OWNER_EMAIL || bootstrapEmail,
+    )
+      .trim()
+      .toLowerCase(),
+    microsoftTenantId = String(
+      env.MICROSOFT_TENANT_ID || env.AZURE_TENANT_ID || "",
+    ).trim(),
+    microsoft = [
+      env.MICROSOFT_CLIENT_ID || env.AZURE_CLIENT_ID,
+      env.MICROSOFT_CLIENT_SECRET || env.AZURE_CLIENT_SECRET,
+    ].filter(Boolean);
+  if (production && microsoft.length > 0 && microsoft.length < 2)
     throw new Error(
-      "Microsoft integration requires MICROSOFT_CLIENT_ID, MICROSOFT_CLIENT_SECRET, and MICROSOFT_TENANT_ID together.",
+      "Microsoft integration requires MICROSOFT_CLIENT_ID and MICROSOFT_CLIENT_SECRET together.",
+    );
+  if (!validEmail(applicationOwnerEmail))
+    throw new Error(
+      "SIGNIFY_APPLICATION_OWNER_EMAIL must be a valid email address.",
     );
   const microsoftSenderEmail = String(env.MICROSOFT_SENDER_EMAIL || "")
     .trim()
     .toLowerCase();
   if (microsoftSenderEmail && !validEmail(microsoftSenderEmail))
     throw new Error("MICROSOFT_SENDER_EMAIL must be a valid email address.");
-  if (production && microsoftSenderEmail && microsoft.length !== 3)
+  if (
+    production &&
+    (microsoftTenantId || microsoftSenderEmail) &&
+    microsoft.length !== 2
+  )
     throw new Error(
-      "MICROSOFT_SENDER_EMAIL requires complete Microsoft integration credentials.",
+      "Legacy Microsoft tenant or sender settings require complete Microsoft integration credentials.",
+    );
+  if (microsoftSenderEmail && !microsoftTenantId)
+    throw new Error(
+      "MICROSOFT_SENDER_EMAIL requires MICROSOFT_TENANT_ID for system mail.",
     );
   const stripeSecretKey = String(env.STRIPE_SECRET_KEY || "").trim(),
     stripeWebhookSecret = String(env.STRIPE_WEBHOOK_SECRET || "").trim(),
@@ -143,15 +162,14 @@ function loadConfig(env = process.env, baseDir = path.join(__dirname, "..")) {
         "SIGNIFY_MEDIA_BASE_URL",
       ),
       allowRegistration: bool(env.SIGNIFY_ALLOW_REGISTRATION, !production),
+      applicationOwnerEmail,
       microsoftClientId: String(
         env.MICROSOFT_CLIENT_ID || env.AZURE_CLIENT_ID || "",
       ).trim(),
       microsoftClientSecret: String(
         env.MICROSOFT_CLIENT_SECRET || env.AZURE_CLIENT_SECRET || "",
       ).trim(),
-      microsoftTenantId: String(
-        env.MICROSOFT_TENANT_ID || env.AZURE_TENANT_ID || "",
-      ).trim(),
+      microsoftTenantId,
       microsoftSenderEmail,
       stripeSecretKey,
       stripeWebhookSecret,

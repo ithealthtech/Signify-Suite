@@ -1,5 +1,20 @@
 # Changelog
 
+## Unreleased
+
+### Added
+
+- Three-tier authorization: Application Owner, Tenant Admin, and End User.
+- Application Owner control plane for tenant lifecycle, onboarding invitations, subscriptions, Stripe checkout, owner grants, and global audit history.
+- Per-tenant Microsoft 365 admin consent, tenant verification, sender validation, directory sync status, and tenant-bound Microsoft sign-in.
+- Offline Application Owner recovery command.
+
+### Changed
+
+- Removed Stripe Checkout and customer portal controls and routes from tenant administration.
+- Routed Graph directory and mail operations through each organization's registered Microsoft tenant.
+- Preserved the original login page and existing signature, campaign, banner, approval, analytics, and rollout features.
+
 ## 0.2.0 - 2026-07-17
 
 First stable Signify Creator release.

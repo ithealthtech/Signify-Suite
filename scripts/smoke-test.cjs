@@ -3,6 +3,7 @@ const http = require("node:http");
 const os = require("node:os");
 const path = require("node:path");
 const fs = require("node:fs");
+const { generateKeyPairSync, sign } = require("node:crypto");
 const Stripe = require("stripe");
 const sharp = require("sharp");
 const { createApplication } = require("../server.cjs");
@@ -107,46 +108,117 @@ async function main() {
     STRIPE_PRICE_TEAM: "price_team",
     MICROSOFT_CLIENT_ID: "client-smoke",
     MICROSOFT_CLIENT_SECRET: "secret-smoke",
-    MICROSOFT_TENANT_ID: "tenant-smoke",
+    MICROSOFT_TENANT_ID: "11111111-1111-4111-8111-111111111111",
     LOG_LEVEL: "silent",
   };
-  const graphRequests = [],
+  const microsoftTenantId = "22222222-2222-4222-8222-222222222222",
+    { privateKey: microsoftPrivateKey, publicKey: microsoftPublicKey } =
+      generateKeyPairSync("rsa", { modulusLength: 2048 }),
+    microsoftJwk = {
+      ...microsoftPublicKey.export({ format: "jwk" }),
+      kid: "smoke-key",
+      use: "sig",
+      alg: "RS256",
+    },
+    graphRequests = [],
     graphResponse = (payload) => ({
       status: 200,
       ok: true,
       json: async () => payload,
     }),
-    fetchImpl = async (input) => {
-      const url = String(input);
-      graphRequests.push(url);
-      if (url.includes("login.microsoftonline.com"))
-        return graphResponse({ access_token: "graph-token" });
-      if (url.includes("$skiptoken=second-page"))
-        return graphResponse({
-          value: [
-            {
-              id: "graph-2",
-              displayName: "Graph User Two",
-              mail: "graph.two@example.com",
-              assignedLicenses: [{ skuId: "license-2" }],
-            },
-          ],
-        });
-      if (url.startsWith("https://graph.microsoft.com/v1.0/users?"))
-        return graphResponse({
-          value: [
-            {
-              id: "graph-1",
-              displayName: "Graph User One",
-              mail: "graph.one@example.com",
-              assignedLicenses: [{ skuId: "license-1" }],
-            },
-          ],
-          "@odata.nextLink":
-            "https://graph.microsoft.com/v1.0/users?$skiptoken=second-page",
-        });
-      throw new Error(`Unexpected external request in smoke test: ${url}`);
+    microsoftIdToken = () => {
+      const now = Math.floor(Date.now() / 1000),
+        header = Buffer.from(
+          JSON.stringify({ alg: "RS256", typ: "JWT", kid: "smoke-key" }),
+        ).toString("base64url"),
+        payload = Buffer.from(
+          JSON.stringify({
+            aud: "client-smoke",
+            iss: `https://login.microsoftonline.com/${microsoftTenantId}/v2.0`,
+            tid: microsoftTenantId,
+            nonce: microsoftLoginNonce,
+            nbf: now - 60,
+            exp: now + 600,
+          }),
+        ).toString("base64url"),
+        unsigned = `${header}.${payload}`;
+      return `${unsigned}.${sign("RSA-SHA256", Buffer.from(unsigned), microsoftPrivateKey).toString("base64url")}`;
     };
+  let microsoftLoginNonce = "";
+  const fetchImpl = async (input) => {
+    const url = String(input);
+    graphRequests.push(url);
+    if (url.endsWith("/common/discovery/v2.0/keys"))
+      return graphResponse({ keys: [microsoftJwk] });
+    if (url.includes("login.microsoftonline.com"))
+      return graphResponse({
+        access_token: "graph-token",
+        id_token: microsoftIdToken(),
+      });
+    if (url.includes("/v1.0/me?$select="))
+      return graphResponse({
+        id: "admin-graph",
+        displayName: "Signify Admin",
+        mail: "admin@signify.local",
+        userPrincipalName: "admin@signify.local",
+        jobTitle: "Application Owner",
+        department: "Operations",
+        businessPhones: ["212-555-0100"],
+        mobilePhone: "",
+      });
+    if (url.includes("/v1.0/me/photo/$value"))
+      return { status: 404, ok: false, json: async () => ({}) };
+    if (url.includes("/v1.0/organization?"))
+      return graphResponse({
+        value: [
+          {
+            id: "22222222-2222-4222-8222-222222222222",
+            displayName: "Smoke Microsoft Tenant",
+            verifiedDomains: [{ name: "example.com", isDefault: true }],
+          },
+        ],
+      });
+    if (
+      url.startsWith(
+        "https://graph.microsoft.com/v1.0/users/signatures%40example.com?",
+      )
+    )
+      return graphResponse({
+        id: "sender-1",
+        mail: "signatures@example.com",
+        userPrincipalName: "signatures@example.com",
+      });
+    if (
+      url ===
+      "https://graph.microsoft.com/v1.0/users/signatures%40example.com/sendMail"
+    )
+      return graphResponse({});
+    if (url.includes("$skiptoken=second-page"))
+      return graphResponse({
+        value: [
+          {
+            id: "graph-2",
+            displayName: "Graph User Two",
+            mail: "graph.two@example.com",
+            assignedLicenses: [{ skuId: "license-2" }],
+          },
+        ],
+      });
+    if (url.startsWith("https://graph.microsoft.com/v1.0/users?"))
+      return graphResponse({
+        value: [
+          {
+            id: "graph-1",
+            displayName: "Graph User One",
+            mail: "graph.one@example.com",
+            assignedLicenses: [{ skuId: "license-1" }],
+          },
+        ],
+        "@odata.nextLink":
+          "https://graph.microsoft.com/v1.0/users?$skiptoken=second-page",
+      });
+    throw new Error(`Unexpected external request in smoke test: ${url}`);
+  };
   let application = createApplication({ env, fetchImpl }),
     server = http.createServer(application.handler);
   try {
@@ -294,7 +366,11 @@ async function main() {
     result = await request(baseUrl, "/api/signature/session", {
       jar: adminJar,
     });
-    assert(result.body?.user?.role === "admin", "admin session failed");
+    assert(
+      result.body?.user?.role === "admin" &&
+        result.body.user.applicationOwner === true,
+      "admin session or Application Owner bootstrap failed",
+    );
     const primaryOrganizationId = result.body.user.organizationId;
     result = await request(baseUrl, "/api/signature/users", { jar: adminJar });
     assert(
@@ -367,6 +443,14 @@ async function main() {
     });
     assert(result.response.status === 200, "editor login failed");
     await request(baseUrl, "/api/signature/session", { jar: editorJar });
+    result = await request(baseUrl, "/api/platform/session", {
+      jar: editorJar,
+    });
+    assert(
+      result.response.status === 403 &&
+        result.body.error.code === "APPLICATION_OWNER_REQUIRED",
+      "end user reached the Application Owner control plane",
+    );
     result = await request(baseUrl, "/api/signature/runtime-config", {
       jar: editorJar,
     });
@@ -399,9 +483,93 @@ async function main() {
     assert(
       result.response.status === 200 &&
         result.body.subscription?.plan === "starter" &&
-        result.body.subscription?.status === "trialing",
+        result.body.subscription?.status === "trialing" &&
+        !Object.hasOwn(result.body.subscription, "stripeCustomerId"),
       "stable workspaces did not start on the Starter trial",
     );
+    result = await request(baseUrl, "/auth/microsoft/admin-consent", {
+      jar: editorJar,
+    });
+    assert(
+      result.response.status === 403,
+      "end user could initiate Microsoft tenant consent",
+    );
+    const consentJar = adminJar,
+      consentTenantId = microsoftTenantId;
+    result = await request(baseUrl, "/auth/microsoft/admin-consent", {
+      jar: consentJar,
+    });
+    const consentLocation = result.response.headers.get("location"),
+      consentState = new URL(consentLocation).searchParams.get("state");
+    assert(
+      result.response.status === 302 &&
+        consentLocation.startsWith(
+          "https://login.microsoftonline.com/organizations/v2.0/adminconsent",
+        ) &&
+        consentState,
+      "tenant administrator could not start Microsoft admin consent",
+    );
+    result = await request(
+      baseUrl,
+      `/auth/microsoft/admin-consent/callback?state=${encodeURIComponent(consentState)}&admin_consent=True&tenant=${consentTenantId}`,
+    );
+    assert(
+      result.response.status === 400 && result.text.includes("state expired"),
+      "Microsoft admin consent accepted state from another browser",
+    );
+    result = await request(
+      baseUrl,
+      `/auth/microsoft/admin-consent/callback?state=${encodeURIComponent(consentState)}&admin_consent=True&tenant=${consentTenantId}`,
+      { jar: consentJar },
+    );
+    assert(
+      result.response.status === 302 &&
+        result.response.headers
+          .get("location")
+          .includes("microsoft=connected") &&
+        application.db
+          .prepare(
+            "SELECT tenant_id FROM organization_microsoft_connections WHERE organization_id=?",
+          )
+          .get(primaryOrganizationId).tenant_id === consentTenantId,
+      "Microsoft admin consent was not verified and stored per tenant",
+    );
+    result = await request(baseUrl, "/api/signature/microsoft-connection", {
+      method: "PUT",
+      body: { senderEmail: "signatures@example.com" },
+      jar: adminJar,
+    });
+    assert(
+      result.response.status === 200 &&
+        result.body.microsoft.senderEmail === "signatures@example.com",
+      "tenant sender mailbox validation failed",
+    );
+    const microsoftLoginJar = new Map();
+    result = await request(baseUrl, "/auth/microsoft", {
+      jar: microsoftLoginJar,
+    });
+    const loginLocation = result.response.headers.get("location"),
+      loginState = new URL(loginLocation).searchParams.get("state");
+    microsoftLoginNonce = new URL(loginLocation).searchParams.get("nonce");
+    assert(
+      new URL(loginLocation).searchParams.get("code_challenge_method") ===
+        "S256" && microsoftLoginNonce,
+      "Microsoft sign-in did not use PKCE and nonce binding",
+    );
+    result = await request(
+      baseUrl,
+      `/auth/microsoft/callback?state=${encodeURIComponent(loginState)}&code=smoke-code`,
+      { jar: microsoftLoginJar },
+    );
+    assert(
+      result.response.status === 302 &&
+        result.response.headers.get("location") === "/signature.html" &&
+        microsoftLoginJar.has("sig_session"),
+      "multi-tenant Microsoft sign-in did not resolve the connected tenant",
+    );
+    result = await request(baseUrl, "/api/signature/admin-config", {
+      jar: adminJar,
+    });
     const approvalSettings = result.body.workspace.settings,
       workspaceName = result.body.workspace.name;
     result = await request(baseUrl, "/api/signature/admin-config", {
@@ -746,6 +914,14 @@ async function main() {
     });
     assert(result.response.status === 200, "verified tenant login failed");
     await request(baseUrl, "/api/signature/session", { jar: tenantJar });
+    result = await request(baseUrl, "/api/platform/organizations", {
+      jar: tenantJar,
+    });
+    assert(
+      result.response.status === 403 &&
+        result.body.error.code === "APPLICATION_OWNER_REQUIRED",
+      "tenant administrator reached the Application Owner control plane",
+    );
     result = await request(baseUrl, "/api/signature/users", { jar: tenantJar });
     assert(
       result.response.status === 200 &&
@@ -897,9 +1073,12 @@ async function main() {
       jar: adminJar,
     });
     assert(
-      result.response.status === 503 &&
-        result.body.error.code === "MAIL_NOT_CONFIGURED",
-      "rollout email ran without Microsoft mail configuration",
+      result.response.status === 200 &&
+        result.body.emailed === result.body.updated &&
+        graphRequests.some((url) =>
+          url.includes("users/signatures%40example.com/sendMail"),
+        ),
+      "rollout email did not use the tenant Microsoft connection",
     );
     result = await request(baseUrl, "/api/signature/bulk-rollout", {
       method: "POST",
@@ -928,9 +1107,8 @@ async function main() {
       jar: editorJar,
     });
     assert(
-      result.response.status === 503 &&
-        result.body.error.code === "MAIL_NOT_CONFIGURED",
-      "send-to-self ran without Microsoft mail configuration",
+      result.response.status === 200,
+      "send-to-self did not use the tenant Microsoft connection",
     );
     application.db
       .prepare(
@@ -1041,6 +1219,167 @@ async function main() {
         result.body.html.includes("Georgia, 'Times New Roman', serif"),
       "brand font was not enforced in rendered HTML",
     );
+    result = await request(baseUrl, "/api/platform/session", { jar: adminJar });
+    assert(
+      result.response.status === 200 &&
+        result.body.stats.organizations >= 2 &&
+        result.body.stats.microsoftConnected >= 1,
+      "Application Owner control-plane summary failed",
+    );
+    result = await request(baseUrl, "/api/platform/organizations", {
+      method: "POST",
+      body: {
+        name: "Control Plane Tenant",
+        adminEmail: "tenant.owner@example.com",
+        plan: "team",
+        seats: 25,
+        reason: "Smoke-test onboarding",
+      },
+      jar: adminJar,
+      csrf: false,
+    });
+    assert(
+      result.response.status === 403 &&
+        result.body.error.code === "CSRF_INVALID",
+      "control-plane mutation without CSRF was accepted",
+    );
+    result = await request(baseUrl, "/api/platform/organizations", {
+      method: "POST",
+      body: {
+        name: "Control Plane Tenant",
+        adminEmail: "tenant.owner@example.com",
+        plan: "team",
+        seats: 25,
+        reason: "Smoke-test onboarding",
+      },
+      jar: adminJar,
+    });
+    assert(
+      result.response.status === 201 &&
+        result.body.invitationUrl.includes("?invite=") &&
+        result.body.organization.status === "active",
+      "Application Owner could not create a tenant",
+    );
+    const controlPlaneOrganizationId = result.body.organization.id,
+      controlPlaneInvitationToken = new URL(
+        result.body.invitationUrl,
+      ).searchParams.get("invite");
+    result = await request(
+      baseUrl,
+      `/api/platform/organizations/${controlPlaneOrganizationId}`,
+      { jar: adminJar },
+    );
+    assert(
+      result.response.status === 200 &&
+        result.body.subscription.plan === "team" &&
+        result.body.subscription.seats === 25 &&
+        result.body.members.length === 0,
+      "new tenant detail was incorrect",
+    );
+    result = await request(
+      baseUrl,
+      `/api/platform/organizations/${controlPlaneOrganizationId}/subscription`,
+      {
+        method: "PUT",
+        body: {
+          plan: "business",
+          status: "active",
+          seats: 75,
+          reason: "Contract activated",
+          stripeCustomerId: "cus_platform_smoke",
+          stripeSubscriptionId: "sub_platform_smoke",
+        },
+        jar: adminJar,
+      },
+    );
+    assert(
+      result.response.status === 200 &&
+        result.body.subscription.plan === "business" &&
+        result.body.subscription.seats === 75,
+      "Application Owner subscription management failed",
+    );
+    const controlPlaneTenantJar = new Map();
+    result = await request(baseUrl, "/api/signature/invitations/accept", {
+      method: "POST",
+      body: {
+        token: controlPlaneInvitationToken,
+        name: "Control Plane Tenant Admin",
+        password: "ControlPlaneTenant123!",
+      },
+      jar: controlPlaneTenantJar,
+    });
+    assert(
+      result.response.status === 200 &&
+        result.body.user.organizationId === controlPlaneOrganizationId &&
+        result.body.user.role === "admin",
+      "Application Owner tenant invitation did not create a Tenant Admin",
+    );
+    result = await request(baseUrl, "/auth/microsoft/admin-consent", {
+      jar: controlPlaneTenantJar,
+    });
+    const duplicateConsentLocation = result.response.headers.get("location"),
+      duplicateConsentState = new URL(
+        duplicateConsentLocation,
+      ).searchParams.get("state");
+    result = await request(
+      baseUrl,
+      `/auth/microsoft/admin-consent/callback?state=${encodeURIComponent(duplicateConsentState)}&admin_consent=True&tenant=${consentTenantId}`,
+      { jar: controlPlaneTenantJar },
+    );
+    assert(
+      result.response.status === 409 &&
+        result.body.error.code === "MICROSOFT_TENANT_ALREADY_CONNECTED",
+      "one Microsoft tenant could be connected to multiple Signify tenants",
+    );
+    result = await request(
+      baseUrl,
+      `/api/platform/organizations/${primaryOrganizationId}/status`,
+      {
+        method: "PUT",
+        body: { status: "suspended", reason: "Isolation regression test" },
+        jar: adminJar,
+      },
+    );
+    assert(
+      result.response.status === 200,
+      "Application Owner could not suspend a tenant",
+    );
+    result = await request(baseUrl, "/api/platform/session", { jar: adminJar });
+    assert(
+      result.response.status === 200,
+      "suspending the current tenant locked out the Application Owner",
+    );
+    result = await request(
+      baseUrl,
+      `/api/platform/organizations/${primaryOrganizationId}/status`,
+      {
+        method: "PUT",
+        body: { status: "active", reason: "Isolation regression complete" },
+        jar: adminJar,
+      },
+    );
+    assert(
+      result.response.status === 200,
+      "Application Owner could not restore a tenant",
+    );
+    result = await request(baseUrl, "/api/signature/billing/checkout", {
+      method: "POST",
+      body: { plan: "team" },
+      jar: adminJar,
+    });
+    assert(
+      result.response.status === 405,
+      "tenant administrator still has a Stripe checkout endpoint",
+    );
+    result = await request(baseUrl, "/api/platform/audit", { jar: adminJar });
+    assert(
+      result.response.status === 200 &&
+        result.body.audit.some((item) => item.action === "tenant.created") &&
+        result.body.audit.some(
+          (item) => item.action === "subscription.updated",
+        ),
+      "Application Owner audit trail is incomplete",
+    );
     const organizationId = primaryOrganizationId,
       stripeEvent = JSON.stringify({
         id: "evt_smoke_checkout",
@@ -1093,6 +1432,33 @@ async function main() {
         result.body.subscription.status === "active",
       "Stripe webhook did not update subscription state",
     );
+    application.db
+      .prepare(
+        `INSERT INTO application_owners(user_id,status,granted_by) VALUES (?,'active',?) ON CONFLICT(user_id) DO UPDATE SET status='active'`,
+      )
+      .run(editorId, adminId);
+    application.db
+      .prepare("DELETE FROM organization_memberships WHERE user_id=?")
+      .run(editorId);
+    editorJar.clear();
+    result = await request(baseUrl, "/api/signature/login", {
+      method: "POST",
+      body: { email: "editor@example.com", password: "EditorPass123!" },
+      jar: editorJar,
+    });
+    assert(
+      result.response.status === 200 &&
+        result.body.user.applicationOwner === true &&
+        result.body.user.organizationId === null,
+      `Application Owner without a tenant membership could not sign in: ${result.response.status} ${JSON.stringify(result.body)}`,
+    );
+    result = await request(baseUrl, "/api/platform/session", {
+      jar: editorJar,
+    });
+    assert(
+      result.response.status === 200,
+      "tenant-independent Application Owner session failed",
+    );
     for (let attempt = 0; attempt < 7; attempt += 1)
       result = await request(baseUrl, "/api/signature/login", {
         method: "POST",
@@ -1129,6 +1495,22 @@ async function main() {
         .get(),
       "stable Starter plan migration was not applied",
     );
+    assert(
+      application.db
+        .prepare(
+          "SELECT 1 FROM schema_migrations WHERE version='010_application_control_plane.sql'",
+        )
+        .get(),
+      "Application Owner control-plane migration was not applied",
+    );
+    assert(
+      application.db
+        .prepare(
+          "SELECT 1 FROM schema_migrations WHERE version='011_microsoft_oidc_hardening.sql'",
+        )
+        .get(),
+      "Microsoft OIDC hardening migration was not applied",
+    );
     await new Promise((resolve) => server.close(resolve));
     application.db.close();
     application = createApplication({ env });
@@ -1137,7 +1519,7 @@ async function main() {
     result = await request(reopened, "/api/health");
     assert(result.response.status === 200, "existing database reopen failed");
     console.log(
-      "Smoke test passed: migrations, request validation, auth, browser-bound OAuth state, verification retry, invitations, CSRF, RBAC, tenant isolation, workspace switching, approval integrity, atomic updates, subscription enforcement, recovery, Microsoft directory pagination, image normalization, templates, rollout, campaigns, brand rendering, Stripe webhooks, rate limiting, database integrity, and reopen",
+      "Smoke test passed: migrations, three-tier RBAC, Application Owner control plane, tenant lifecycle, owner-only Stripe, tenant Microsoft consent, request validation, auth, browser-bound OAuth state, verification retry, invitations, CSRF, tenant isolation, workspace switching, approval integrity, atomic updates, subscription enforcement, recovery, Microsoft directory pagination, image normalization, templates, rollout, campaigns, brand rendering, Stripe webhooks, rate limiting, database integrity, and reopen",
     );
   } finally {
     if (server.listening) await new Promise((resolve) => server.close(resolve));
@@ -1148,6 +1530,6 @@ async function main() {
   }
 }
 main().catch((error) => {
-  console.error(`Smoke test failed: ${error.message}`);
+  console.error(`Smoke test failed: ${error.stack || error.message}`);
   process.exitCode = 1;
 });

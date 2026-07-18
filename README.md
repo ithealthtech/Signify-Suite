@@ -1,6 +1,14 @@
 # Signify Creator
 
-Signify Creator is a multi-tenant email-signature workspace. It combines an Outlook-safe signature studio with member governance, reusable templates, campaigns, approvals, bulk rollout, Microsoft 365 directory/email integration, Stripe subscriptions, click analytics, audit history, image uploads, QR codes, and vCards.
+Signify Creator is a multi-tenant email-signature SaaS. It combines an Outlook-safe signature studio with member governance, reusable templates, campaigns, approvals, bulk rollout, per-tenant Microsoft 365 integration, Application Owner-managed Stripe subscriptions, click analytics, audit history, image uploads, QR codes, and vCards.
+
+Access has three explicit tiers:
+
+1. **Application Owner** controls tenant lifecycle, SaaS subscriptions, Stripe, Application Owner grants, and the global audit trail.
+2. **Tenant Admin** controls users, branding, campaigns, approvals, and Microsoft 365 consent for one tenant.
+3. **End User** creates and manages signatures only within assigned tenants.
+
+Tenant Admin status never grants Application Owner authority. Stripe routes and controls are not exposed in tenant or end-user interfaces.
 
 ## Requirements
 
@@ -31,7 +39,7 @@ npm run build
 npm audit --omit=dev
 ```
 
-`npm test` uses a temporary clean database and verifies migrations, authentication, browser-bound Microsoft OAuth state, email verification, password recovery, invitations, CSRF, role enforcement, tenant isolation, approval integrity, atomic updates, subscription enforcement, Microsoft directory pagination, image normalization, saved-template rollout, campaign updates, brand rendering, signed/idempotent Stripe webhooks, rate limiting, database integrity, and database reopen behavior.
+`npm test` uses a temporary clean database and verifies migrations, the three-tier authorization model, Application Owner tenant lifecycle, tenant Microsoft admin consent and sign-in, owner-only Stripe access, browser-bound OAuth state, email verification, password recovery, invitations, CSRF, tenant isolation, approval integrity, atomic updates, subscription enforcement, Microsoft directory pagination, image normalization, saved-template rollout, campaign updates, brand rendering, signed/idempotent Stripe webhooks, rate limiting, database integrity, and database reopen behavior.
 
 ## Operations
 
@@ -49,6 +57,15 @@ $env:SIGNATURE_ADMIN_PASSWORD="a-new-strong-password"
 $env:SIGNATURE_ORGANIZATION_ID="org-id" # required only for multi-workspace accounts
 npm run signature:reset-admin
 ```
+
+Grant or recover global Application Owner access from the server console:
+
+```powershell
+$env:SIGNIFY_OWNER_EMAIL="owner@example.com"
+npm run application:grant-owner
+```
+
+The account must already exist. This command does not change tenant membership.
 
 The health endpoint is `GET /api/health`. Application logs are structured JSON and include request IDs, response status, duration, and server-side errors without response stack traces.
 
