@@ -94,9 +94,11 @@ npm run setup
 npm start
 ```
 
-The interactive installer asks for the owner email, company name, public HTTPS
-URL, persistent database and backup paths, listen address, port, and proxy
-setting. It then:
+The interactive installer asks only for values it cannot detect, such as the
+owner email and company name. It reads the application path, persistent-volume
+path, database path, backup path, host, port, proxy mode, and public domain from
+the application and hosting environment. It shows the detected paths before
+making changes. It then:
 
 - verifies Node.js and all writable directories
 - generates the credential-encryption key and initial owner password
@@ -109,6 +111,13 @@ Store the displayed password immediately; it is shown only for a fresh
 installation. If `.env.local` already exists, the installer backs it up before
 updating it. Rerunning setup validates the installation without resetting users
 or passwords.
+
+Detection recognizes `PORT`, `WEBSITE_HOSTNAME`, `RAILWAY_PUBLIC_DOMAIN`,
+`RAILWAY_VOLUME_MOUNT_PATH`, `RENDER_EXTERNAL_URL`, `RENDER_DISK_PATH`,
+`HOSTINGER_APP_URL`, `REPLIT_DOMAINS`, and `PERSISTENT_STORAGE_PATH`. Set
+`SIGNIFY_STORAGE_ROOT` to the host's durable volume when its variable is not
+recognized. Explicit `DATABASE_PATH`, `BACKUP_DIR`, `HOST`, `PORT`,
+`SIGNIFY_PUBLIC_URL`, and `TRUST_PROXY` values always take precedence.
 
 For a hosting panel that supplies environment variables and does not provide an
 interactive terminal, configure the required values in the panel and run:

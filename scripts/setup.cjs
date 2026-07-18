@@ -10,19 +10,60 @@ const { loadConfig, bool } = require("../server/config.cjs");
 const { openDatabase } = require("../server/database.cjs");
 const { createApplication } = require("../server.cjs");
 
-const root = path.join(__dirname, ".."),
-  defaults = {
+const root = path.join(__dirname, "..");
+
+function publicUrlFromEnvironment(env) {
+  const direct = [
+    env.SIGNIFY_PUBLIC_URL,
+    env.APP_URL,
+    env.RENDER_EXTERNAL_URL,
+    env.HOSTINGER_APP_URL,
+  ].find(Boolean);
+  if (direct) return String(direct).replace(/\/+$/, "");
+  const hostname = [
+    env.WEBSITE_HOSTNAME,
+    env.RAILWAY_PUBLIC_DOMAIN,
+    env.REPLIT_DOMAINS && String(env.REPLIT_DOMAINS).split(",")[0],
+  ].find(Boolean);
+  return hostname
+    ? `https://${String(hostname).replace(/^https?:\/\//, "")}`
+    : "";
+}
+
+function detectEnvironment(env = process.env, appRoot = root) {
+  const resolvedRoot = path.resolve(appRoot),
+    storageRoot = path.resolve(
+      env.SIGNIFY_STORAGE_ROOT ||
+        env.PERSISTENT_STORAGE_PATH ||
+        env.RAILWAY_VOLUME_MOUNT_PATH ||
+        env.RENDER_DISK_PATH ||
+        resolvedRoot,
+    ),
+    publicUrl = publicUrlFromEnvironment(env),
+    managedHost = Boolean(
+      env.WEBSITE_HOSTNAME ||
+      env.RAILWAY_PUBLIC_DOMAIN ||
+      env.RENDER_EXTERNAL_URL ||
+      env.HOSTINGER_APP_URL ||
+      env.REPLIT_DOMAINS,
+    );
+  return {
     NODE_ENV: "production",
-    HOST: "127.0.0.1",
-    PORT: "4173",
-    TRUST_PROXY: "true",
+    HOST: env.HOST || (managedHost ? "0.0.0.0" : "127.0.0.1"),
+    PORT: String(env.PORT || "4173"),
+    TRUST_PROXY: env.TRUST_PROXY || (managedHost ? "true" : "false"),
     LOG_LEVEL: "info",
-    DATABASE_PATH: path.join(root, "data", "signify-creator.db"),
-    BACKUP_DIR: path.join(root, "backups"),
+    DATABASE_PATH:
+      env.DATABASE_PATH || path.join(storageRoot, "data", "signify-creator.db"),
+    BACKUP_DIR: env.BACKUP_DIR || path.join(storageRoot, "backups"),
     SIGNATURE_SESSION_HOURS: "12",
     SIGNATURE_ALLOW_DEFAULT_ADMIN: "true",
     SIGNIFY_ALLOW_REGISTRATION: "false",
+    SIGNIFY_PUBLIC_URL: publicUrl,
+    SIGNIFY_ASSET_BASE_URL: env.SIGNIFY_ASSET_BASE_URL || publicUrl,
+    SIGNIFY_MEDIA_BASE_URL: env.SIGNIFY_MEDIA_BASE_URL || publicUrl,
   };
+}
 
 function validateNodeVersion(version = process.versions.node) {
   const [major, minor] = String(version).split(".").map(Number);
@@ -136,7 +177,7 @@ function firstOwnerState(config) {
   }
 }
 
-async function promptEnvironment(existing = {}) {
+async function promptEnvironment(existing = {}, detected = {}) {
   const terminal = createInterface({ input: stdin, output: stdout });
   const ask = async (label, fallback) => {
     const answer = String(
@@ -152,6 +193,11 @@ async function promptEnvironment(existing = {}) {
     }
   };
   try {
+    console.log("\nDetected hosting configuration:");
+    console.log(`  Application: ${root}`);
+    console.log(`  Database:    ${detected.DATABASE_PATH}`);
+    console.log(`  Backups:     ${detected.BACKUP_DIR}`);
+    console.log(`  Listen:      ${detected.HOST}:${detected.PORT}`);
     const ownerEmail = await required(
         "Application Owner email",
         existing.SIGNIFY_APPLICATION_OWNER_EMAIL || "",
@@ -164,7 +210,7 @@ async function promptEnvironment(existing = {}) {
       ),
       publicUrl = await required(
         "Public HTTPS URL",
-        existing.SIGNIFY_PUBLIC_URL || "",
+        existing.SIGNIFY_PUBLIC_URL || detected.SIGNIFY_PUBLIC_URL || "",
         (value) => {
           try {
             return new URL(value).protocol === "https:";
@@ -174,19 +220,11 @@ async function promptEnvironment(existing = {}) {
         },
         "Enter the public HTTPS URL for this installation.",
       ),
-      databasePath = await ask(
-        "Persistent database path",
-        existing.DATABASE_PATH || defaults.DATABASE_PATH,
-      ),
-      backupDirectory = await ask(
-        "Persistent backup directory",
-        existing.BACKUP_DIR || defaults.BACKUP_DIR,
-      ),
-      host = await ask("Listen address", existing.HOST || defaults.HOST),
-      port = await ask("Port", existing.PORT || defaults.PORT),
       proxyAnswer = await ask(
         "Behind a trusted reverse proxy? (yes/no)",
-        bool(existing.TRUST_PROXY, true) ? "yes" : "no",
+        bool(existing.TRUST_PROXY ?? detected.TRUST_PROXY, false)
+          ? "yes"
+          : "no",
       );
     return {
       SIGNIFY_APPLICATION_OWNER_EMAIL: ownerEmail,
@@ -195,10 +233,6 @@ async function promptEnvironment(existing = {}) {
       SIGNIFY_PUBLIC_URL: publicUrl,
       SIGNIFY_ASSET_BASE_URL: publicUrl,
       SIGNIFY_MEDIA_BASE_URL: publicUrl,
-      DATABASE_PATH: databasePath,
-      BACKUP_DIR: backupDirectory,
-      HOST: host,
-      PORT: port,
       TRUST_PROXY: /^(y|yes|true|1)$/i.test(proxyAnswer) ? "true" : "false",
     };
   } finally {
@@ -209,13 +243,14 @@ async function promptEnvironment(existing = {}) {
 async function install(options) {
   validateNodeVersion();
   const fileExists = fs.existsSync(options.envFile),
-    fileEnvironment = readEnvironment(options.envFile);
+    fileEnvironment = readEnvironment(options.envFile),
+    detected = detectEnvironment({ ...fileEnvironment, ...process.env }, root);
   if (fileExists && !options.noWriteEnv)
     fs.copyFileSync(options.envFile, `${options.envFile}.backup-${Date.now()}`);
 
   const prompted = options.nonInteractive
       ? {}
-      : await promptEnvironment(fileEnvironment),
+      : await promptEnvironment(fileEnvironment, detected),
     generatedPassword =
       process.env.SIGNIFY_BOOTSTRAP_PASSWORD ||
       fileEnvironment.SIGNIFY_BOOTSTRAP_PASSWORD ||
@@ -225,7 +260,7 @@ async function install(options) {
       fileEnvironment.SIGNIFY_CREDENTIAL_ENCRYPTION_KEY ||
       randomBytes(32).toString("base64"),
     env = {
-      ...defaults,
+      ...detected,
       ...fileEnvironment,
       ...process.env,
       ...prompted,
@@ -354,5 +389,6 @@ module.exports = {
   environmentFile,
   install,
   validateNodeVersion,
+  detectEnvironment,
   validateWritableDirectory,
 };
