@@ -3,8 +3,6 @@ const fs = require("node:fs");
 const path = require("node:path");
 const {
   randomBytes,
-  scryptSync,
-  timingSafeEqual,
   createHash,
   createPublicKey,
   verify: verifySignature,
@@ -15,6 +13,37 @@ const QRCode = require("qrcode");
 const Stripe = require("stripe");
 const sharp = require("sharp");
 const { createCredentialVault } = require("./credential-vault.cjs");
+const { createAccessControl } = require("./access-control.cjs");
+const {
+  cookie,
+  csrfCookie,
+  hashPassword,
+  jwtPayload,
+  oauthStateCookie,
+  sessionCookie,
+  tokenHash,
+  verifyPassword,
+} = require("./auth-security.cjs");
+const { redirect, textResponse } = require("./http-responses.cjs");
+const {
+  BRAND_FONT_STACKS,
+  campaignInput,
+  canonicalBrandFont,
+  canonicalRole,
+  canonicalStatus,
+  cleanUrl,
+  limited,
+  normalizedBrand,
+  safeJson,
+  safeLink,
+  safeMedia,
+  signatureInputError,
+  slug,
+  validDate,
+  validEmail,
+  validMediaUrl,
+  validUrl,
+} = require("./validation.cjs");
 const {
   TEMPLATES,
   buildSignatureHtml,
@@ -44,142 +73,6 @@ const legacyTemplates = [
   ],
 ];
 
-const BRAND_FONT_STACKS = Object.freeze({
-  system: "'Segoe UI', Helvetica, Arial, sans-serif",
-  arial: "Arial, Helvetica, sans-serif",
-  trebuchet: "'Trebuchet MS', Arial, sans-serif",
-  verdana: "Verdana, Arial, sans-serif",
-  georgia: "Georgia, 'Times New Roman', serif",
-});
-
-function hashPassword(password, salt = randomBytes(16).toString("hex")) {
-  return `${salt}:${scryptSync(String(password), salt, 64).toString("hex")}`;
-}
-function verifyPassword(password, stored) {
-  const [salt, hash] = String(stored || "").split(":");
-  if (!salt || !hash) return false;
-  const actual = scryptSync(String(password), salt, 64),
-    expected = Buffer.from(hash, "hex");
-  return expected.length === actual.length && timingSafeEqual(actual, expected);
-}
-function tokenHash(token) {
-  return createHash("sha256").update(token).digest("hex");
-}
-function cookie(req, name) {
-  for (const item of String(req.headers.cookie || "").split(";")) {
-    const index = item.indexOf("=");
-    if (index <= 0) continue;
-    try {
-      if (decodeURIComponent(item.slice(0, index).trim()) === name)
-        return decodeURIComponent(item.slice(index + 1).trim());
-    } catch {
-      continue;
-    }
-  }
-  return "";
-}
-function sessionCookie(token, maxAge, secure) {
-  return `sig_session=${encodeURIComponent(token || "")}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${maxAge};${secure ? " Secure;" : ""}`;
-}
-function csrfCookie(token, maxAge, secure) {
-  return `sig_csrf=${encodeURIComponent(token || "")}; Path=/; SameSite=Strict; Max-Age=${maxAge};${secure ? " Secure;" : ""}`;
-}
-function oauthStateCookie(token, maxAge, secure) {
-  return `sig_oauth_state=${encodeURIComponent(token || "")}; Path=/auth/microsoft/; HttpOnly; SameSite=Lax; Max-Age=${maxAge};${secure ? " Secure;" : ""}`;
-}
-function validEmail(value) {
-  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(value || ""));
-}
-function validUrl(value) {
-  if (!value) return true;
-  try {
-    return ["http:", "https:"].includes(new URL(String(value)).protocol);
-  } catch {
-    return false;
-  }
-}
-function validMediaUrl(value) {
-  return !value || String(value).startsWith("/") || validUrl(value);
-}
-function cleanUrl(value) {
-  return String(value || "")
-    .trim()
-    .replace(/\/+$/, "");
-}
-function canonicalRole(value) {
-  const role = String(value || "editor").toLowerCase();
-  return ["admin", "editor", "viewer"].includes(role) ? role : "editor";
-}
-function canonicalStatus(value) {
-  return String(value || "active").toLowerCase() === "disabled"
-    ? "disabled"
-    : "active";
-}
-function slug(value) {
-  return (
-    String(value || "workspace")
-      .toLowerCase()
-      .replace(/[^a-z0-9]+/g, "-")
-      .replace(/^-|-$/g, "")
-      .slice(0, 60) || "workspace"
-  );
-}
-function safeJson(value, fallback = {}) {
-  try {
-    return JSON.parse(value || "{}");
-  } catch {
-    return fallback;
-  }
-}
-function jwtPayload(token) {
-  try {
-    const parts = String(token || "").split(".");
-    return parts.length === 3
-      ? JSON.parse(Buffer.from(parts[1], "base64url").toString("utf8"))
-      : {};
-  } catch {
-    return {};
-  }
-}
-function limited(value, max = 240) {
-  return String(value || "")
-    .trim()
-    .slice(0, max);
-}
-function safeLink(value, max = 1000) {
-  const link = limited(value, max);
-  return validUrl(link) ? link : "";
-}
-function safeMedia(value) {
-  const link = limited(value, 1000);
-  return validMediaUrl(link) ? link : "";
-}
-function canonicalBrandFont(value) {
-  const key = String(value || "system").toLowerCase();
-  return BRAND_FONT_STACKS[key] ? key : "system";
-}
-function normalizedBrand(input = {}, current = {}, companyName = "") {
-  const accent = String(input.accent ?? current.accent ?? "#2563eb");
-  return {
-    locked: Boolean(input.locked ?? current.locked),
-    accent: /^#[0-9a-f]{6}$/i.test(accent) ? accent : "#2563eb",
-    font: canonicalBrandFont(input.font ?? current.font),
-    companyName: limited(
-      input.companyName ?? current.companyName ?? companyName,
-      120,
-    ),
-    logoUrl: safeMedia(input.logoUrl ?? current.logoUrl),
-  };
-}
-function validDate(value) {
-  const date = String(value || "");
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return false;
-  const parsed = new Date(`${date}T00:00:00.000Z`);
-  return (
-    !Number.isNaN(parsed.valueOf()) &&
-    parsed.toISOString().slice(0, 10) === date
-  );
-}
 function campaignDto(row) {
   return {
     id: row.id,
@@ -193,41 +86,6 @@ function campaignDto(row) {
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
-}
-function campaignInput(body = {}, existing = {}) {
-  return {
-    title: limited(body.title ?? existing.title, 64),
-    message: limited(body.message ?? existing.message, 240),
-    linkUrl: limited(body.linkUrl ?? existing.link_url, 1000),
-    imageUrl: limited(body.imageUrl ?? existing.image_url, 1000),
-    startDate: String(body.startDate ?? existing.start_date ?? ""),
-    endDate: String(body.endDate ?? existing.end_date ?? ""),
-    status:
-      String(body.status ?? existing.status) === "paused" ? "paused" : "active",
-  };
-}
-function signatureInputError(input) {
-  if (input === undefined) return "";
-  if (!input || typeof input !== "object" || Array.isArray(input))
-    return "Signature data must be an object.";
-  if (input.templateId && !TEMPLATES[input.templateId])
-    return "Choose an available signature template.";
-  if (
-    input.colors?.accent &&
-    !/^#[0-9a-f]{6}$/i.test(String(input.colors.accent))
-  )
-    return "Choose a valid accent color.";
-  for (const value of [
-    input.fields?.website,
-    input.fields?.social?.linkedin,
-    input.fields?.social?.twitter,
-    input.fields?.social?.instagram,
-    input.fields?.social?.facebook,
-  ])
-    if (value && !validUrl(value)) return "Enter valid contact URLs.";
-  for (const value of [input.photoUrl, input.bannerUrl])
-    if (value && !validMediaUrl(value)) return "Enter valid image URLs.";
-  return "";
 }
 function installEmailBody(signatureHtml) {
   return `<p>Your email signature is ready.</p>${signatureHtml}<p>Copy the signature above and paste it into your Outlook or Gmail signature settings.</p>`;
@@ -296,33 +154,6 @@ async function normalizeUploadedImage(bytes, kind, format) {
     format: "jpeg",
   };
 }
-function redirect(res, location, headers = {}) {
-  res.writeHead(302, {
-    Location: location,
-    "Cache-Control": "no-store",
-    ...headers,
-  });
-  res.end();
-  return true;
-}
-function textResponse(
-  res,
-  status,
-  body,
-  type = "text/plain; charset=utf-8",
-  headers = {},
-) {
-  const data = Buffer.from(String(body));
-  res.writeHead(status, {
-    "Content-Type": type,
-    "Content-Length": data.length,
-    "Cache-Control": "no-store",
-    ...headers,
-  });
-  res.end(data);
-  return true;
-}
-
 function profileFrom(row, raw) {
   const profile = raw.profile || {},
     fields = raw.fields || {};
@@ -524,8 +355,14 @@ function createSignaturePortal({
 }) {
   seed(db, signature);
   const credentialVault = createCredentialVault(
-    signature.credentialEncryptionKey,
-  );
+      signature.credentialEncryptionKey,
+    ),
+    {
+      isApplicationOwner,
+      requireAdmin,
+      requireApplicationOwner,
+      requireEditor,
+    } = createAccessControl(db);
   let microsoftJwksCache = { expiresAt: 0, keys: [] };
   const memberSelect = `SELECT u.id,u.email,u.password_hash,u.display_name,u.role,u.status,u.created_at,u.updated_at,u.last_login_at,u.email_verified_at,m.signature_json,m.role AS membership_role,m.status AS membership_status,o.id AS organization_id,o.name AS organization_name,o.slug AS organization_slug,o.status AS organization_status,o.settings_json AS organization_settings FROM signature_users u JOIN organization_memberships m ON m.user_id=u.id JOIN organizations o ON o.id=m.organization_id`;
   const builtinTemplates = Object.entries(TEMPLATES).map(([id, item]) => ({
@@ -746,22 +583,6 @@ function createSignaturePortal({
       JSON.stringify(metadata),
     );
   }
-  function isApplicationOwner(userId) {
-    return Boolean(
-      db
-        .prepare(
-          "SELECT 1 FROM application_owners WHERE user_id=? AND status='active'",
-        )
-        .get(userId),
-    );
-  }
-  function requireApplicationOwner(user) {
-    if (!isApplicationOwner(user.id))
-      throw Object.assign(new Error("Application Owner access required."), {
-        status: 403,
-        code: "APPLICATION_OWNER_REQUIRED",
-      });
-  }
   function recordApplicationAudit(
     user,
     action,
@@ -855,22 +676,6 @@ function createSignaturePortal({
       csrfTokenHash: { value: row.csrf_token_hash || "" },
     });
     return user;
-  }
-  function requireAdmin(user) {
-    if (user.role !== "admin") {
-      const error = new Error("Administrator access required.");
-      error.status = 403;
-      error.code = "ADMIN_REQUIRED";
-      throw error;
-    }
-  }
-  function requireEditor(user) {
-    if (!["admin", "editor"].includes(user.role)) {
-      const error = new Error("Editor access required.");
-      error.status = 403;
-      error.code = "EDITOR_REQUIRED";
-      throw error;
-    }
   }
   function createSession(req, row) {
     const user = userDto(row),

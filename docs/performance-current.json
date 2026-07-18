@@ -1,13 +1,13 @@
 {
   "schemaVersion": 1,
-  "capturedAt": "2026-07-18T08:38:48.219Z",
+  "capturedAt": "2026-07-18T08:49:59.373Z",
   "runtime": {
     "node": "v24.18.0",
     "platform": "win32",
     "arch": "x64"
   },
   "source": {
-    "measuredBytes": 442732,
+    "measuredBytes": 447845,
     "files": [
       {
         "path": "server.cjs",
@@ -15,14 +15,34 @@
         "lines": 409
       },
       {
+        "path": "server/access-control.cjs",
+        "bytes": 1037,
+        "lines": 45
+      },
+      {
+        "path": "server/auth-security.cjs",
+        "bytes": 1995,
+        "lines": 73
+      },
+      {
+        "path": "server/http-responses.cjs",
+        "bytes": 567,
+        "lines": 32
+      },
+      {
         "path": "server/signature-portal.cjs",
-        "bytes": 196283,
-        "lines": 5666
+        "bytes": 189851,
+        "lines": 5471
       },
       {
         "path": "server/templates.cjs",
         "bytes": 22366,
         "lines": 482
+      },
+      {
+        "path": "server/validation.cjs",
+        "bytes": 4366,
+        "lines": 166
       },
       {
         "path": "admin.js",
@@ -68,28 +88,33 @@
         "path": "scripts/smoke-test.cjs",
         "bytes": 65472,
         "lines": 1923
+      },
+      {
+        "path": "scripts/unit-test.cjs",
+        "bytes": 3580,
+        "lines": 124
       }
     ]
   },
   "production": {
-    "artifactBytes": 13519499,
+    "artifactBytes": 13521109,
     "dependencyCount": 63
   },
   "tests": {
     "durationMs": {
-      "setup": 1163.042,
-      "smoke": 1982.023,
-      "build": 166.881
+      "setup": 1252.785,
+      "smoke": 1966.083,
+      "build": 187.698
     }
   },
   "server": {
-    "initializationMs": 44.923,
+    "initializationMs": 49.621,
     "healthRequests": 100,
     "healthLatencyMs": {
-      "min": 0.716,
-      "p50": 15.645,
-      "p95": 16.291,
-      "max": 16.858
+      "min": 0.461,
+      "p50": 15.534,
+      "p95": 16.129,
+      "max": 16.368
     }
   }
 }
