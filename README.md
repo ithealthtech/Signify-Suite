@@ -31,7 +31,7 @@ npm run build
 npm audit --omit=dev
 ```
 
-`npm test` uses a temporary clean database and verifies migrations, authentication, email verification, password recovery, invitations, CSRF, role enforcement, tenant isolation, uploads, campaigns, signed/idempotent Stripe webhooks, and database reopen behavior.
+`npm test` uses a temporary clean database and verifies migrations, authentication, email verification, password recovery, invitations, CSRF, role enforcement, tenant isolation, image normalization, saved-template rollout, campaign updates, brand rendering, signed/idempotent Stripe webhooks, and database reopen behavior.
 
 ## Operations
 

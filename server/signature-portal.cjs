@@ -11,6 +11,7 @@ const {
 const { GIFEncoder, quantize, applyPalette } = require("gifenc");
 const QRCode = require("qrcode");
 const Stripe = require("stripe");
+const sharp = require("sharp");
 const {
   TEMPLATES,
   buildSignatureHtml,
@@ -39,6 +40,14 @@ const legacyTemplates = [
     { templateId: "minimalLine", colors: { accent: "#2563eb" } },
   ],
 ];
+
+const BRAND_FONT_STACKS = Object.freeze({
+  system: "'Segoe UI', Helvetica, Arial, sans-serif",
+  arial: "Arial, Helvetica, sans-serif",
+  trebuchet: "'Trebuchet MS', Arial, sans-serif",
+  verdana: "Verdana, Arial, sans-serif",
+  georgia: "Georgia, 'Times New Roman', serif",
+});
 
 function hashPassword(password, salt = randomBytes(16).toString("hex")) {
   return `${salt}:${scryptSync(String(password), salt, 64).toString("hex")}`;
@@ -124,6 +133,61 @@ function safeMedia(value) {
   const link = limited(value, 1000);
   return validMediaUrl(link) ? link : "";
 }
+function canonicalBrandFont(value) {
+  const key = String(value || "system").toLowerCase();
+  return BRAND_FONT_STACKS[key] ? key : "system";
+}
+function normalizedBrand(input = {}, current = {}, companyName = "") {
+  const accent = String(input.accent ?? current.accent ?? "#2563eb");
+  return {
+    locked: Boolean(input.locked ?? current.locked),
+    accent: /^#[0-9a-f]{6}$/i.test(accent) ? accent : "#2563eb",
+    font: canonicalBrandFont(input.font ?? current.font),
+    companyName: limited(
+      input.companyName ?? current.companyName ?? companyName,
+      120,
+    ),
+    logoUrl: safeMedia(input.logoUrl ?? current.logoUrl),
+  };
+}
+function validDate(value) {
+  const date = String(value || "");
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return false;
+  const parsed = new Date(`${date}T00:00:00.000Z`);
+  return (
+    !Number.isNaN(parsed.valueOf()) &&
+    parsed.toISOString().slice(0, 10) === date
+  );
+}
+function campaignDto(row) {
+  return {
+    id: row.id,
+    title: row.title,
+    message: row.message,
+    linkUrl: row.link_url,
+    imageUrl: row.image_url,
+    startDate: row.start_date,
+    endDate: row.end_date,
+    status: row.status,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  };
+}
+function campaignInput(body = {}, existing = {}) {
+  return {
+    title: limited(body.title ?? existing.title, 64),
+    message: limited(body.message ?? existing.message, 240),
+    linkUrl: limited(body.linkUrl ?? existing.link_url, 1000),
+    imageUrl: limited(body.imageUrl ?? existing.image_url, 1000),
+    startDate: String(body.startDate ?? existing.start_date ?? ""),
+    endDate: String(body.endDate ?? existing.end_date ?? ""),
+    status:
+      String(body.status ?? existing.status) === "paused" ? "paused" : "active",
+  };
+}
+function installEmailBody(signatureHtml) {
+  return `<p>Your email signature is ready.</p>${signatureHtml}<p>Copy the signature above and paste it into your Outlook or Gmail signature settings.</p>`;
+}
 function imageFormat(bytes) {
   if (
     bytes.length >= 8 &&
@@ -151,6 +215,42 @@ function imageFormat(bytes) {
   )
     return "webp";
   return "";
+}
+async function normalizeUploadedImage(bytes, kind, format) {
+  if (format === "gif") return { bytes, format };
+  const normalizedKind = String(kind || "image").toLowerCase(),
+    dimensions = normalizedKind.includes("campaign")
+      ? { width: 840, height: 240 }
+      : normalizedKind.includes("banner")
+        ? { width: 840, height: 200 }
+        : normalizedKind.includes("logo")
+          ? { width: 400, height: 160 }
+          : { width: 300, height: 300 },
+    photo =
+      !normalizedKind.includes("campaign") &&
+      !normalizedKind.includes("banner") &&
+      !normalizedKind.includes("logo"),
+    pipeline = sharp(bytes, { limitInputPixels: 40_000_000 })
+      .rotate()
+      .resize({
+        ...dimensions,
+        fit: photo ? "cover" : "inside",
+        withoutEnlargement: !photo,
+      });
+  if (format === "png")
+    return {
+      bytes: await pipeline.png({ compressionLevel: 9 }).toBuffer(),
+      format: "png",
+    };
+  if (format === "webp")
+    return {
+      bytes: await pipeline.webp({ quality: 88 }).toBuffer(),
+      format: "webp",
+    };
+  return {
+    bytes: await pipeline.jpeg({ quality: 88, mozjpeg: true }).toBuffer(),
+    format: "jpeg",
+  };
 }
 function redirect(res, location, headers = {}) {
   res.writeHead(302, {
@@ -750,6 +850,9 @@ function createSignaturePortal({
         ? absoluteMedia(req, user, brand.logoUrl)
         : "",
       companyName: brand.companyName || workspaceRow(user)?.name,
+      fontFamily: brand.locked
+        ? BRAND_FONT_STACKS[canonicalBrandFont(brand.font)]
+        : "",
     });
     return {
       html,
@@ -793,6 +896,31 @@ function createSignaturePortal({
       userId,
     );
     return normalized;
+  }
+  function rolloutTemplatePatch(organizationId, templateId) {
+    if (TEMPLATES[templateId]) return { templateId };
+    const row = db
+      .prepare(
+        "SELECT template_json FROM signature_templates WHERE id=? AND organization_id=?",
+      )
+      .get(templateId, organizationId);
+    if (!row)
+      throw Object.assign(
+        new Error("Choose an available signature template."),
+        {
+          status: 400,
+          code: "TEMPLATE_INVALID",
+        },
+      );
+    const saved = safeJson(row.template_json);
+    return {
+      templateId: TEMPLATES[saved.templateId] ? saved.templateId : "executive",
+      colors: saved.colors,
+      photoUrl: saved.photoUrl,
+      bannerUrl: saved.bannerUrl,
+      vcardEnabled: saved.vcardEnabled,
+      ribbonText: saved.ribbonText,
+    };
   }
 
   async function fetchWithRetry(url, options = {}, attempts = 3) {
@@ -888,6 +1016,24 @@ function createSignaturePortal({
         new Error("Microsoft 365 could not send the message."),
         { status: 502, code: "MICROSOFT_SEND_FAILED" },
       );
+  }
+  async function downloadMicrosoftProfilePhoto(token, row) {
+    const response = await fetchWithRetry(
+      "https://graph.microsoft.com/v1.0/me/photo/$value",
+      { headers: { Authorization: `Bearer ${token}` } },
+      1,
+    );
+    if (!response.ok) return "";
+    const bytes = Buffer.from(await response.arrayBuffer()),
+      format = imageFormat(bytes);
+    if (!format || bytes.length > 4 * 1024 * 1024) return "";
+    const processed = await normalizeUploadedImage(bytes, "photo", format),
+      ext = processed.format === "jpeg" ? "jpg" : processed.format,
+      dir = path.join(publicRoot, "uploads", row.organization_id),
+      name = `microsoft-profile-${row.id}.${ext}`;
+    fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(path.join(dir, name), processed.bytes);
+    return `/uploads/${row.organization_id}/${name}`;
   }
 
   return async function handle(req, res, url, requestId) {
@@ -1014,7 +1160,7 @@ function createSignaturePortal({
           400,
           "Microsoft account has no usable email address.",
         );
-      const row = db
+      let row = db
         .prepare(
           `${memberSelect} WHERE lower(u.email)=lower(?) ORDER BY m.created_at LIMIT 1`,
         )
@@ -1022,7 +1168,37 @@ function createSignaturePortal({
       if (!row) {
         return redirect(res, "/signature.html?auth=account-required");
       }
+      const current = normalizeSignature(row),
+        fields = { ...current.fields };
+      fields.name = fields.name || limited(profile.displayName, 120);
+      fields.jobTitle = fields.jobTitle || limited(profile.jobTitle, 120);
+      fields.department = fields.department || limited(profile.department, 120);
+      fields.phone = fields.phone || limited(profile.businessPhones?.[0], 60);
+      fields.mobile = fields.mobile || limited(profile.mobilePhone, 60);
+      let photoUrl = current.photoUrl;
+      if (!photoUrl) {
+        try {
+          photoUrl = await downloadMicrosoftProfilePhoto(
+            tokens.access_token,
+            row,
+          );
+        } catch {
+          photoUrl = "";
+        }
+      }
+      db.prepare(
+        `UPDATE signature_users SET display_name=?,last_login_at=strftime('%Y-%m-%dT%H:%M:%fZ','now'),updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE id=?`,
+      ).run(limited(profile.displayName || row.display_name, 120), row.id);
+      saveSignatureRow(row.organization_id, row.id, {
+        ...current,
+        fields,
+        photoUrl,
+      });
+      row = memberById(row.organization_id, row.id);
       const session = createSession(req, row);
+      recordAudit(session.user, "profile.microsoft_synced", "user", row.id, {
+        photoImported: Boolean(photoUrl && photoUrl !== current.photoUrl),
+      });
       return redirect(res, "/signature.html", session.header);
     }
     const redirectMatch = url.pathname.match(/^\/r\/([^/]+)$/);
@@ -1445,6 +1621,7 @@ function createSignaturePortal({
           brand: {
             locked: false,
             accent: "#2563eb",
+            font: "system",
             companyName: company,
             logoUrl: "",
           },
@@ -1882,13 +2059,35 @@ function createSignaturePortal({
           },
           requestId,
         );
-      const ext = detected === "jpeg" ? "jpg" : detected,
+      let processed;
+      try {
+        processed = await normalizeUploadedImage(
+          bytes,
+          body.kind || "image",
+          detected,
+        );
+      } catch {
+        return json(
+          res,
+          400,
+          {
+            error: {
+              code: "IMAGE_PROCESSING_FAILED",
+              message: "The image could not be decoded or resized.",
+            },
+          },
+          requestId,
+        );
+      }
+      const ext = processed.format === "jpeg" ? "jpg" : processed.format,
         dir = path.join(publicRoot, "uploads", user.organizationId),
         name = `${slug(body.kind || "image")}-${randomUUID()}.${ext}`;
       fs.mkdirSync(dir, { recursive: true });
-      fs.writeFileSync(path.join(dir, name), bytes);
+      fs.writeFileSync(path.join(dir, name), processed.bytes);
       recordAudit(user, "asset.uploaded", "asset", name, {
         kind: limited(body.kind || "image", 40),
+        sourceBytes: bytes.length,
+        storedBytes: processed.bytes.length,
       });
       return json(
         res,
@@ -2437,16 +2636,7 @@ function createSignaturePortal({
               "SELECT * FROM signature_campaigns WHERE organization_id=? ORDER BY start_date DESC",
             )
             .all(user.organizationId)
-            .map((row) => ({
-              id: row.id,
-              title: row.title,
-              message: row.message,
-              linkUrl: row.link_url,
-              imageUrl: row.image_url,
-              startDate: row.start_date,
-              endDate: row.end_date,
-              status: row.status,
-            })),
+            .map(campaignDto),
         },
         requestId,
       );
@@ -2455,14 +2645,12 @@ function createSignaturePortal({
       requireAdmin(user);
       const body = await readJsonBody(req),
         id = randomUUID(),
-        title = String(body.title || "").trim(),
-        start = String(body.startDate || ""),
-        end = String(body.endDate || "");
+        input = campaignInput(body);
       if (
-        !title ||
-        !/^\d{4}-\d{2}-\d{2}$/.test(start) ||
-        !/^\d{4}-\d{2}-\d{2}$/.test(end) ||
-        end < start
+        !input.title ||
+        !validDate(input.startDate) ||
+        !validDate(input.endDate) ||
+        input.endDate < input.startDate
       )
         return json(
           res,
@@ -2475,14 +2663,17 @@ function createSignaturePortal({
           },
           requestId,
         );
-      if (body.linkUrl && !validUrl(body.linkUrl))
+      if (
+        (input.linkUrl && !validUrl(input.linkUrl)) ||
+        (input.imageUrl && !validMediaUrl(input.imageUrl))
+      )
         return json(
           res,
           400,
           {
             error: {
               code: "URL_INVALID",
-              message: "Enter a valid campaign link.",
+              message: "Enter valid campaign and banner URLs.",
             },
           },
           requestId,
@@ -2492,21 +2683,95 @@ function createSignaturePortal({
       ).run(
         id,
         user.organizationId,
-        title,
-        String(body.message || "").slice(0, 240),
-        String(body.linkUrl || ""),
-        String(body.imageUrl || ""),
-        start,
-        end,
-        body.status === "paused" ? "paused" : "active",
+        input.title,
+        input.message,
+        input.linkUrl,
+        input.imageUrl,
+        input.startDate,
+        input.endDate,
+        input.status,
         user.id,
       );
-      recordAudit(user, "campaign.created", "campaign", id, { title });
-      return json(res, 201, { id }, requestId);
+      const campaign = db
+        .prepare("SELECT * FROM signature_campaigns WHERE id=?")
+        .get(id);
+      recordAudit(user, "campaign.created", "campaign", id, {
+        title: input.title,
+      });
+      return json(res, 201, { id, campaign: campaignDto(campaign) }, requestId);
     }
     const campaignMatch = url.pathname.match(
       /^\/api\/signature\/campaigns\/([^/]+)$/,
     );
+    if (campaignMatch && req.method === "PUT") {
+      requireAdmin(user);
+      const id = decodeURIComponent(campaignMatch[1]),
+        existing = db
+          .prepare(
+            "SELECT * FROM signature_campaigns WHERE id=? AND organization_id=?",
+          )
+          .get(id, user.organizationId);
+      if (!existing)
+        return json(
+          res,
+          404,
+          { error: { code: "NOT_FOUND", message: "Campaign not found." } },
+          requestId,
+        );
+      const input = campaignInput(await readJsonBody(req), existing);
+      if (
+        !input.title ||
+        !validDate(input.startDate) ||
+        !validDate(input.endDate) ||
+        input.endDate < input.startDate
+      )
+        return json(
+          res,
+          400,
+          {
+            error: {
+              code: "CAMPAIGN_INVALID",
+              message: "Enter a title and valid date range.",
+            },
+          },
+          requestId,
+        );
+      if (
+        (input.linkUrl && !validUrl(input.linkUrl)) ||
+        (input.imageUrl && !validMediaUrl(input.imageUrl))
+      )
+        return json(
+          res,
+          400,
+          {
+            error: {
+              code: "URL_INVALID",
+              message: "Enter valid campaign and banner URLs.",
+            },
+          },
+          requestId,
+        );
+      db.prepare(
+        `UPDATE signature_campaigns SET title=?,message=?,link_url=?,image_url=?,start_date=?,end_date=?,status=?,updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE id=? AND organization_id=?`,
+      ).run(
+        input.title,
+        input.message,
+        input.linkUrl,
+        input.imageUrl,
+        input.startDate,
+        input.endDate,
+        input.status,
+        id,
+        user.organizationId,
+      );
+      const campaign = db
+        .prepare("SELECT * FROM signature_campaigns WHERE id=?")
+        .get(id);
+      recordAudit(user, "campaign.updated", "campaign", id, {
+        title: input.title,
+      });
+      return json(res, 200, { campaign: campaignDto(campaign) }, requestId);
+    }
     if (campaignMatch && req.method === "DELETE") {
       requireAdmin(user);
       const row = db
@@ -2593,6 +2858,8 @@ function createSignaturePortal({
     ) {
       requireAdmin(user);
       const body = await readJsonBody(req),
+        overwrite = Boolean(body.overwrite ?? body.overwriteExisting),
+        sendEmail = Boolean(body.sendEmail),
         rows = db
           .prepare(
             `${memberSelect} WHERE m.organization_id=? AND m.status='active'`,
@@ -2606,30 +2873,104 @@ function createSignaturePortal({
             .all(user.organizationId)
             .map((row) => [row.department.toLowerCase(), row]),
         ),
-        updated = [];
+        updated = [],
+        skipped = [],
+        errors = [];
+      if (sendEmail && !mailAvailable())
+        return json(
+          res,
+          503,
+          {
+            error: {
+              code: "MAIL_NOT_CONFIGURED",
+              message: "Microsoft 365 email delivery is not configured.",
+            },
+          },
+          requestId,
+        );
+      rolloutTemplatePatch(user.organizationId, String(body.templateId || ""));
+      let emailed = 0;
       for (const row of rows) {
         const sig = normalizeSignature(row);
-        if (!body.overwrite && sig.updatedAt) continue;
+        if (!overwrite && sig.updatedAt) {
+          skipped.push(row.id);
+          continue;
+        }
         const dept = defaults.get(
-          String(sig.fields.department || "").toLowerCase(),
-        );
-        sig.templateId = dept?.template_id || body.templateId || sig.templateId;
-        if (dept?.accent_color) sig.colors.accent = dept.accent_color;
-        sig.workflowStatus = "approved";
-        saveSignatureRow(user.organizationId, row.id, sig);
-        updated.push(row.id);
+            String(sig.fields.department || "").toLowerCase(),
+          ),
+          selectedTemplate = String(
+            dept?.template_id || body.templateId || sig.templateId,
+          );
+        try {
+          const patch = rolloutTemplatePatch(
+              user.organizationId,
+              selectedTemplate,
+            ),
+            next = {
+              ...sig,
+              ...patch,
+              fields: sig.fields,
+              colors: { ...sig.colors, ...(patch.colors || {}) },
+              workflowStatus: "approved",
+              approvedAt: new Date().toISOString(),
+              approvedBy: user.id,
+            };
+          if (dept?.accent_color) next.colors.accent = dept.accent_color;
+          saveSignatureRow(user.organizationId, row.id, next);
+          updated.push(row.id);
+          if (sendEmail) {
+            try {
+              const target = userDto(memberById(user.organizationId, row.id)),
+                rendered = await renderSignature(req, target, target.signature);
+              await sendGraphMail(
+                target.email,
+                "Your email signature is ready",
+                installEmailBody(rendered.html),
+              );
+              emailed += 1;
+            } catch (error) {
+              errors.push({
+                userId: row.id,
+                email: row.email,
+                code: error.code || "EMAIL_DELIVERY_FAILED",
+                message: "Signature updated, but its email could not be sent.",
+              });
+            }
+          }
+        } catch (error) {
+          errors.push({
+            userId: row.id,
+            email: row.email,
+            code: error.code || "ROLLOUT_FAILED",
+            message: limited(error.message || "Rollout failed.", 240),
+          });
+        }
       }
       recordAudit(
         user,
         "rollout.completed",
         "organization",
         user.organizationId,
-        { updated: updated.length, overwrite: Boolean(body.overwrite) },
+        {
+          updated: updated.length,
+          skipped: skipped.length,
+          emailed,
+          errors: errors.length,
+          overwrite,
+          sendEmail,
+        },
       );
       return json(
         res,
         200,
-        { updated: updated.length, total: rows.length },
+        {
+          updated: updated.length,
+          skipped: skipped.length,
+          emailed,
+          errors,
+          total: rows.length,
+        },
         requestId,
       );
     }
@@ -2760,6 +3101,34 @@ function createSignaturePortal({
         throw error;
       }
     }
+    if (
+      url.pathname === "/api/signature/send-to-self" &&
+      req.method === "POST"
+    ) {
+      requireEditor(user);
+      if (!mailAvailable())
+        return json(
+          res,
+          503,
+          {
+            error: {
+              code: "MAIL_NOT_CONFIGURED",
+              message: "Microsoft 365 email delivery is not configured.",
+            },
+          },
+          requestId,
+        );
+      const body = await readJsonBody(req, { limit: 65536 }),
+        target = userDto(memberById(user.organizationId, user.id)),
+        rendered = await renderSignature(req, target, body.signature || body);
+      await sendGraphMail(
+        target.email,
+        "Your email signature is ready to install",
+        installEmailBody(rendered.html),
+      );
+      recordAudit(user, "signature.emailed_to_self", "user", user.id);
+      return json(res, 200, { ok: true }, requestId);
+    }
     if (url.pathname === "/api/signature/send" && req.method === "POST") {
       requireAdmin(user);
       const body = await readJsonBody(req),
@@ -2775,7 +3144,7 @@ function createSignaturePortal({
         );
       const targetUser = userDto(target),
         rendered = await renderSignature(req, targetUser, targetUser.signature),
-        mail = `<p>Your email signature is ready.</p>${rendered.html}<p>Copy the signature above and paste it into Outlook or Gmail signature settings.</p>`;
+        mail = installEmailBody(rendered.html);
       await sendGraphMail(
         targetUser.email,
         "Your email signature is ready",
@@ -2809,7 +3178,11 @@ function createSignaturePortal({
             backupPath: String(body.backupPath ?? current.backupPath ?? "")
               .trim()
               .slice(0, 260),
-            brand: { ...(current.brand || {}), ...(body.brand || {}) },
+            brand: normalizedBrand(
+              body.brand || {},
+              current.brand || {},
+              body.name || row.name,
+            ),
           };
         for (const value of [
           next.publicUrl,
@@ -2983,6 +3356,7 @@ function seed(db, signature = {}) {
       brand: {
         locked: false,
         accent: "#2563eb",
+        font: "system",
         companyName: signature.companyName || organization.name,
         logoUrl: "",
         ...(current.brand || {}),

@@ -38,7 +38,7 @@ Set `MICROSOFT_CLIENT_ID`, `MICROSOFT_CLIENT_SECRET`, and `MICROSOFT_TENANT_ID` 
 https://your-domain.example/auth/microsoft/callback
 ```
 
-For invitations, password recovery, verification, and signature delivery, set `MICROSOFT_SENDER_EMAIL` and grant the application Microsoft Graph application permissions required for `Mail.Send`. Directory sync also requires the appropriate application permission to read users. Apply tenant admin consent.
+For invitations, password recovery, verification, individual signature delivery, and rollout email delivery, set `MICROSOFT_SENDER_EMAIL` and grant Microsoft Graph application permission `Mail.Send`. Directory sync requires application permission `User.Read.All`. Microsoft login requests delegated `User.Read` and uses it to fill missing profile fields and import the signed-in user's profile photo. Apply tenant admin consent to the application permissions.
 
 ## 5. Stripe
 

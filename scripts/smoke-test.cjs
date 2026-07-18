@@ -4,6 +4,7 @@ const os = require("node:os");
 const path = require("node:path");
 const fs = require("node:fs");
 const Stripe = require("stripe");
+const sharp = require("sharp");
 const { createApplication } = require("../server.cjs");
 
 function assert(condition, message) {
@@ -275,6 +276,37 @@ async function main() {
         result.body.error.code === "IMAGE_CONTENT_INVALID",
       "spoofed image upload was accepted",
     );
+    const oversizedLogo = await sharp({
+      create: {
+        width: 1200,
+        height: 800,
+        channels: 4,
+        background: "#2563eb",
+      },
+    })
+      .png()
+      .toBuffer();
+    result = await request(baseUrl, "/api/signature/upload", {
+      method: "POST",
+      body: {
+        kind: "logo",
+        dataUrl: `data:image/png;base64,${oversizedLogo.toString("base64")}`,
+      },
+      jar: editorJar,
+    });
+    assert(result.response.status === 201, "valid image upload failed");
+    const normalizedLogoPath = path.join(
+        __dirname,
+        "..",
+        "public",
+        ...result.body.url.split("/").filter(Boolean),
+      ),
+      normalizedLogo = await sharp(normalizedLogoPath).metadata();
+    assert(
+      normalizedLogo.width <= 400 && normalizedLogo.height <= 160,
+      "uploaded logo was not normalized",
+    );
+    fs.unlinkSync(normalizedLogoPath);
     const animationFrames = [
       Buffer.from([0, 0, 0, 255, 255, 255, 255, 255]).toString("base64"),
       Buffer.from([37, 99, 235, 255, 95, 229, 255, 255]).toString("base64"),
@@ -429,6 +461,71 @@ async function main() {
       result.response.status === 404,
       "cross-tenant user mutation succeeded",
     );
+    result = await request(baseUrl, "/api/signature/templates", {
+      method: "POST",
+      body: {
+        name: "Rollout preset",
+        signature: {
+          templateId: "modernMinimal",
+          colors: { accent: "#0f766e" },
+          bannerUrl: "/event-banners/cloud-services-modernization.png",
+        },
+      },
+      jar: adminJar,
+    });
+    assert(result.response.status === 201, "rollout preset creation failed");
+    const rolloutTemplateId = result.body.template.id;
+    result = await request(baseUrl, "/api/signature/bulk-rollout", {
+      method: "POST",
+      body: { templateId: "missing-template", overwrite: true },
+      jar: adminJar,
+    });
+    assert(
+      result.response.status === 400 &&
+        result.body.error.code === "TEMPLATE_INVALID",
+      "invalid rollout template was accepted",
+    );
+    result = await request(baseUrl, "/api/signature/bulk-rollout", {
+      method: "POST",
+      body: { templateId: rolloutTemplateId, overwrite: true, sendEmail: true },
+      jar: adminJar,
+    });
+    assert(
+      result.response.status === 503 &&
+        result.body.error.code === "MAIL_NOT_CONFIGURED",
+      "rollout email ran without Microsoft mail configuration",
+    );
+    result = await request(baseUrl, "/api/signature/bulk-rollout", {
+      method: "POST",
+      body: { templateId: rolloutTemplateId, overwrite: true },
+      jar: adminJar,
+    });
+    assert(
+      result.response.status === 200 &&
+        result.body.updated === 2 &&
+        result.body.skipped === 0 &&
+        result.body.errors.length === 0,
+      "saved-template rollout failed",
+    );
+    result = await request(baseUrl, "/api/signature/users", { jar: adminJar });
+    assert(
+      result.body.users.every(
+        (member) =>
+          member.signature.templateId === "modernMinimal" &&
+          member.signature.fields.email === member.email,
+      ),
+      "rollout did not preserve member identity fields",
+    );
+    result = await request(baseUrl, "/api/signature/send-to-self", {
+      method: "POST",
+      body: { signature: { templateId: "compact" } },
+      jar: editorJar,
+    });
+    assert(
+      result.response.status === 503 &&
+        result.body.error.code === "MAIL_NOT_CONFIGURED",
+      "send-to-self ran without Microsoft mail configuration",
+    );
     application.db
       .prepare(
         "UPDATE organization_subscriptions SET status='canceled' WHERE organization_id=?",
@@ -464,6 +561,42 @@ async function main() {
       jar: adminJar,
     });
     assert(result.response.status === 201, "campaign creation failed");
+    const campaignId = result.body.id;
+    result = await request(baseUrl, `/api/signature/campaigns/${campaignId}`, {
+      method: "PUT",
+      body: { title: "Cross-tenant update" },
+      jar: tenantJar,
+    });
+    assert(
+      result.response.status === 404,
+      "cross-tenant campaign update succeeded",
+    );
+    result = await request(baseUrl, `/api/signature/campaigns/${campaignId}`, {
+      method: "PUT",
+      body: { startDate: "2026-02-30" },
+      jar: adminJar,
+    });
+    assert(
+      result.response.status === 400 &&
+        result.body.error.code === "CAMPAIGN_INVALID",
+      "invalid campaign update was accepted",
+    );
+    result = await request(baseUrl, `/api/signature/campaigns/${campaignId}`, {
+      method: "PUT",
+      body: {
+        title: "Updated summer event",
+        status: "paused",
+        startDate: "2026-07-01",
+        endDate: "2026-08-01",
+      },
+      jar: adminJar,
+    });
+    assert(
+      result.response.status === 200 &&
+        result.body.campaign.title === "Updated summer event" &&
+        result.body.campaign.status === "paused",
+      "campaign update failed",
+    );
     result = await request(baseUrl, "/api/signature/admin-config", {
       jar: adminJar,
     });
@@ -473,7 +606,36 @@ async function main() {
         result.body.audit.length > 0,
       "admin dashboard failed",
     );
-    const organizationId = result.body.workspace.id,
+    const workspaceSettings = result.body.workspace.settings;
+    result = await request(baseUrl, "/api/signature/admin-config", {
+      method: "PUT",
+      body: {
+        name: result.body.workspace.name,
+        ...workspaceSettings,
+        brand: {
+          ...workspaceSettings.brand,
+          locked: true,
+          font: "georgia",
+        },
+      },
+      jar: adminJar,
+    });
+    assert(
+      result.response.status === 200 &&
+        result.body.workspace.settings.brand.font === "georgia",
+      "brand font setting failed",
+    );
+    result = await request(baseUrl, "/api/signature/preview", {
+      method: "POST",
+      body: { userId: adminId, signature: { templateId: "executive" } },
+      jar: adminJar,
+    });
+    assert(
+      result.response.status === 200 &&
+        result.body.html.includes("Georgia, 'Times New Roman', serif"),
+      "brand font was not enforced in rendered HTML",
+    );
+    const organizationId = primaryOrganizationId,
       stripeEvent = JSON.stringify({
         id: "evt_smoke_checkout",
         object: "event",
@@ -544,7 +706,7 @@ async function main() {
     result = await request(reopened, "/api/health");
     assert(result.response.status === 200, "existing database reopen failed");
     console.log(
-      "Smoke test passed: migrations, auth, invitations, CSRF, RBAC, tenant isolation, workspace switching, subscription enforcement, recovery, uploads, campaigns, Stripe webhooks, rate limiting, and database reopen",
+      "Smoke test passed: migrations, auth, invitations, CSRF, RBAC, tenant isolation, workspace switching, subscription enforcement, recovery, image normalization, templates, rollout, campaigns, brand rendering, Stripe webhooks, rate limiting, and database reopen",
     );
   } finally {
     if (server.listening) await new Promise((resolve) => server.close(resolve));

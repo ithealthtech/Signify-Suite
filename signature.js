@@ -245,6 +245,10 @@ function selectUser(id) {
   state.selectedUserId = id;
   state.signature = structuredClone(user.signature);
   els.employeeSelect.value = id;
+  $("#emailSelf").hidden =
+    !state.runtime.capabilities.mail ||
+    id !== state.me.id ||
+    state.me.role === "viewer";
   fillForm();
   markSaved();
   schedulePreview(0);
@@ -821,6 +825,21 @@ $("#copyHtml").addEventListener("click", async () => {
   await updatePreview();
   await navigator.clipboard.writeText(state.rendered.html);
   toast("HTML copied");
+});
+$("#emailSelf").addEventListener("click", async (event) => {
+  const button = event.currentTarget;
+  setBusy(button, true, "Sending…");
+  try {
+    await api("/api/signature/send-to-self", {
+      method: "POST",
+      body: JSON.stringify({ signature: collectForm() }),
+    });
+    toast("Signature emailed to you");
+  } catch (error) {
+    toast(error.message);
+  } finally {
+    setBusy(button, false);
+  }
 });
 $("#downloadHtml").addEventListener("click", async () => {
   await updatePreview();
