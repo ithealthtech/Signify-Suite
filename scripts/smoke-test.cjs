@@ -393,6 +393,24 @@ async function main() {
         !microsoftJar.has("sig_oauth_state"),
       "Microsoft cancellation did not consume and clear OAuth state",
     );
+    const missingCodeJar = new Map();
+    result = await request(baseUrl, "/auth/microsoft", {
+      jar: missingCodeJar,
+    });
+    const missingCodeState = new URL(
+      result.response.headers.get("location"),
+    ).searchParams.get("state");
+    result = await request(
+      baseUrl,
+      `/auth/microsoft/callback?state=${encodeURIComponent(missingCodeState)}`,
+      { jar: missingCodeJar },
+    );
+    assert(
+      result.response.status === 400 &&
+        result.text.includes("authorization code is missing") &&
+        !missingCodeJar.has("sig_oauth_state"),
+      "Microsoft callback did not reject a missing authorization code locally",
+    );
     result = await request(baseUrl, "/setup.html");
     assert(
       result.response.status === 404,
@@ -568,6 +586,25 @@ async function main() {
     );
     const consentJar = adminJar,
       consentTenantId = microsoftTenantId;
+    result = await request(baseUrl, "/auth/microsoft/admin-consent", {
+      jar: consentJar,
+    });
+    const canceledConsentState = new URL(
+      result.response.headers.get("location"),
+    ).searchParams.get("state");
+    result = await request(
+      baseUrl,
+      `/auth/microsoft/admin-consent/callback?state=${encodeURIComponent(canceledConsentState)}&error=access_denied`,
+      { jar: consentJar },
+    );
+    assert(
+      result.response.status === 302 &&
+        result.response.headers
+          .get("location")
+          .includes("microsoft=canceled") &&
+        !consentJar.has("sig_oauth_state"),
+      "Microsoft consent cancellation did not consume state and clear its cookie",
+    );
     result = await request(baseUrl, "/auth/microsoft/admin-consent", {
       jar: consentJar,
     });

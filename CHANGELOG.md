@@ -1,5 +1,26 @@
 # Changelog
 
+## 0.3.0-rc.4 - 2026-07-18
+
+### Fixed
+
+- Removed page-level horizontal overflow from the signature studio between the
+  mobile and desktop breakpoints while retaining scroll protection inside the
+  rendered signature preview.
+- Reject Microsoft sign-in callbacks without an authorization code locally with
+  HTTP 400 instead of forwarding malformed requests and reporting a downstream
+  provider failure.
+
+### Validation
+
+- Added callback regressions for missing Microsoft authorization codes and
+  canceled Microsoft administrator consent, including one-time state and cookie
+  cleanup assertions.
+- Revalidated Application Owner, Tenant Admin, and End User authorization,
+  tenant isolation, CSRF, OAuth state/PKCE/nonce, Microsoft tenant consent,
+  Stripe signatures and idempotency, campaigns, approvals, rollout, installer,
+  migrations, production packaging, and responsive frontend rendering.
+
 ## 0.3.0-rc.3 - 2026-07-18
 
 ### Changed
