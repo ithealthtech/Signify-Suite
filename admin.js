@@ -11,6 +11,14 @@ let state = {
   departments: [],
   approvals: [],
   analytics: [],
+  editingCampaignId: null,
+};
+const brandFonts = {
+  system: '"Segoe UI", Helvetica, Arial, sans-serif',
+  arial: "Arial, Helvetica, sans-serif",
+  trebuchet: '"Trebuchet MS", Arial, sans-serif',
+  verdana: "Verdana, Arial, sans-serif",
+  georgia: 'Georgia, "Times New Roman", serif',
 };
 function cookieValue(name) {
   return (
@@ -222,6 +230,7 @@ function renderBrand() {
   form.locked.checked = Boolean(brand.locked);
   form.companyName.value = brand.companyName || state.config.workspace.name;
   form.accent.value = brand.accent || "#2563eb";
+  form.font.value = brand.font || "system";
   form.logoUrl.value = brand.logoUrl || "";
   updateBrandPreview();
 }
@@ -230,6 +239,7 @@ function updateBrandPreview() {
     preview = $("#brandPreview");
   preview.querySelector("i").style.background = form.accent.value;
   preview.querySelector("i").style.borderColor = `${form.accent.value}33`;
+  preview.style.fontFamily = brandFonts[form.font.value] || brandFonts.system;
   preview.querySelector("small").textContent =
     `Role · ${form.companyName.value || "Company"}`;
 }
@@ -239,7 +249,7 @@ function renderCampaigns() {
     ? rows
         .map(
           (item) =>
-            `<article class="campaign-card" data-campaign-id="${item.id}">${item.imageUrl ? `<img class="campaign-thumb" src="${escapeHtml(item.imageUrl)}" alt="">` : '<div class="campaign-thumb"></div>'}<div><strong>${escapeHtml(item.title)}</strong><small>${escapeHtml(item.message || "No message")} · ${escapeHtml(item.startDate)} to ${escapeHtml(item.endDate)}</small><small>${escapeHtml(item.linkUrl || "No destination URL")}</small></div><span>${escapeHtml(item.status)}</span><button data-delete-campaign type="button">Delete</button></article>`,
+            `<article class="campaign-card" data-campaign-id="${item.id}">${item.imageUrl ? `<img class="campaign-thumb" src="${escapeHtml(item.imageUrl)}" alt="">` : '<div class="campaign-thumb"></div>'}<div><strong>${escapeHtml(item.title)}</strong><small>${escapeHtml(item.message || "No message")} · ${escapeHtml(item.startDate)} to ${escapeHtml(item.endDate)}</small><small>${escapeHtml(item.linkUrl || "No destination URL")}</small></div><span>${escapeHtml(item.status)}</span><button data-edit-campaign type="button">Edit</button><button data-delete-campaign type="button">Delete</button></article>`,
         )
         .join("")
     : '<div class="content-panel"><div class="empty">No campaigns yet. Create one to add a scheduled promotion to signatures.</div></div>';
@@ -373,13 +383,7 @@ function bindEvents() {
       $("#brandLogoName"),
     ),
   );
-  $("#openCampaign").addEventListener("click", () => {
-    $("#campaignForm").reset();
-    $("#campaignImageName").textContent = "Optional";
-    updateCampaignBannerSelection();
-    updateCampaignComposer();
-    $("#campaignDialog").showModal();
-  });
+  $("#openCampaign").addEventListener("click", () => openCampaignDialog());
   $$("[data-close-campaign]").forEach((button) =>
     button.addEventListener("click", () => $("#campaignDialog").close()),
   );
@@ -400,7 +404,7 @@ function bindEvents() {
       : "Optional";
   });
   $("#createCampaign").addEventListener("click", createCampaign);
-  $("#campaignList").addEventListener("click", deleteCampaign);
+  $("#campaignList").addEventListener("click", handleCampaignAction);
   $("#uploadCampaignImage").addEventListener("click", () =>
     $("#campaignImageInput").click(),
   );
@@ -526,9 +530,16 @@ async function runRollout(event) {
       body: JSON.stringify({
         templateId: $("#rolloutTemplate").value,
         overwrite: $("#rolloutOverwrite").checked,
+        sendEmail: $("#rolloutEmail").checked,
       }),
     });
-    toast(`Updated ${result.updated} of ${result.total} signatures`);
+    const details = [
+      `Updated ${result.updated} of ${result.total} signatures`,
+      result.emailed ? `${result.emailed} emailed` : "",
+      result.skipped ? `${result.skipped} skipped` : "",
+      result.errors?.length ? `${result.errors.length} email errors` : "",
+    ].filter(Boolean);
+    toast(details.join(" · "));
     const users = await api("/api/signature/users");
     state.users = users.users;
     renderUsers();
@@ -558,6 +569,7 @@ async function saveBrand(event) {
           locked: form.locked.checked,
           companyName: form.companyName.value.trim(),
           accent: form.accent.value,
+          font: form.font.value,
           logoUrl: form.logoUrl.value.trim(),
         },
       }),
@@ -871,24 +883,71 @@ async function createCampaign() {
     delete body.overlayFontWeight;
     delete body.headlineSize;
     delete body.overlayTextColor;
-    button.textContent = "Scheduling…";
-    await api("/api/signature/campaigns", {
-      method: "POST",
-      body: JSON.stringify(body),
-    });
+    const editing = state.editingCampaignId;
+    button.textContent = editing ? "Saving…" : "Scheduling…";
+    await api(
+      editing
+        ? `/api/signature/campaigns/${encodeURIComponent(editing)}`
+        : "/api/signature/campaigns",
+      {
+        method: editing ? "PUT" : "POST",
+        body: JSON.stringify(body),
+      },
+    );
     state.campaigns = (await api("/api/signature/campaigns")).campaigns;
     renderCampaigns();
     $("#campaignDialog").close();
-    toast("Campaign scheduled");
+    toast(editing ? "Campaign updated" : "Campaign scheduled");
   } catch (error) {
     toast(error.message);
   } finally {
     busy(button, false);
   }
 }
-async function deleteCampaign(event) {
-  const button = event.target.closest("[data-delete-campaign]"),
-    card = event.target.closest("[data-campaign-id]");
+function openCampaignDialog(campaign = null) {
+  const form = $("#campaignForm");
+  form.reset();
+  state.editingCampaignId = campaign?.id || null;
+  $("#campaignDialogEyebrow").textContent = campaign
+    ? "Edit campaign"
+    : "New campaign";
+  $("#campaignDialogTitle").textContent = campaign
+    ? "Update signature promotion"
+    : "Schedule signature promotion";
+  $("#createCampaign").textContent = campaign
+    ? "Save campaign"
+    : "Schedule campaign";
+  if (campaign) {
+    for (const name of [
+      "title",
+      "message",
+      "linkUrl",
+      "imageUrl",
+      "startDate",
+      "endDate",
+      "status",
+    ])
+      form.elements[name].value = campaign[name] || "";
+    form.elements.overlayEnabled.checked = false;
+  }
+  $("#campaignImageName").textContent = campaign?.imageUrl
+    ? "Current campaign banner"
+    : "Optional";
+  updateCampaignBannerSelection();
+  updateCampaignComposer();
+  $("#campaignDialog").showModal();
+}
+async function handleCampaignAction(event) {
+  const card = event.target.closest("[data-campaign-id]");
+  if (!card) return;
+  if (event.target.closest("[data-edit-campaign]")) {
+    const campaign = state.campaigns.find(
+      (item) => item.id === card.dataset.campaignId,
+    );
+    if (campaign) openCampaignDialog(campaign);
+    return;
+  }
+  const button = event.target.closest("[data-delete-campaign]");
   if (!button || !card || !confirm("Delete this campaign?")) return;
   try {
     await api(`/api/signature/campaigns/${card.dataset.campaignId}`, {

@@ -144,6 +144,9 @@
             ><label
               ><input id="rolloutOverwrite" type="checkbox" /> Overwrite
               existing</label
+            ><label
+              ><input id="rolloutEmail" type="checkbox" /> Email each
+              employee</label
             ><button class="button secondary" id="runRollout" type="button">
               Run rollout
             </button>
@@ -179,6 +182,14 @@
                   name="accent"
                   type="color"
                   value="#2563eb" /></label
+              ><label
+                >Typeface<select name="font">
+                  <option value="system">Segoe UI</option>
+                  <option value="arial">Arial</option>
+                  <option value="trebuchet">Trebuchet</option>
+                  <option value="verdana">Verdana</option>
+                  <option value="georgia">Georgia</option>
+                </select></label
               ><label
                 >Company logo URL<input
                   name="logoUrl"
@@ -396,8 +407,8 @@
       <form method="dialog" class="dialog-form" id="campaignForm">
         <div class="dialog-head">
           <div>
-            <span class="eyebrow">New campaign</span>
-            <h2>Schedule signature promotion</h2>
+            <span class="eyebrow" id="campaignDialogEyebrow">New campaign</span>
+            <h2 id="campaignDialogTitle">Schedule signature promotion</h2>
           </div>
           <button data-close-campaign aria-label="Close" type="button">
             ×
@@ -415,7 +426,13 @@
             >Destination URL<input name="linkUrl" type="url" /></label
           ><label
             >Start date<input name="startDate" type="date" required /></label
-          ><label>End date<input name="endDate" type="date" required /></label>
+          ><label>End date<input name="endDate" type="date" required /></label
+          ><label
+            >Status<select name="status">
+              <option value="active">Active</option>
+              <option value="paused">Paused</option>
+            </select></label
+          >
           <section class="campaign-composer full" aria-label="Banner composer">
             <div class="campaign-composer-head">
               <div>

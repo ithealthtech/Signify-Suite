@@ -447,10 +447,13 @@ function buildSignatureHtml(templateId, data) {
     companyLogoBlock(data.companyLogoUrl, data.companyName),
   ].join("");
 
-  return `
+  const html = `
 <table role="presentation" cellpadding="0" cellspacing="0" border="0" style="font-family:${SANS};">
   ${rows}
 </table>`;
+  return data.fontFamily
+    ? html.replaceAll(SANS, data.fontFamily).replaceAll(SERIF, data.fontFamily)
+    : html;
 }
 
 // ---------- Plain-text fallback (for clients that strip HTML, or as a
