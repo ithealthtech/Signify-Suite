@@ -18,6 +18,8 @@ module.exports = [
         URL: "readonly",
         URLSearchParams: "readonly",
         AbortSignal: "readonly",
+        AbortController: "readonly",
+        DOMException: "readonly",
         console: "readonly",
         process: "readonly",
         require: "readonly",
@@ -45,6 +47,7 @@ module.exports = [
       ...shared,
       globals: {
         Blob: "readonly",
+        AbortController: "readonly",
         ClipboardItem: "readonly",
         FileReader: "readonly",
         FormData: "readonly",
