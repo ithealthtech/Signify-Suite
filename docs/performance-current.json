@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "capturedAt": "2026-07-18T09:12:49.589Z",
+  "capturedAt": "2026-07-18T09:22:31.496Z",
   "runtime": {
     "node": "v24.18.0",
     "platform": "win32",
@@ -97,24 +97,24 @@
     ]
   },
   "production": {
-    "artifactBytes": 13538375,
+    "artifactBytes": 13582443,
     "dependencyCount": 63
   },
   "tests": {
     "durationMs": {
-      "setup": 1221.957,
-      "smoke": 1970.423,
-      "build": 177.086
+      "setup": 1207.88,
+      "smoke": 1998.962,
+      "build": 183.774
     }
   },
   "server": {
-    "initializationMs": 70.102,
+    "initializationMs": 78.26,
     "healthRequests": 100,
     "healthLatencyMs": {
-      "min": 0.435,
-      "p50": 15.505,
-      "p95": 16.309,
-      "max": 16.827
+      "min": 0.517,
+      "p50": 15.597,
+      "p95": 16.364,
+      "max": 16.606
     }
   }
 }

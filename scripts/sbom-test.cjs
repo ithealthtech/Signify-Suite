@@ -14,7 +14,7 @@ assert.equal(sbom.bomFormat, "CycloneDX");
 assert.equal(sbom.specVersion, "1.5");
 assert.equal(sbom.metadata.component.name, "signify-creator");
 assert.equal(sbom.metadata.component.type, "application");
-assert.equal(sbom.metadata.component.version, "0.3.1");
+assert.equal(sbom.metadata.component.version, "0.4.0");
 for (const dependency of ["gifenc", "qrcode", "sharp", "stripe"])
   assert.ok(components.has(dependency), `SBOM is missing ${dependency}.`);
 for (const component of components.values()) {
