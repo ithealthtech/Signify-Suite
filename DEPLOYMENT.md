@@ -69,6 +69,47 @@ Subscribe to Checkout session completion, customer subscription changes/deletion
 
 Application Owners use `/platform.html` to create tenants, copy initial Tenant Admin invitation links, suspend or restore tenants, adjust seats/plans, inspect Microsoft connection health, manage owner grants, and review the global audit trail. Every lifecycle, subscription, Stripe, and owner-grant mutation requires CSRF validation and records an Application Owner audit event with a reason.
 
+### Guided provider setup
+
+Set one installation-level encryption key before storing credentials through
+the owner interface:
+
+```text
+SIGNIFY_CREDENTIAL_ENCRYPTION_KEY=<32 bytes encoded as base64 or 64 hex characters>
+```
+
+Open **Application > First-time setup** after the first Application Owner signs
+in. The wizard stores company/public URL settings, validates the Microsoft home
+tenant application against Graph, and requires Stripe configuration or an
+explicit billing deferral. **Application > Integrations** can then:
+
+- validate and replace Microsoft application credentials
+- display Microsoft tenant and granted application-permission health
+- validate a Stripe test or live key and discover recurring prices
+- map Signify plans and create the signed webhook endpoint
+- open Stripe's customer portal and submit plan, cancellation, or reactivation changes
+- disconnect either provider with an audited reason
+
+Provider secrets are encrypted with AES-256-GCM and provider-specific
+authenticated context. They are never returned by the API or included in audit
+metadata. Keep the encryption key outside database backups. Losing it makes
+stored provider credentials unrecoverable.
+
+Rotate the encryption key while the application is stopped:
+
+```powershell
+$env:SIGNIFY_OLD_CREDENTIAL_ENCRYPTION_KEY="<current key>"
+$env:SIGNIFY_CREDENTIAL_ENCRYPTION_KEY="<new key>"
+npm run credentials:rotate
+```
+
+Update the hosted environment to the new key before restarting. Verify real
+provider access without exposing secrets:
+
+```powershell
+npm run integrations:verify
+```
+
 ## 7. Backups and monitoring
 
 Schedule `npm run backup` at least daily and copy backups to separate durable storage. Test restoration by starting a release against a copied backup. Monitor `GET /api/health`, process exits, HTTP 5xx logs, failed directory sync runs, and Stripe webhook delivery failures.

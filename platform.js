@@ -1,7 +1,13 @@
 "use strict";
 const $ = (selector) => document.querySelector(selector);
 const $$ = (selector) => [...document.querySelectorAll(selector)];
-const state = { page: 1, pagination: null, organizations: [], detail: null };
+const state = {
+  page: 1,
+  pagination: null,
+  organizations: [],
+  detail: null,
+  stripePrices: [],
+};
 
 function cookieValue(name) {
   return (
@@ -27,10 +33,14 @@ async function api(path, options = {}) {
       ...options,
     }),
     data = await response.json().catch(() => ({}));
-  if (!response.ok)
-    throw new Error(
+  if (!response.ok) {
+    const error = new Error(
       data.error?.message || `Request failed (${response.status})`,
     );
+    error.status = response.status;
+    error.code = data.error?.code || "REQUEST_FAILED";
+    throw error;
+  }
   return data;
 }
 function escapeHtml(value) {
@@ -82,6 +92,187 @@ async function loadSession() {
     ? "Stripe is configured for Application Owner checkout."
     : "Stripe is not configured in this environment.";
   $("#createCheckout").disabled = !result.stripe.configured;
+}
+function stripePriceLabel(price) {
+  const amount = Number.isInteger(price.unitAmount)
+    ? new Intl.NumberFormat(undefined, {
+        style: "currency",
+        currency: String(price.currency || "usd").toUpperCase(),
+      }).format(price.unitAmount / 100)
+    : "Custom";
+  return `${price.productName} - ${amount}/${price.interval || "period"}`;
+}
+function renderStripePrices(selected = {}) {
+  for (const plan of ["starter", "team", "business"]) {
+    const select = $(`#stripePlanForm [name="${plan}"]`);
+    select.innerHTML =
+      '<option value="">Not offered</option>' +
+      state.stripePrices
+        .map(
+          (price) =>
+            `<option value="${escapeHtml(price.id)}">${escapeHtml(stripePriceLabel(price))}</option>`,
+        )
+        .join("");
+    select.value = selected[plan] || "";
+  }
+}
+async function loadIntegrations() {
+  const result = await api("/api/platform/integrations"),
+    stripe = result.stripe,
+    microsoft = result.microsoft;
+  state.stripePrices = stripe.catalog || state.stripePrices;
+  $("#microsoftIntegrationStatus").innerHTML =
+    `<div><span>Status</span><strong>${escapeHtml(microsoft.status)}</strong></div>` +
+    `<div><span>Organization</span><strong>${escapeHtml(microsoft.accountName || "Not connected")}</strong></div>` +
+    `<div><span>Tenant</span><strong>${escapeHtml(microsoft.homeTenantId || "-")}</strong></div>` +
+    `<div><span>Verified</span><strong>${escapeHtml(dateLabel(microsoft.lastVerifiedAt))}</strong></div>`;
+  $("#microsoftPermissions").textContent = microsoft.permissions?.length
+    ? `Granted application permissions: ${microsoft.permissions.join(", ")}`
+    : "Connect and verify the Microsoft application from First-time setup.";
+  $("#disconnectMicrosoft").disabled = microsoft.source !== "vault";
+  $("#stripeIntegrationStatus").innerHTML =
+    `<div><span>Status</span><strong>${escapeHtml(stripe.status)}</strong></div>` +
+    `<div><span>Account</span><strong>${escapeHtml(stripe.accountName || "Not connected")}</strong></div>` +
+    `<div><span>Mode</span><strong>${escapeHtml(stripe.mode || "-")}</strong></div>` +
+    `<div><span>Verified</span><strong>${escapeHtml(dateLabel(stripe.lastVerifiedAt))}</strong></div>`;
+  $("#stripeConnectForm").hidden = stripe.source === "vault";
+  $("#stripePlanForm").hidden = stripe.source !== "vault";
+  $("#stripeTestForm").hidden = !stripe.configured || stripe.mode !== "test";
+  renderStripePrices(stripe.prices || {});
+}
+async function loadSetup({ navigate = false } = {}) {
+  const result = await api("/api/platform/setup"),
+    steps = [
+      ["Identity", result.company.ready],
+      ["Credential vault", result.vault.configured],
+      ["Microsoft 365", result.microsoft.configured],
+      ["Stripe", result.stripe.configured || result.stripe.skipped],
+    ];
+  $("#setupProgress").innerHTML = steps
+    .map(
+      ([label, ready], index) =>
+        `<div><strong>${index + 1}. ${escapeHtml(label)}</strong><span>${ready ? "Ready" : "Action required"}</span></div>`,
+    )
+    .join("");
+  $("#setupCompletion").textContent = result.complete ? "Ready" : "Not ready";
+  $("#setupReadinessMessage").textContent = result.complete
+    ? "Application services are ready for tenant onboarding."
+    : "Complete identity, credential vault, Microsoft 365, and Stripe setup or deferral.";
+  $("#finishSetup").disabled = !result.complete;
+  const identity = $("#applicationSetupForm").elements;
+  identity.companyName.value = result.company.name || "";
+  identity.publicUrl.value = result.company.publicUrl || "";
+  $("#skipStripeSetup").textContent = result.stripe.skipped
+    ? "Require Stripe"
+    : "Skip for now";
+  $("#skipStripeSetup").dataset.skipped = result.stripe.skipped
+    ? "true"
+    : "false";
+  if (navigate && !result.complete) showSection("setup");
+  return result;
+}
+async function saveApplicationSetup(event) {
+  event.preventDefault();
+  const button = event.submitter,
+    body = Object.fromEntries(new FormData(event.currentTarget));
+  busy(button, true, "Saving...");
+  try {
+    await api("/api/platform/setup/application", {
+      method: "PUT",
+      body: JSON.stringify(body),
+    });
+    await loadSetup();
+    toast("Application identity saved");
+  } catch (error) {
+    toast(error.message);
+  } finally {
+    busy(button, false);
+  }
+}
+async function saveMicrosoftSetup(event) {
+  event.preventDefault();
+  const button = event.submitter,
+    body = Object.fromEntries(new FormData(event.currentTarget));
+  busy(button, true, "Verifying...");
+  try {
+    await api("/api/platform/integrations/microsoft/connect", {
+      method: "POST",
+      body: JSON.stringify(body),
+    });
+    event.currentTarget.elements.clientSecret.value = "";
+    await loadSetup();
+    toast("Microsoft application verified");
+  } catch (error) {
+    toast(error.message);
+  } finally {
+    busy(button, false);
+  }
+}
+async function connectStripe(event) {
+  event.preventDefault();
+  const button = event.submitter,
+    body = Object.fromEntries(new FormData(event.currentTarget));
+  busy(button, true, "Verifying...");
+  try {
+    const result = await api("/api/platform/integrations/stripe/connect", {
+      method: "POST",
+      body: JSON.stringify(body),
+    });
+    state.stripePrices = result.prices;
+    event.currentTarget.reset();
+    renderStripePrices();
+    await loadIntegrations();
+    $("#stripePlanForm").hidden = false;
+    toast("Stripe account verified");
+  } catch (error) {
+    toast(error.message);
+  } finally {
+    busy(button, false);
+  }
+}
+async function configureStripe(event) {
+  event.preventDefault();
+  const button = event.submitter,
+    form = new FormData(event.currentTarget),
+    body = {
+      prices: {
+        starter: form.get("starter"),
+        team: form.get("team"),
+        business: form.get("business"),
+      },
+      reason: form.get("reason"),
+    };
+  busy(button, true, "Configuring...");
+  try {
+    await api("/api/platform/integrations/stripe/configure", {
+      method: "PUT",
+      body: JSON.stringify(body),
+    });
+    await Promise.all([loadIntegrations(), loadSession()]);
+    toast("Stripe plans and webhook configured");
+  } catch (error) {
+    toast(error.message);
+  } finally {
+    busy(button, false);
+  }
+}
+async function testStripeCheckout(event) {
+  event.preventDefault();
+  const button = event.submitter,
+    body = Object.fromEntries(new FormData(event.currentTarget));
+  busy(button, true, "Creating...");
+  try {
+    const result = await api(
+      "/api/platform/integrations/stripe/test-checkout",
+      { method: "POST", body: JSON.stringify(body) },
+    );
+    window.open(result.url, "_blank", "noopener");
+    toast("Stripe sandbox Checkout created");
+  } catch (error) {
+    toast(error.message);
+  } finally {
+    busy(button, false);
+  }
 }
 async function loadTenants() {
   const params = new URLSearchParams({
@@ -153,6 +344,7 @@ async function openTenant(id) {
   checkoutForm.plan.value = result.subscription.plan;
   checkoutForm.customerEmail.value =
     result.members.find((member) => member.role === "admin")?.email || "";
+  $("#stripeSubscriptionForm").elements.plan.value = result.subscription.plan;
   $("#detailMembers").innerHTML = result.members.length
     ? result.members
         .map(
@@ -256,10 +448,48 @@ async function createCheckout(event) {
     busy(button, false);
   }
 }
+async function stripeSubscriptionAction(event) {
+  event.preventDefault();
+  const button = event.submitter,
+    form = new FormData(event.currentTarget),
+    body = {
+      action: button.dataset.stripeAction,
+      plan: form.get("plan"),
+      reason: form.get("reason"),
+    };
+  busy(button, true, "Submitting...");
+  try {
+    await api(
+      `/api/platform/organizations/${state.detail.organization.id}/billing/subscription`,
+      { method: "PUT", body: JSON.stringify(body) },
+    );
+    toast("Stripe accepted the subscription change");
+  } catch (error) {
+    toast(error.message);
+  } finally {
+    busy(button, false);
+  }
+}
+async function openStripePortal() {
+  const button = $("#openStripePortal");
+  busy(button, true, "Opening...");
+  try {
+    const result = await api(
+      `/api/platform/organizations/${state.detail.organization.id}/billing/portal`,
+      { method: "POST", body: "{}" },
+    );
+    window.open(result.url, "_blank", "noopener");
+  } catch (error) {
+    toast(error.message);
+  } finally {
+    busy(button, false);
+  }
+}
 function bindEvents() {
   $$("[data-section]").forEach((button) =>
     button.addEventListener("click", async () => {
       showSection(button.dataset.section);
+      if (button.dataset.section === "integrations") await loadIntegrations();
       if (button.dataset.section === "owners") await loadOwners();
       if (button.dataset.section === "audit") await loadAudit();
     }),
@@ -279,6 +509,11 @@ function bindEvents() {
   $("#tenantStatusForm").addEventListener("submit", updateTenantStatus);
   $("#subscriptionForm").addEventListener("submit", updateSubscription);
   $("#checkoutForm").addEventListener("submit", createCheckout);
+  $("#stripeSubscriptionForm").addEventListener(
+    "submit",
+    stripeSubscriptionAction,
+  );
+  $("#openStripePortal").addEventListener("click", openStripePortal);
   $("#tenantRows").addEventListener("click", (event) => {
     const button = event.target.closest("[data-tenant-id]");
     if (button)
@@ -348,6 +583,69 @@ function bindEvents() {
   $("#refreshAudit").addEventListener("click", () =>
     loadAudit().catch((error) => toast(error.message)),
   );
+  $("#refreshIntegrations").addEventListener("click", () =>
+    loadIntegrations().catch((error) => toast(error.message)),
+  );
+  $("#openMicrosoftSetup").addEventListener("click", () =>
+    showSection("setup"),
+  );
+  $("#disconnectMicrosoft").addEventListener("click", async () => {
+    const reason = prompt("Reason for disconnecting Microsoft 365:");
+    if (!reason) return;
+    try {
+      await api("/api/platform/integrations/microsoft", {
+        method: "DELETE",
+        body: JSON.stringify({ reason }),
+      });
+      await Promise.all([loadIntegrations(), loadSetup()]);
+      toast("Microsoft application disconnected");
+    } catch (error) {
+      toast(error.message);
+    }
+  });
+  $("#applicationSetupForm").addEventListener("submit", saveApplicationSetup);
+  $("#microsoftSetupForm").addEventListener("submit", saveMicrosoftSetup);
+  $("#openStripeSetup").addEventListener("click", async () => {
+    showSection("integrations");
+    await loadIntegrations();
+  });
+  $("#skipStripeSetup").addEventListener("click", async (event) => {
+    const skipped = event.currentTarget.dataset.skipped !== "true";
+    try {
+      await api("/api/platform/setup/stripe-skip", {
+        method: "PUT",
+        body: JSON.stringify({
+          skipped,
+          reason: skipped
+            ? "Defer Stripe during setup"
+            : "Require Stripe setup",
+        }),
+      });
+      await loadSetup();
+      toast(skipped ? "Stripe deferred" : "Stripe is now required");
+    } catch (error) {
+      toast(error.message);
+    }
+  });
+  $("#finishSetup").addEventListener("click", () => showSection("tenants"));
+  $("#stripeConnectForm").addEventListener("submit", connectStripe);
+  $("#stripePlanForm").addEventListener("submit", configureStripe);
+  $("#stripeTestForm").addEventListener("submit", testStripeCheckout);
+  $("#disconnectStripe").addEventListener("click", async () => {
+    const reason = prompt("Reason for disconnecting Stripe:");
+    if (!reason) return;
+    try {
+      await api("/api/platform/integrations/stripe", {
+        method: "DELETE",
+        body: JSON.stringify({ reason }),
+      });
+      state.stripePrices = [];
+      await Promise.all([loadIntegrations(), loadSession()]);
+      toast("Stripe disconnected");
+    } catch (error) {
+      toast(error.message);
+    }
+  });
   $("#logout").addEventListener("click", async () => {
     await api("/api/signature/logout", { method: "POST", body: "{}" });
     location.href = "/signature.html";
@@ -357,7 +655,7 @@ function bindEvents() {
 async function boot() {
   await loadSession();
   bindEvents();
-  await loadTenants();
+  await Promise.all([loadTenants(), loadSetup({ navigate: true })]);
   const billing = new URLSearchParams(location.search).get("billing");
   if (billing)
     toast(
@@ -366,4 +664,8 @@ async function boot() {
         : "Stripe checkout canceled",
     );
 }
-boot().catch(() => (location.href = "/signature.html"));
+boot().catch((error) => {
+  if (error.status === 401)
+    location.href = "/signature.html?auth=account-required";
+  else toast(error.message);
+});

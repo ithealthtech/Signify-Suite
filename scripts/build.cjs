@@ -25,6 +25,8 @@ const root = path.join(__dirname, ".."),
     "public",
     "scripts/backup.cjs",
     "scripts/grant-application-owner.cjs",
+    "scripts/rotate-integration-credentials.cjs",
+    "scripts/verify-provider-integrations.cjs",
     "start-production.cmd",
   ];
 

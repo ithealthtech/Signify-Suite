@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+- Added an Application Owner first-time setup and readiness workflow.
+- Added encrypted Microsoft and Stripe credential storage with atomic key rotation.
+- Added Microsoft application credential, tenant, Graph, and permission validation.
+- Added Stripe account discovery, recurring-price mapping, automatic webhook registration, and sandbox-ready onboarding.
+- Added Stripe billing portal, provider-backed plan changes, cancellation, and reactivation controls.
+- Added live read-only provider acceptance verification and expanded regression coverage.
+
+## Unreleased
+
 ### Added
 
 - Three-tier authorization: Application Owner, Tenant Admin, and End User.

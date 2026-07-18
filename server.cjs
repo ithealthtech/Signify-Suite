@@ -202,6 +202,7 @@ function createApplication(options = {}) {
     publicRoot: config.publicRoot,
     trustProxy: config.trustProxy,
     fetchImpl: options.fetchImpl,
+    stripeFactory: options.stripeFactory,
   });
   const rateBuckets = new Map();
   function clientIp(req) {
