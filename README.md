@@ -328,6 +328,17 @@ available, use a Hostinger VPS or another host with a persistent volume.
 
 ## Validation and Health
 
+Capture the current size, dependency, test-duration, startup, and health-request
+baseline with:
+
+```bash
+npm run benchmark
+```
+
+The machine-readable result is written to
+`docs/performance-baseline.json`; methodology and acceptance rules are in
+`docs/OPTIMIZATION.md`.
+
 Run the complete local validation suite:
 
 ```powershell
