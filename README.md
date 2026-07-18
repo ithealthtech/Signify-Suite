@@ -84,6 +84,43 @@ Database migrations run automatically when the server starts.
 
 ## Production Installation
 
+### Install a release package
+
+Extract the GitHub release, open a terminal in that directory, and run:
+
+```powershell
+npm ci --omit=dev
+npm run setup
+npm start
+```
+
+The interactive installer asks for the owner email, company name, public HTTPS
+URL, persistent database and backup paths, listen address, port, and proxy
+setting. It then:
+
+- verifies Node.js and all writable directories
+- generates the credential-encryption key and initial owner password
+- writes `.env.local` with bootstrap disabled
+- initializes SQLite and applies every migration
+- creates the first Application Owner
+- prints the login password and First-time setup URL
+
+Store the displayed password immediately; it is shown only for a fresh
+installation. If `.env.local` already exists, the installer backs it up before
+updating it. Rerunning setup validates the installation without resetting users
+or passwords.
+
+For a hosting panel that supplies environment variables and does not provide an
+interactive terminal, configure the required values in the panel and run:
+
+```powershell
+npm run setup -- --non-interactive --no-write-env
+```
+
+After that command, set `SIGNATURE_ALLOW_DEFAULT_ADMIN=false`, remove
+`SIGNIFY_BOOTSTRAP_PASSWORD` from the panel, and restart the application. Run
+`npm run setup -- --help` for all installer options.
+
 ### 1. Build the release
 
 From a clean source checkout:
@@ -102,16 +139,17 @@ migrations, and the production build. The deployable application is written to
 ```powershell
 Set-Location dist
 npm ci --omit=dev
-Copy-Item .env.example .env.local
+npm run setup
 ```
 
 The `dist/` directory is self-contained and excludes development databases,
-backups, tests, and installer files.
+backups, and tests.
 
 ### 3. Configure production
 
-At minimum, set the following values in `dist/.env.local` or in the hosting
-provider's environment-variable interface:
+The installer creates `dist/.env.local`. For noninteractive hosting, set these
+values in the hosting provider's environment-variable interface before running
+setup:
 
 ```env
 NODE_ENV=production
