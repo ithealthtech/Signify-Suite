@@ -311,7 +311,7 @@ function renderSettings() {
   form.sessionHours.value = settings.sessionHours || 12;
   form.backupPath.value = settings.backupPath || "";
   form.requireApproval.checked = Boolean(settings.requireApproval);
-  $("#planName").textContent = (subscription?.plan || "beta").replace(
+  $("#planName").textContent = (subscription?.plan || "starter").replace(
     /^./,
     (char) => char.toUpperCase(),
   );
