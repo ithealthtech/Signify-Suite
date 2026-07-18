@@ -9,8 +9,13 @@ function openDatabase(databasePath) {
   const db = new DatabaseSync(databasePath);
   db.exec("PRAGMA foreign_keys = ON;");
   db.exec("PRAGMA busy_timeout = 5000;");
-  if (databasePath !== ":memory:") db.exec("PRAGMA journal_mode = WAL;");
+  if (databasePath !== ":memory:") {
+    db.exec("PRAGMA journal_mode = WAL;");
+    db.exec("PRAGMA synchronous = NORMAL;");
+  }
+  db.exec("PRAGMA temp_store = MEMORY;");
   migrate(db);
+  db.exec("PRAGMA optimize=0x10002;");
   return db;
 }
 
