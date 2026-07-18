@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.3.0-rc.3 - 2026-07-18
 
 ### Changed
 
