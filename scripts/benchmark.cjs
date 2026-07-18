@@ -129,8 +129,12 @@ async function main() {
     },
     sourceFiles = fileMetrics([
       "server.cjs",
+      "server/access-control.cjs",
+      "server/auth-security.cjs",
+      "server/http-responses.cjs",
       "server/signature-portal.cjs",
       "server/templates.cjs",
+      "server/validation.cjs",
       "admin.js",
       "platform.js",
       "signature.js",
@@ -140,6 +144,7 @@ async function main() {
       "signature.css",
       "signify-shared.css",
       "scripts/smoke-test.cjs",
+      "scripts/unit-test.cjs",
     ]),
     report = {
       schemaVersion: 1,
