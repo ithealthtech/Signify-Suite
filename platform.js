@@ -1,6 +1,5 @@
 "use strict";
-const $ = (selector) => document.querySelector(selector);
-const $$ = (selector) => [...document.querySelectorAll(selector)];
+const { $, $$, api, escapeHtml } = window.Signify;
 const state = {
   page: 1,
   pagination: null,
@@ -9,49 +8,6 @@ const state = {
   stripePrices: [],
 };
 
-function cookieValue(name) {
-  return (
-    document.cookie
-      .split(";")
-      .map((item) => item.trim())
-      .find((item) => item.startsWith(`${name}=`))
-      ?.slice(name.length + 1) || ""
-  );
-}
-async function api(path, options = {}) {
-  const method = String(options.method || "GET").toUpperCase(),
-    csrf = !["GET", "HEAD", "OPTIONS"].includes(method)
-      ? decodeURIComponent(cookieValue("sig_csrf"))
-      : "",
-    response = await fetch(path, {
-      credentials: "same-origin",
-      headers: {
-        "Content-Type": "application/json",
-        ...(csrf ? { "X-CSRF-Token": csrf } : {}),
-        ...(options.headers || {}),
-      },
-      ...options,
-    }),
-    data = await response.json().catch(() => ({}));
-  if (!response.ok) {
-    const error = new Error(
-      data.error?.message || `Request failed (${response.status})`,
-    );
-    error.status = response.status;
-    error.code = data.error?.code || "REQUEST_FAILED";
-    throw error;
-  }
-  return data;
-}
-function escapeHtml(value) {
-  return String(value || "").replace(
-    /[&<>"']/g,
-    (char) =>
-      ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[
-        char
-      ],
-  );
-}
 function dateLabel(value) {
   if (!value) return "Never";
   const date = new Date(value);

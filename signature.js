@@ -1,6 +1,5 @@
 "use strict";
-const $ = (selector) => document.querySelector(selector);
-const $$ = (selector) => [...document.querySelectorAll(selector)];
+const { $, $$, api, escapeHtml, initials } = window.Signify;
 const els = {
   authView: $("#authView"),
   appView: $("#appView"),
@@ -37,50 +36,11 @@ let state = {
   previewSequence: 0,
 };
 
-function cookieValue(name) {
-  return (
-    document.cookie
-      .split(";")
-      .map((item) => item.trim())
-      .find((item) => item.startsWith(`${name}=`))
-      ?.slice(name.length + 1) || ""
-  );
-}
-async function api(path, options = {}) {
-  const method = String(options.method || "GET").toUpperCase(),
-    csrf = !["GET", "HEAD", "OPTIONS"].includes(method)
-      ? decodeURIComponent(cookieValue("sig_csrf"))
-      : "";
-  const response = await fetch(path, {
-    credentials: "same-origin",
-    headers: {
-      "Content-Type": "application/json",
-      ...(csrf ? { "X-CSRF-Token": csrf } : {}),
-      ...(options.headers || {}),
-    },
-    ...options,
-  });
-  const data = await response.json().catch(() => ({}));
-  if (!response.ok)
-    throw new Error(
-      data.error?.message || `Request failed (${response.status})`,
-    );
-  return data;
-}
 function toast(message) {
   els.toast.textContent = message;
   els.toast.classList.add("show");
   clearTimeout(toast.timer);
   toast.timer = setTimeout(() => els.toast.classList.remove("show"), 2600);
-}
-function initials(name) {
-  return String(name || "SC")
-    .split(/\s+/)
-    .filter(Boolean)
-    .map((part) => part[0])
-    .slice(0, 2)
-    .join("")
-    .toUpperCase();
 }
 function activeUser() {
   return (
@@ -230,15 +190,6 @@ function renderCustomTemplates() {
           `<option value="${template.id}">${escapeHtml(template.name)}</option>`,
       )
       .join("");
-}
-function escapeHtml(value) {
-  return String(value || "").replace(
-    /[&<>"']/g,
-    (char) =>
-      ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[
-        char
-      ],
-  );
 }
 function selectUser(id) {
   const user = state.users.find((item) => item.id === id);

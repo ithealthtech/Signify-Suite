@@ -3,7 +3,8 @@
 Run `npm run benchmark` on the same host before and after structural or runtime
 optimization work. The command rebuilds the production artifact, runs the setup
 and smoke suites independently, measures application initialization and 100
-health requests, and writes `docs/performance-baseline.json`.
+health requests, and writes `docs/performance-current.json`. Compare that report
+with the checked-in initial `docs/performance-baseline.json`.
 
 ## Initial findings
 
