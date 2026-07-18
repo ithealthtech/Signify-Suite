@@ -396,6 +396,12 @@ async function main() {
     result = await request(baseUrl, "/api/signature/admin-config", {
       jar: adminJar,
     });
+    assert(
+      result.response.status === 200 &&
+        result.body.subscription?.plan === "starter" &&
+        result.body.subscription?.status === "trialing",
+      "stable workspaces did not start on the Starter trial",
+    );
     const approvalSettings = result.body.workspace.settings,
       workspaceName = result.body.workspace.name;
     result = await request(baseUrl, "/api/signature/admin-config", {
@@ -1114,6 +1120,14 @@ async function main() {
         )
         .get(),
       "query index migration was not applied",
+    );
+    assert(
+      application.db
+        .prepare(
+          "SELECT 1 FROM schema_migrations WHERE version='009_stable_starter_plan.sql'",
+        )
+        .get(),
+      "stable Starter plan migration was not applied",
     );
     await new Promise((resolve) => server.close(resolve));
     application.db.close();

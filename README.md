@@ -1,4 +1,4 @@
-# Signify Creator Beta
+# Signify Creator
 
 Signify Creator is a multi-tenant email-signature workspace. It combines an Outlook-safe signature studio with member governance, reusable templates, campaigns, approvals, bulk rollout, Microsoft 365 directory/email integration, Stripe subscriptions, click analytics, audit history, image uploads, QR codes, and vCards.
 

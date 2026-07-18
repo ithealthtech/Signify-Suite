@@ -1829,7 +1829,7 @@ function createSignaturePortal({
           "INSERT INTO organizations(id,name,slug,settings_json) VALUES (?,?,?,?)",
         ).run(orgId, company, baseSlug, JSON.stringify(settings));
         db.prepare(
-          `INSERT INTO organization_subscriptions(organization_id,plan,status,seats,trial_ends_at) VALUES (?,'beta','trialing',10,strftime('%Y-%m-%dT%H:%M:%fZ','now','+30 days'))`,
+          `INSERT INTO organization_subscriptions(organization_id,plan,status,seats,trial_ends_at) VALUES (?,'starter','trialing',10,strftime('%Y-%m-%dT%H:%M:%fZ','now','+30 days'))`,
         ).run(orgId);
         const sig = normalizeSignature(
           { display_name: name, email, signature_json: "{}" },
@@ -3803,7 +3803,7 @@ function seed(db, signature = {}) {
         "INSERT INTO signature_templates(id,name,template_json,organization_id) VALUES (?,?,?,?)",
       ).run(randomUUID(), name, JSON.stringify(patch), organization.id);
   db.prepare(
-    `INSERT INTO organization_subscriptions(organization_id,plan,status,seats,trial_ends_at) VALUES (?,'beta','trialing',10,strftime('%Y-%m-%dT%H:%M:%fZ','now','+30 days')) ON CONFLICT(organization_id) DO NOTHING`,
+    `INSERT INTO organization_subscriptions(organization_id,plan,status,seats,trial_ends_at) VALUES (?,'starter','trialing',10,strftime('%Y-%m-%dT%H:%M:%fZ','now','+30 days')) ON CONFLICT(organization_id) DO NOTHING`,
   ).run(organization.id);
 }
 
