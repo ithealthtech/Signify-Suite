@@ -31,6 +31,13 @@ function loadConfig(env = process.env, baseDir = path.join(__dirname, "..")) {
   const sessionHours = Number(env.SIGNATURE_SESSION_HOURS || 12);
   if (!Number.isFinite(sessionHours) || sessionHours < 1 || sessionHours > 168)
     throw new Error("SIGNATURE_SESSION_HOURS must be from 1 to 168.");
+  const mediaLimitMb = Number(env.SIGNIFY_TENANT_MEDIA_LIMIT_MB || 250);
+  if (
+    !Number.isFinite(mediaLimitMb) ||
+    mediaLimitMb < 10 ||
+    mediaLimitMb > 10240
+  )
+    throw new Error("SIGNIFY_TENANT_MEDIA_LIMIT_MB must be from 10 to 10240.");
   const allowDefaultAdmin = bool(
       env.SIGNATURE_ALLOW_DEFAULT_ADMIN,
       !production,
@@ -139,6 +146,7 @@ function loadConfig(env = process.env, baseDir = path.join(__dirname, "..")) {
       env.DATABASE_PATH || path.join(baseDir, "data", "signify-creator.db"),
     signature: {
       sessionHours,
+      mediaLimitBytes: Math.floor(mediaLimitMb * 1024 * 1024),
       allowDefaultAdmin,
       bootstrapEmail,
       bootstrapPassword,

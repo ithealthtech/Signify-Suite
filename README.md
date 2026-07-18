@@ -171,6 +171,7 @@ DATABASE_PATH=/persistent/signify/data/signify-creator.db
 BACKUP_DIR=/persistent/signify/backups
 
 SIGNATURE_SESSION_HOURS=12
+SIGNIFY_TENANT_MEDIA_LIMIT_MB=250
 SIGNATURE_ALLOW_DEFAULT_ADMIN=false
 SIGNIFY_BOOTSTRAP_EMAIL=owner@example.com
 SIGNIFY_BOOTSTRAP_PASSWORD=replace-with-a-long-random-password
@@ -183,9 +184,11 @@ SIGNIFY_ALLOW_REGISTRATION=false
 SIGNIFY_CREDENTIAL_ENCRYPTION_KEY=replace-with-a-generated-32-byte-key
 ```
 
-Use absolute persistent paths for `DATABASE_PATH` and `BACKUP_DIR`. Keep the
-encryption key outside database backups. Losing the key makes credentials saved
-through the integration wizard unrecoverable.
+Use absolute persistent paths for `DATABASE_PATH` and `BACKUP_DIR`.
+`SIGNIFY_TENANT_MEDIA_LIMIT_MB` limits the combined uploads and generated-banner
+storage for each tenant. Keep the encryption key outside database backups.
+Losing the key makes credentials saved through the integration wizard
+unrecoverable.
 
 Set `TRUST_PROXY=true` only when the Node.js port is inaccessible directly and
 traffic arrives through a trusted reverse proxy.

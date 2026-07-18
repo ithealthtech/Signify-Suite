@@ -25,6 +25,7 @@ const {
   verifyPassword,
 } = require("./auth-security.cjs");
 const { redirect, textResponse } = require("./http-responses.cjs");
+const { writeTenantMedia } = require("./media-storage.cjs");
 const {
   BRAND_FONT_STACKS,
   campaignInput,
@@ -3901,21 +3902,22 @@ function createSignaturePortal({
         );
       }
       const ext = processed.format === "jpeg" ? "jpg" : processed.format,
-        dir = path.join(publicRoot, "uploads", user.organizationId),
-        name = `${slug(body.kind || "image")}-${randomUUID()}.${ext}`;
-      fs.mkdirSync(dir, { recursive: true });
-      fs.writeFileSync(path.join(dir, name), processed.bytes);
+        name = `${slug(body.kind || "image")}-${randomUUID()}.${ext}`,
+        stored = writeTenantMedia({
+          publicRoot,
+          organizationId: user.organizationId,
+          collection: "uploads",
+          name,
+          bytes: processed.bytes,
+          limitBytes: signature.mediaLimitBytes || 250 * 1024 * 1024,
+        });
       recordAudit(user, "asset.uploaded", "asset", name, {
         kind: limited(body.kind || "image", 40),
         sourceBytes: bytes.length,
         storedBytes: processed.bytes.length,
+        usageBytes: stored.usageBytes,
       });
-      return json(
-        res,
-        201,
-        { url: `/uploads/${user.organizationId}/${name}` },
-        requestId,
-      );
+      return json(res, 201, stored, requestId);
     }
     if (
       url.pathname === "/api/signature/generated-banners" &&
@@ -3969,26 +3971,24 @@ function createSignaturePortal({
         }),
       );
       gif.finish();
-      const dir = path.join(
+      const name = `banner-${randomUUID()}.gif`,
+        stored = writeTenantMedia({
           publicRoot,
-          "generated-banners",
-          user.organizationId,
-        ),
-        name = `banner-${randomUUID()}.gif`;
-      fs.mkdirSync(dir, { recursive: true });
-      fs.writeFileSync(path.join(dir, name), Buffer.from(gif.bytes()));
+          organizationId: user.organizationId,
+          collection: "generated-banners",
+          name,
+          bytes: Buffer.from(gif.bytes()),
+          limitBytes: signature.mediaLimitBytes || 250 * 1024 * 1024,
+        });
       recordAudit(user, "asset.generated", "asset", name, {
         kind: "animated-banner",
         frames: frames.length,
         width,
         height,
+        storedBytes: stored.storedBytes,
+        usageBytes: stored.usageBytes,
       });
-      return json(
-        res,
-        201,
-        { url: `/generated-banners/${user.organizationId}/${name}` },
-        requestId,
-      );
+      return json(res, 201, stored, requestId);
     }
     if (url.pathname === "/api/signature/preview" && req.method === "POST") {
       const body = await readJsonBody(req, { limit: 65536 }),
