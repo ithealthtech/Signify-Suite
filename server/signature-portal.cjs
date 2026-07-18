@@ -65,8 +65,13 @@ function tokenHash(token) {
 function cookie(req, name) {
   for (const item of String(req.headers.cookie || "").split(";")) {
     const index = item.indexOf("=");
-    if (index > 0 && decodeURIComponent(item.slice(0, index).trim()) === name)
-      return decodeURIComponent(item.slice(index + 1).trim());
+    if (index <= 0) continue;
+    try {
+      if (decodeURIComponent(item.slice(0, index).trim()) === name)
+        return decodeURIComponent(item.slice(index + 1).trim());
+    } catch {
+      continue;
+    }
   }
   return "";
 }
@@ -75,6 +80,9 @@ function sessionCookie(token, maxAge, secure) {
 }
 function csrfCookie(token, maxAge, secure) {
   return `sig_csrf=${encodeURIComponent(token || "")}; Path=/; SameSite=Strict; Max-Age=${maxAge};${secure ? " Secure;" : ""}`;
+}
+function oauthStateCookie(token, maxAge, secure) {
+  return `sig_oauth_state=${encodeURIComponent(token || "")}; Path=/auth/microsoft/callback; HttpOnly; SameSite=Lax; Max-Age=${maxAge};${secure ? " Secure;" : ""}`;
 }
 function validEmail(value) {
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(value || ""));
@@ -184,6 +192,29 @@ function campaignInput(body = {}, existing = {}) {
     status:
       String(body.status ?? existing.status) === "paused" ? "paused" : "active",
   };
+}
+function signatureInputError(input) {
+  if (input === undefined) return "";
+  if (!input || typeof input !== "object" || Array.isArray(input))
+    return "Signature data must be an object.";
+  if (input.templateId && !TEMPLATES[input.templateId])
+    return "Choose an available signature template.";
+  if (
+    input.colors?.accent &&
+    !/^#[0-9a-f]{6}$/i.test(String(input.colors.accent))
+  )
+    return "Choose a valid accent color.";
+  for (const value of [
+    input.fields?.website,
+    input.fields?.social?.linkedin,
+    input.fields?.social?.twitter,
+    input.fields?.social?.instagram,
+    input.fields?.social?.facebook,
+  ])
+    if (value && !validUrl(value)) return "Enter valid contact URLs.";
+  for (const value of [input.photoUrl, input.bannerUrl])
+    if (value && !validMediaUrl(value)) return "Enter valid image URLs.";
+  return "";
 }
 function installEmailBody(signatureHtml) {
   return `<p>Your email signature is ready.</p>${signatureHtml}<p>Copy the signature above and paste it into your Outlook or Gmail signature settings.</p>`;
@@ -351,6 +382,39 @@ function normalizeSignature(row, raw = safeJson(row.signature_json)) {
     updatedAt: raw.updatedAt || null,
   };
 }
+function mergeSignature(row, input = {}) {
+  const current = normalizeSignature(row),
+    patch =
+      input && typeof input === "object" && !Array.isArray(input) ? input : {},
+    fields =
+      patch.fields &&
+      typeof patch.fields === "object" &&
+      !Array.isArray(patch.fields)
+        ? patch.fields
+        : {},
+    social =
+      fields.social &&
+      typeof fields.social === "object" &&
+      !Array.isArray(fields.social)
+        ? fields.social
+        : {},
+    colors =
+      patch.colors &&
+      typeof patch.colors === "object" &&
+      !Array.isArray(patch.colors)
+        ? patch.colors
+        : {};
+  return normalizeSignature(row, {
+    ...current,
+    ...patch,
+    fields: {
+      ...current.fields,
+      ...fields,
+      social: { ...current.fields.social, ...social },
+    },
+    colors: { ...current.colors, ...colors },
+  });
+}
 function userDto(row) {
   return {
     id: row.id,
@@ -416,6 +480,8 @@ function createSignaturePortal({
   readJsonBody,
   readBody,
   publicRoot = path.join(__dirname, "..", "public"),
+  trustProxy = false,
+  fetchImpl = fetch,
 }) {
   seed(db, signature);
   const stripe = signature.stripeSecretKey
@@ -429,7 +495,7 @@ function createSignaturePortal({
     signature.microsoftClientSecret &&
     signature.microsoftTenantId,
   );
-  const memberSelect = `SELECT u.id,u.email,u.password_hash,u.display_name,u.role,u.status,u.created_at,u.updated_at,u.last_login_at,u.email_verified_at,m.signature_json,m.role AS membership_role,m.status AS membership_status,o.id AS organization_id,o.name AS organization_name,o.slug AS organization_slug,o.settings_json AS organization_settings FROM signature_users u JOIN organization_memberships m ON m.user_id=u.id JOIN organizations o ON o.id=m.organization_id`;
+  const memberSelect = `SELECT u.id,u.email,u.password_hash,u.display_name,u.role,u.status,u.created_at,u.updated_at,u.last_login_at,u.email_verified_at,m.signature_json,m.role AS membership_role,m.status AS membership_status,o.id AS organization_id,o.name AS organization_name,o.slug AS organization_slug,o.status AS organization_status,o.settings_json AS organization_settings FROM signature_users u JOIN organization_memberships m ON m.user_id=u.id JOIN organizations o ON o.id=m.organization_id`;
   const builtinTemplates = Object.entries(TEMPLATES).map(([id, item]) => ({
     id,
     name: item.name,
@@ -438,10 +504,21 @@ function createSignaturePortal({
   }));
 
   function requestBase(req) {
-    const proto =
-      String(req.headers["x-forwarded-proto"] || "").split(",")[0] ||
-      (req.socket.encrypted ? "https" : "http");
-    return `${proto}://${req.headers.host || "127.0.0.1:4173"}`;
+    const forwardedProto = trustProxy
+        ? String(req.headers["x-forwarded-proto"] || "")
+            .split(",")[0]
+            .trim()
+        : "",
+      proto = ["http", "https"].includes(forwardedProto)
+        ? forwardedProto
+        : req.socket.encrypted
+          ? "https"
+          : "http",
+      requestedHost = String(req.headers.host || "").trim(),
+      host = /^[a-z0-9.[\]:-]+$/i.test(requestedHost)
+        ? requestedHost
+        : "127.0.0.1:4173";
+    return `${proto}://${host}`;
   }
   function workspaceRow(user) {
     return db
@@ -451,10 +528,39 @@ function createSignaturePortal({
   function workspaceSettings(user) {
     return safeJson(workspaceRow(user)?.settings_json);
   }
+  function effectiveBase(req, configured) {
+    const current = cleanUrl(requestBase(req)),
+      candidate = cleanUrl(configured);
+    if (!candidate) return current;
+    if (!production) {
+      try {
+        const configuredUrl = new URL(candidate),
+          currentUrl = new URL(current),
+          loopback = (hostname) =>
+            ["127.0.0.1", "localhost", "::1"].includes(hostname);
+        if (loopback(configuredUrl.hostname) && loopback(currentUrl.hostname))
+          return current;
+      } catch {
+        return current;
+      }
+    }
+    return candidate;
+  }
   function publicBase(req, user) {
     const settings = user ? workspaceSettings(user) : {};
-    return cleanUrl(
+    return effectiveBase(
+      req,
       settings.publicUrl || signature.publicUrl || requestBase(req),
+    );
+  }
+  function assetBase(req, user) {
+    const settings = workspaceSettings(user);
+    return effectiveBase(
+      req,
+      settings.assetBaseUrl ||
+        settings.publicUrl ||
+        signature.assetBaseUrl ||
+        publicBase(req, user),
     );
   }
   function memberById(organizationId, userId) {
@@ -788,17 +894,14 @@ function createSignaturePortal({
     return `${publicBase(req, user)}/r/${row.id}`;
   }
   async function renderSignature(req, user, input) {
-    const sig = {
-        ...normalizeSignature(
-          {
-            display_name: user.displayName,
-            email: user.email,
-            signature_json: "{}",
-          },
-          input,
-        ),
-        ...input,
-      },
+    const sig = mergeSignature(
+        {
+          display_name: user.displayName,
+          email: user.email,
+          signature_json: JSON.stringify(user.signature || {}),
+        },
+        input,
+      ),
       settings = workspaceSettings(user),
       brand = settings.brand || {},
       colors = { ...(sig.colors || {}) };
@@ -837,7 +940,7 @@ function createSignaturePortal({
       colors,
       photoUrl: absoluteMedia(req, user, sig.photoUrl),
       bannerUrl: absoluteMedia(req, user, sig.bannerUrl),
-      iconBase: `${publicBase(req, user)}/icons`,
+      iconBase: `${assetBase(req, user)}/icons`,
       hrefs,
       campaign: campaign
         ? { ...campaign, imageUrl: absoluteMedia(req, user, campaign.imageUrl) }
@@ -865,25 +968,12 @@ function createSignaturePortal({
     if (!url) return "";
     if (/^https?:\/\//i.test(url) || url.startsWith("data:")) return url;
     const settings = workspaceSettings(user);
-    return `${cleanUrl(settings.mediaBaseUrl || settings.publicUrl || signature.mediaBaseUrl || publicBase(req, user))}/${url.replace(/^\/+/, "")}`;
+    return `${effectiveBase(req, settings.mediaBaseUrl || settings.publicUrl || signature.mediaBaseUrl || publicBase(req, user))}/${url.replace(/^\/+/, "")}`;
   }
   function saveSignatureRow(organizationId, userId, input) {
     const existing = memberById(organizationId, userId),
       normalized = {
-        ...normalizeSignature(existing),
-        ...input,
-        fields: {
-          ...normalizeSignature(existing).fields,
-          ...(input.fields || {}),
-          social: {
-            ...normalizeSignature(existing).fields.social,
-            ...(input.fields?.social || {}),
-          },
-        },
-        colors: {
-          ...normalizeSignature(existing).colors,
-          ...(input.colors || {}),
-        },
+        ...mergeSignature(existing, input),
         updatedAt: new Date().toISOString(),
       };
     db.prepare(
@@ -927,7 +1017,7 @@ function createSignaturePortal({
     let lastError;
     for (let attempt = 1; attempt <= attempts; attempt += 1) {
       try {
-        const response = await fetch(url, {
+        const response = await fetchImpl(url, {
           ...options,
           signal: AbortSignal.timeout(10000),
         });
@@ -984,6 +1074,48 @@ function createSignaturePortal({
         { status: 502, code: "MICROSOFT_AUTH_FAILED" },
       );
     return data.access_token;
+  }
+  async function graphDirectoryUsers(token) {
+    const users = [];
+    let nextUrl =
+        "https://graph.microsoft.com/v1.0/users?$select=id,displayName,mail,userPrincipalName,jobTitle,department,businessPhones,mobilePhone,assignedLicenses&$top=999",
+      pageCount = 0;
+    while (nextUrl) {
+      const parsed = new URL(nextUrl);
+      if (
+        parsed.protocol !== "https:" ||
+        parsed.hostname !== "graph.microsoft.com"
+      )
+        throw Object.assign(
+          new Error("Microsoft Graph returned an invalid pagination URL."),
+          { status: 502, code: "MICROSOFT_GRAPH_INVALID_RESPONSE" },
+        );
+      pageCount += 1;
+      if (pageCount > 100)
+        throw Object.assign(
+          new Error("Microsoft Graph directory response exceeded 100 pages."),
+          { status: 502, code: "MICROSOFT_GRAPH_PAGE_LIMIT" },
+        );
+      const response = await fetchWithRetry(parsed.href, {
+          headers: { Authorization: `Bearer ${token}` },
+        }),
+        data = await response.json();
+      if (!response.ok)
+        throw Object.assign(
+          new Error(
+            data.error?.message || "Microsoft Graph directory request failed.",
+          ),
+          { status: 502, code: "MICROSOFT_GRAPH_FAILED" },
+        );
+      if (!Array.isArray(data.value))
+        throw Object.assign(
+          new Error("Microsoft Graph returned an invalid directory response."),
+          { status: 502, code: "MICROSOFT_GRAPH_INVALID_RESPONSE" },
+        );
+      users.push(...data.value);
+      nextUrl = data["@odata.nextLink"] || "";
+    }
+    return users;
   }
   async function sendGraphMail(to, subject, html) {
     const token = await graphAppToken(),
@@ -1109,17 +1241,42 @@ function createSignaturePortal({
       return redirect(
         res,
         `https://login.microsoftonline.com/${encodeURIComponent(signature.microsoftTenantId)}/oauth2/v2.0/authorize?${params}`,
+        { "Set-Cookie": oauthStateCookie(state, 600, production) },
       );
     }
     if (url.pathname === "/auth/microsoft/callback" && req.method === "GET") {
       const state = url.searchParams.get("state"),
-        storedState = db
-          .prepare(
-            `DELETE FROM oauth_states WHERE token_hash=? AND provider='microsoft' AND expires_at>strftime('%Y-%m-%dT%H:%M:%fZ','now') RETURNING token_hash`,
-          )
-          .get(tokenHash(state || ""));
+        stateCookie = cookie(req, "sig_oauth_state"),
+        clearOauthCookie = oauthStateCookie("", 0, production);
+      if (!state || !stateCookie || tokenHash(state) !== tokenHash(stateCookie))
+        return textResponse(
+          res,
+          400,
+          "Microsoft sign-in state expired.",
+          "text/plain; charset=utf-8",
+          { "Set-Cookie": clearOauthCookie },
+        );
+      const storedState = db
+        .prepare(
+          `DELETE FROM oauth_states WHERE token_hash=? AND provider='microsoft' AND expires_at>strftime('%Y-%m-%dT%H:%M:%fZ','now') RETURNING token_hash`,
+        )
+        .get(tokenHash(state || ""));
       if (!storedState)
-        return textResponse(res, 400, "Microsoft sign-in state expired.");
+        return textResponse(
+          res,
+          400,
+          "Microsoft sign-in state expired.",
+          "text/plain; charset=utf-8",
+          { "Set-Cookie": clearOauthCookie },
+        );
+      if (url.searchParams.get("error"))
+        return textResponse(
+          res,
+          400,
+          "Microsoft sign-in was canceled.",
+          "text/plain; charset=utf-8",
+          { "Set-Cookie": clearOauthCookie },
+        );
       const callback = `${cleanUrl(signature.publicUrl || requestBase(req))}/auth/microsoft/callback`,
         body = new URLSearchParams({
           client_id: signature.microsoftClientId,
@@ -1143,13 +1300,21 @@ function createSignaturePortal({
           res,
           502,
           tokens.error_description || "Microsoft sign-in failed.",
+          "text/plain; charset=utf-8",
+          { "Set-Cookie": clearOauthCookie },
         );
       const meRes = await fetchWithRetry(
         "https://graph.microsoft.com/v1.0/me?$select=id,displayName,mail,userPrincipalName,jobTitle,department,businessPhones,mobilePhone",
         { headers: { Authorization: `Bearer ${tokens.access_token}` } },
       );
       if (!meRes.ok)
-        return textResponse(res, 502, "Microsoft profile request failed.");
+        return textResponse(
+          res,
+          502,
+          "Microsoft profile request failed.",
+          "text/plain; charset=utf-8",
+          { "Set-Cookie": clearOauthCookie },
+        );
       const profile = await meRes.json(),
         email = String(
           profile.mail || profile.userPrincipalName || "",
@@ -1159,6 +1324,8 @@ function createSignaturePortal({
           res,
           400,
           "Microsoft account has no usable email address.",
+          "text/plain; charset=utf-8",
+          { "Set-Cookie": clearOauthCookie },
         );
       let row = db
         .prepare(
@@ -1166,7 +1333,9 @@ function createSignaturePortal({
         )
         .get(email);
       if (!row) {
-        return redirect(res, "/signature.html?auth=account-required");
+        return redirect(res, "/signature.html?auth=account-required", {
+          "Set-Cookie": clearOauthCookie,
+        });
       }
       const current = normalizeSignature(row),
         fields = { ...current.fields };
@@ -1199,6 +1368,7 @@ function createSignaturePortal({
       recordAudit(session.user, "profile.microsoft_synced", "user", row.id, {
         photoImported: Boolean(photoUrl && photoUrl !== current.photoUrl),
       });
+      session.header["Set-Cookie"].push(clearOauthCookie);
       return redirect(res, "/signature.html", session.header);
     }
     const redirectMatch = url.pathname.match(/^\/r\/([^/]+)$/);
@@ -1593,11 +1763,37 @@ function createSignaturePortal({
           },
           requestId,
         );
-      if (
-        db
-          .prepare("SELECT id FROM signature_users WHERE lower(email)=lower(?)")
-          .get(email)
-      )
+      const existingAccount = db
+        .prepare("SELECT * FROM signature_users WHERE lower(email)=lower(?)")
+        .get(email);
+      if (existingAccount) {
+        if (
+          !existingAccount.email_verified_at &&
+          verifyPassword(password, existingAccount.password_hash)
+        ) {
+          const verificationToken = createOneTimeToken(
+              "email_verification_tokens",
+              existingAccount.id,
+              24 * 60,
+            ),
+            link = `${cleanUrl(signature.publicUrl || requestBase(req))}/signature.html?verify=${encodeURIComponent(verificationToken)}`;
+          if (mailAvailable())
+            await sendGraphMail(
+              email,
+              "Verify your Signify email",
+              `<p>Verify your email to activate your Signify workspace.</p><p><a href="${link}">Verify email</a></p><p>This link expires in 24 hours.</p>`,
+            );
+          return json(
+            res,
+            200,
+            {
+              requiresVerification: true,
+              resent: true,
+              ...(!production ? { developmentToken: verificationToken } : {}),
+            },
+            requestId,
+          );
+        }
         return json(
           res,
           409,
@@ -1609,6 +1805,7 @@ function createSignaturePortal({
           },
           requestId,
         );
+      }
       const orgId = randomUUID(),
         userId = randomUUID(),
         baseSlug = `${slug(company)}-${randomBytes(3).toString("hex")}`,
@@ -1754,7 +1951,8 @@ function createSignaturePortal({
       if (
         !target ||
         target.membership_status !== "active" ||
-        target.status !== "active"
+        target.status !== "active" ||
+        target.organization_status !== "active"
       )
         return json(
           res,
@@ -1823,7 +2021,7 @@ function createSignaturePortal({
               signature.microsoftClientSecret &&
               signature.microsoftTenantId,
             ),
-            mail: Boolean(signature.microsoftSenderEmail),
+            mail: mailAvailable(),
             billing: billingAvailable(),
             billingPlans: Object.entries(signature.stripePrices || {})
               .filter(([, price]) => Boolean(price))
@@ -2156,6 +2354,12 @@ function createSignaturePortal({
         name = `banner-${randomUUID()}.gif`;
       fs.mkdirSync(dir, { recursive: true });
       fs.writeFileSync(path.join(dir, name), Buffer.from(gif.bytes()));
+      recordAudit(user, "asset.generated", "asset", name, {
+        kind: "animated-banner",
+        frames: frames.length,
+        width,
+        height,
+      });
       return json(
         res,
         201,
@@ -2165,11 +2369,21 @@ function createSignaturePortal({
     }
     if (url.pathname === "/api/signature/preview" && req.method === "POST") {
       const body = await readJsonBody(req, { limit: 65536 }),
-        target = body.userId
-          ? user.role === "admin" || body.userId === user.id
-            ? memberById(user.organizationId, body.userId)
-            : null
-          : memberById(user.organizationId, user.id);
+        signatureError = signatureInputError(body.signature);
+      if (signatureError)
+        return json(
+          res,
+          400,
+          {
+            error: { code: "SIGNATURE_INVALID", message: signatureError },
+          },
+          requestId,
+        );
+      const target = body.userId
+        ? user.role === "admin" || body.userId === user.id
+          ? memberById(user.organizationId, body.userId)
+          : null
+        : memberById(user.organizationId, user.id);
       if (!target)
         return json(
           res,
@@ -2288,32 +2502,39 @@ function createSignaturePortal({
           },
         },
       );
-      if (!account) {
+      db.exec("BEGIN IMMEDIATE");
+      try {
+        if (!account) {
+          db.prepare(
+            `INSERT INTO signature_users(id,email,password_hash,display_name,role,status,signature_json,email_verified_at) VALUES (?,?,?,?,?,?,?,strftime('%Y-%m-%dT%H:%M:%fZ','now'))`,
+          ).run(
+            id,
+            email,
+            hashPassword(password),
+            displayName,
+            canonicalRole(body.role),
+            canonicalStatus(body.status),
+            JSON.stringify(initial),
+          );
+        }
         db.prepare(
-          `INSERT INTO signature_users(id,email,password_hash,display_name,role,status,signature_json,email_verified_at) VALUES (?,?,?,?,?,?,?,strftime('%Y-%m-%dT%H:%M:%fZ','now'))`,
+          "INSERT INTO organization_memberships(organization_id,user_id,role,status,signature_json) VALUES (?,?,?,?,?)",
         ).run(
+          user.organizationId,
           id,
-          email,
-          hashPassword(password),
-          displayName,
           canonicalRole(body.role),
           canonicalStatus(body.status),
           JSON.stringify(initial),
         );
+        recordAudit(user, "member.created", "user", id, {
+          email,
+          role: canonicalRole(body.role),
+        });
+        db.exec("COMMIT");
+      } catch (error) {
+        db.exec("ROLLBACK");
+        throw error;
       }
-      db.prepare(
-        "INSERT INTO organization_memberships(organization_id,user_id,role,status,signature_json) VALUES (?,?,?,?,?)",
-      ).run(
-        user.organizationId,
-        id,
-        canonicalRole(body.role),
-        canonicalStatus(body.status),
-        JSON.stringify(initial),
-      );
-      recordAudit(user, "member.created", "user", id, {
-        email,
-        role: canonicalRole(body.role),
-      });
       return json(
         res,
         201,
@@ -2361,8 +2582,6 @@ function createSignaturePortal({
           },
           requestId,
         );
-      if (body.signature)
-        saveSignatureRow(user.organizationId, id, body.signature);
       if (
         body.email &&
         String(body.email).trim().toLowerCase() !== existing.email.toLowerCase()
@@ -2379,71 +2598,91 @@ function createSignaturePortal({
           },
           requestId,
         );
-      if (body.displayName) {
-        const nextEmail = existing.email,
-          nextName = String(body.displayName).trim();
-        if (!validEmail(nextEmail) || !nextName)
-          return json(
-            res,
-            400,
-            {
-              error: {
-                code: "USER_INVALID",
-                message: "Enter a name and valid email.",
-              },
+      const nextName =
+        body.displayName === undefined ? null : limited(body.displayName, 120);
+      if (body.displayName !== undefined && !nextName)
+        return json(
+          res,
+          400,
+          {
+            error: {
+              code: "USER_INVALID",
+              message: "Enter a valid display name.",
             },
-            requestId,
-          );
-        const duplicate = db
-          .prepare(
-            "SELECT id FROM signature_users WHERE lower(email)=lower(?) AND id<>?",
-          )
-          .get(nextEmail, id);
-        if (duplicate)
-          return json(
-            res,
-            409,
-            {
-              error: {
-                code: "EMAIL_EXISTS",
-                message: "That email is already in use.",
-              },
-            },
-            requestId,
-          );
-        db.prepare(
-          `UPDATE signature_users SET email=?,display_name=?,updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE id=?`,
-        ).run(nextEmail, nextName, id);
-      }
-      if (isAdmin && body.password) {
-        if (String(body.password).length < 10)
-          return json(
-            res,
-            400,
-            {
-              error: {
-                code: "PASSWORD_WEAK",
-                message: "Password must be at least 10 characters.",
-              },
-            },
-            requestId,
-          );
-        db.prepare("UPDATE signature_users SET password_hash=? WHERE id=?").run(
-          hashPassword(body.password),
-          id,
+          },
+          requestId,
         );
+      if (body.password && (!isAdmin || String(body.password).length < 10))
+        return json(
+          res,
+          isAdmin ? 400 : 403,
+          {
+            error: {
+              code: isAdmin ? "PASSWORD_WEAK" : "ADMIN_REQUIRED",
+              message: isAdmin
+                ? "Password must be at least 10 characters."
+                : "Administrator access required.",
+            },
+          },
+          requestId,
+        );
+      const signatureError = signatureInputError(body.signature);
+      if (signatureError)
+        return json(
+          res,
+          400,
+          {
+            error: {
+              code: "SIGNATURE_INVALID",
+              message: signatureError,
+            },
+          },
+          requestId,
+        );
+      let signaturePatch = body.signature;
+      if (signaturePatch && !isAdmin) {
+        const requiresApproval = Boolean(
+          workspaceSettings(user).requireApproval,
+        );
+        signaturePatch = {
+          ...signaturePatch,
+          workflowStatus: requiresApproval ? "draft" : "approved",
+          reviewNote: "",
+          submittedAt: null,
+          approvedAt: requiresApproval ? null : new Date().toISOString(),
+          approvedBy: requiresApproval ? null : user.id,
+        };
       }
-      db.prepare(
-        `UPDATE organization_memberships SET role=?,status=?,updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE organization_id=? AND user_id=?`,
-      ).run(nextRole, nextStatus, user.organizationId, id);
-      if (nextStatus === "disabled")
+      db.exec("BEGIN IMMEDIATE");
+      try {
+        if (signaturePatch)
+          saveSignatureRow(user.organizationId, id, signaturePatch);
+        if (nextName)
+          db.prepare(
+            `UPDATE signature_users SET display_name=?,updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE id=?`,
+          ).run(nextName, id);
+        if (isAdmin && body.password) {
+          db.prepare(
+            `UPDATE signature_users SET password_hash=?,updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE id=?`,
+          ).run(hashPassword(body.password), id);
+          db.prepare("DELETE FROM signature_sessions WHERE user_id=?").run(id);
+        }
         db.prepare(
-          "DELETE FROM signature_sessions WHERE user_id=? AND organization_id=?",
-        ).run(id, user.organizationId);
-      recordAudit(user, "member.updated", "user", id, {
-        role: nextRole,
-        status: nextStatus,
-      });
+          `UPDATE organization_memberships SET role=?,status=?,updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE organization_id=? AND user_id=?`,
+        ).run(nextRole, nextStatus, user.organizationId, id);
+        if (nextStatus === "disabled")
+          db.prepare(
+            "DELETE FROM signature_sessions WHERE user_id=? AND organization_id=?",
+          ).run(id, user.organizationId);
+        recordAudit(user, "member.updated", "user", id, {
+          role: nextRole,
+          status: nextStatus,
+        });
+        db.exec("COMMIT");
+      } catch (error) {
+        db.exec("ROLLBACK");
+        throw error;
+      }
       return json(
         res,
         200,
@@ -2466,16 +2705,30 @@ function createSignaturePortal({
           },
           requestId,
         );
-      db.prepare(
-        "DELETE FROM organization_memberships WHERE organization_id=? AND user_id=?",
-      ).run(user.organizationId, id);
-      if (
-        !db
-          .prepare("SELECT 1 FROM organization_memberships WHERE user_id=?")
-          .get(id)
-      )
-        db.prepare("DELETE FROM signature_users WHERE id=?").run(id);
-      recordAudit(user, "member.removed", "user", id);
+      if (!memberById(user.organizationId, id))
+        return json(
+          res,
+          404,
+          { error: { code: "NOT_FOUND", message: "User not found." } },
+          requestId,
+        );
+      db.exec("BEGIN IMMEDIATE");
+      try {
+        db.prepare(
+          "DELETE FROM organization_memberships WHERE organization_id=? AND user_id=?",
+        ).run(user.organizationId, id);
+        if (
+          !db
+            .prepare("SELECT 1 FROM organization_memberships WHERE user_id=?")
+            .get(id)
+        )
+          db.prepare("DELETE FROM signature_users WHERE id=?").run(id);
+        recordAudit(user, "member.removed", "user", id);
+        db.exec("COMMIT");
+      } catch (error) {
+        db.exec("ROLLBACK");
+        throw error;
+      }
       return json(res, 200, { ok: true }, requestId);
     }
     if (url.pathname === "/api/signature/templates" && req.method === "GET")
@@ -2498,7 +2751,9 @@ function createSignaturePortal({
       const body = await readJsonBody(req),
         name = String(body.name || "")
           .trim()
-          .slice(0, 80);
+          .slice(0, 80),
+        patch = body.patch || body.signature || {},
+        signatureError = signatureInputError(patch);
       if (!name)
         return json(
           res,
@@ -2511,16 +2766,19 @@ function createSignaturePortal({
           },
           requestId,
         );
+      if (signatureError)
+        return json(
+          res,
+          400,
+          {
+            error: { code: "SIGNATURE_INVALID", message: signatureError },
+          },
+          requestId,
+        );
       const id = randomUUID();
       db.prepare(
         "INSERT INTO signature_templates(id,name,template_json,created_by,organization_id) VALUES (?,?,?,?,?)",
-      ).run(
-        id,
-        name,
-        JSON.stringify(body.patch || body.signature || {}),
-        user.id,
-        user.organizationId,
-      );
+      ).run(id, name, JSON.stringify(patch), user.id, user.organizationId);
       recordAudit(user, "template.created", "template", id, { name });
       return json(
         res,
@@ -2575,11 +2833,37 @@ function createSignaturePortal({
       req.method === "POST"
     ) {
       requireEditor(user);
-      const current = normalizeSignature(
-        db.prepare("SELECT * FROM signature_users WHERE id=?").get(user.id),
-      );
+      if (!workspaceSettings(user).requireApproval)
+        return json(
+          res,
+          409,
+          {
+            error: {
+              code: "APPROVAL_NOT_REQUIRED",
+              message: "This workspace does not require signature approval.",
+            },
+          },
+          requestId,
+        );
+      const member = memberById(user.organizationId, user.id),
+        current = normalizeSignature(member);
+      if (current.workflowStatus === "pending")
+        return json(
+          res,
+          409,
+          {
+            error: {
+              code: "APPROVAL_ALREADY_PENDING",
+              message: "This signature is already awaiting approval.",
+            },
+          },
+          requestId,
+        );
       current.workflowStatus = "pending";
       current.submittedAt = new Date().toISOString();
+      current.reviewNote = "";
+      current.approvedAt = null;
+      current.approvedBy = null;
       saveSignatureRow(user.organizationId, user.id, current);
       recordAudit(user, "signature.submitted", "user", user.id);
       return json(res, 200, { signature: current }, requestId);
@@ -2608,6 +2892,18 @@ function createSignaturePortal({
         );
       const body = await readJsonBody(req),
         sig = normalizeSignature(target);
+      if (sig.workflowStatus !== "pending")
+        return json(
+          res,
+          409,
+          {
+            error: {
+              code: "APPROVAL_NOT_PENDING",
+              message: "This signature is not awaiting approval.",
+            },
+          },
+          requestId,
+        );
       sig.workflowStatus =
         approvalMatch[2] === "approve" ? "approved" : "rejected";
       sig.reviewNote = String(body.note || "").slice(0, 500);
@@ -2815,7 +3111,9 @@ function createSignaturePortal({
     if (url.pathname === "/api/signature/departments" && req.method === "PUT") {
       requireAdmin(user);
       const body = await readJsonBody(req),
-        department = String(body.department || "").trim();
+        department = limited(body.department, 120),
+        templateId = String(body.templateId || "executive"),
+        accent = String(body.accent || "#2563eb");
       if (!department)
         return json(
           res,
@@ -2828,15 +3126,40 @@ function createSignaturePortal({
           },
           requestId,
         );
+      if (
+        !TEMPLATES[templateId] &&
+        !db
+          .prepare(
+            "SELECT 1 FROM signature_templates WHERE id=? AND organization_id=?",
+          )
+          .get(templateId, user.organizationId)
+      )
+        return json(
+          res,
+          400,
+          {
+            error: {
+              code: "TEMPLATE_INVALID",
+              message: "Choose an available signature template.",
+            },
+          },
+          requestId,
+        );
+      if (!/^#[0-9a-f]{6}$/i.test(accent))
+        return json(
+          res,
+          400,
+          {
+            error: {
+              code: "ACCENT_INVALID",
+              message: "Choose a valid accent color.",
+            },
+          },
+          requestId,
+        );
       db.prepare(
         `INSERT INTO department_signature_defaults(organization_id,department,template_id,accent_color,updated_by,updated_at) VALUES (?,?,?,?,?,strftime('%Y-%m-%dT%H:%M:%fZ','now')) ON CONFLICT(organization_id,department) DO UPDATE SET template_id=excluded.template_id,accent_color=excluded.accent_color,updated_by=excluded.updated_by,updated_at=excluded.updated_at`,
-      ).run(
-        user.organizationId,
-        department,
-        String(body.templateId || "executive"),
-        String(body.accent || "#2563eb"),
-        user.id,
-      );
+      ).run(user.organizationId, department, templateId, accent, user.id);
       recordAudit(user, "department.updated", "department", department);
       return json(res, 200, { ok: true }, requestId);
     }
@@ -2845,10 +3168,24 @@ function createSignaturePortal({
     );
     if (departmentMatch && req.method === "DELETE") {
       requireAdmin(user);
-      const department = decodeURIComponent(departmentMatch[1]);
-      db.prepare(
-        "DELETE FROM department_signature_defaults WHERE organization_id=? AND department=?",
-      ).run(user.organizationId, department);
+      const department = decodeURIComponent(departmentMatch[1]),
+        result = db
+          .prepare(
+            "DELETE FROM department_signature_defaults WHERE organization_id=? AND department=?",
+          )
+          .run(user.organizationId, department);
+      if (!result.changes)
+        return json(
+          res,
+          404,
+          {
+            error: {
+              code: "NOT_FOUND",
+              message: "Department default not found.",
+            },
+          },
+          requestId,
+        );
       recordAudit(user, "department.deleted", "department", department);
       return json(res, 200, { ok: true }, requestId);
     }
@@ -3005,38 +3342,32 @@ function createSignaturePortal({
       req.method === "POST"
     ) {
       requireAdmin(user);
-      const runId = randomUUID(),
-        subscription = db
-          .prepare(
-            "SELECT seats FROM organization_subscriptions WHERE organization_id=?",
-          )
-          .get(user.organizationId),
-        activeMembers = db
-          .prepare(
-            "SELECT COUNT(*) AS count FROM organization_memberships WHERE organization_id=? AND status='active'",
-          )
-          .get(user.organizationId).count,
-        availableSeats = Math.max(
-          0,
-          (subscription?.seats || 1) - activeMembers,
-        );
+      const runId = randomUUID();
       db.prepare(
         `INSERT INTO directory_sync_runs(id,organization_id,status,started_by) VALUES (?,?,'running',?)`,
       ).run(runId, user.organizationId, user.id);
+      let transactionStarted = false;
       try {
         const token = await graphAppToken(),
-          response = await fetchWithRetry(
-            "https://graph.microsoft.com/v1.0/users?$select=id,displayName,mail,userPrincipalName,jobTitle,department,businessPhones,mobilePhone,assignedLicenses&$top=999",
-            { headers: { Authorization: `Bearer ${token}` } },
-          ),
-          data = await response.json();
-        if (!response.ok)
-          throw new Error(
-            data.error?.message || "Microsoft Graph directory request failed.",
+          people = (await graphDirectoryUsers(token)).filter(
+            (item) => item.assignedLicenses?.length,
           );
-        const people = (data.value || []).filter(
-          (item) => item.assignedLicenses?.length,
-        );
+        db.exec("BEGIN IMMEDIATE");
+        transactionStarted = true;
+        const subscription = db
+            .prepare(
+              "SELECT seats FROM organization_subscriptions WHERE organization_id=?",
+            )
+            .get(user.organizationId),
+          activeMembers = db
+            .prepare(
+              "SELECT COUNT(*) AS count FROM organization_memberships WHERE organization_id=? AND status='active'",
+            )
+            .get(user.organizationId).count,
+          availableSeats = Math.max(
+            0,
+            (subscription?.seats || 1) - activeMembers,
+          );
         let added = 0;
         for (const person of people) {
           const email = String(
@@ -3093,8 +3424,11 @@ function createSignaturePortal({
           user.organizationId,
           { seen: people.length, added },
         );
+        db.exec("COMMIT");
+        transactionStarted = false;
         return json(res, 200, { seen: people.length, added }, requestId);
       } catch (error) {
+        if (transactionStarted) db.exec("ROLLBACK");
         db.prepare(
           `UPDATE directory_sync_runs SET status='failed',error_message=?,completed_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE id=?`,
         ).run(String(error.message).slice(0, 500), runId);
@@ -3119,8 +3453,20 @@ function createSignaturePortal({
           requestId,
         );
       const body = await readJsonBody(req, { limit: 65536 }),
+        signatureError = signatureInputError(body.signature || body),
         target = userDto(memberById(user.organizationId, user.id)),
-        rendered = await renderSignature(req, target, body.signature || body);
+        rendered = signatureError
+          ? null
+          : await renderSignature(req, target, body.signature || body);
+      if (signatureError)
+        return json(
+          res,
+          400,
+          {
+            error: { code: "SIGNATURE_INVALID", message: signatureError },
+          },
+          requestId,
+        );
       await sendGraphMail(
         target.email,
         "Your email signature is ready to install",
@@ -3131,6 +3477,18 @@ function createSignaturePortal({
     }
     if (url.pathname === "/api/signature/send" && req.method === "POST") {
       requireAdmin(user);
+      if (!mailAvailable())
+        return json(
+          res,
+          503,
+          {
+            error: {
+              code: "MAIL_NOT_CONFIGURED",
+              message: "Microsoft 365 email delivery is not configured.",
+            },
+          },
+          requestId,
+        );
       const body = await readJsonBody(req),
         target = body.userId
           ? memberById(user.organizationId, body.userId)
@@ -3162,41 +3520,59 @@ function createSignaturePortal({
         const body = await readJsonBody(req, { limit: 32768 }),
           row = workspaceRow(user),
           current = safeJson(row.settings_json),
-          next = {
-            ...current,
-            publicUrl: cleanUrl(body.publicUrl ?? current.publicUrl),
-            assetBaseUrl: cleanUrl(body.assetBaseUrl ?? current.assetBaseUrl),
-            mediaBaseUrl: cleanUrl(body.mediaBaseUrl ?? current.mediaBaseUrl),
-            sessionHours: Math.max(
-              1,
-              Math.min(
-                168,
-                Number(body.sessionHours ?? current.sessionHours ?? 12),
-              ),
-            ),
-            requireApproval: Boolean(body.requireApproval),
-            backupPath: String(body.backupPath ?? current.backupPath ?? "")
-              .trim()
-              .slice(0, 260),
-            brand: normalizedBrand(
-              body.brand || {},
-              current.brand || {},
-              body.name || row.name,
-            ),
-          };
+          sessionHours = Number(
+            body.sessionHours ?? current.sessionHours ?? 12,
+          );
+        if (
+          !Number.isInteger(sessionHours) ||
+          sessionHours < 1 ||
+          sessionHours > 168
+        )
+          return json(
+            res,
+            400,
+            {
+              error: {
+                code: "SESSION_HOURS_INVALID",
+                message: "Session length must be from 1 to 168 hours.",
+              },
+            },
+            requestId,
+          );
+        const next = {
+          ...current,
+          publicUrl: cleanUrl(body.publicUrl ?? current.publicUrl),
+          assetBaseUrl: cleanUrl(body.assetBaseUrl ?? current.assetBaseUrl),
+          mediaBaseUrl: cleanUrl(body.mediaBaseUrl ?? current.mediaBaseUrl),
+          sessionHours,
+          requireApproval: Boolean(body.requireApproval),
+          backupPath: String(body.backupPath ?? current.backupPath ?? "")
+            .trim()
+            .slice(0, 260),
+          brand: normalizedBrand(
+            body.brand || {},
+            current.brand || {},
+            body.name || row.name,
+          ),
+        };
         for (const value of [
           next.publicUrl,
           next.assetBaseUrl,
           next.mediaBaseUrl,
         ])
-          if (value && !validUrl(value))
+          if (
+            value &&
+            (!validUrl(value) || (production && !value.startsWith("https://")))
+          )
             return json(
               res,
               400,
               {
                 error: {
                   code: "URL_INVALID",
-                  message: "Enter valid public and media URLs.",
+                  message: production
+                    ? "Public and media URLs must use HTTPS."
+                    : "Enter valid public and media URLs.",
                 },
               },
               requestId,
@@ -3314,7 +3690,8 @@ function createSignaturePortal({
                 label: "Microsoft 365 connected",
                 ok: Boolean(
                   signature.microsoftClientId &&
-                  signature.microsoftClientSecret,
+                  signature.microsoftClientSecret &&
+                  signature.microsoftTenantId,
                 ),
               },
             ],

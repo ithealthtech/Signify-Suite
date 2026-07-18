@@ -349,8 +349,12 @@ function bindEvents() {
   const initial = location.hash.slice(1);
   if (initial && $(`[data-section="${initial}"]`)) showSection(initial);
   $("#logout").addEventListener("click", async () => {
-    await api("/api/signature/logout", { method: "POST", body: "{}" });
-    location.href = "/signature.html";
+    try {
+      await api("/api/signature/logout", { method: "POST", body: "{}" });
+      location.href = "/signature.html";
+    } catch (error) {
+      toast(error.message);
+    }
   });
   $("#userSearch").addEventListener("input", renderUsers);
   $("#userFilter").addEventListener("change", renderUsers);
@@ -360,6 +364,9 @@ function bindEvents() {
     $("#inviteLink").value = "";
     $("#createUserDialog").showModal();
   });
+  $$("[data-close-user]").forEach((button) =>
+    button.addEventListener("click", () => $("#createUserDialog").close()),
+  );
   $("#createUser").addEventListener("click", createUser);
   $("#userRows").addEventListener("change", updateMembership);
   $("#userRows").addEventListener("click", handleUserAction);
@@ -433,8 +440,10 @@ function bindEvents() {
   }
 }
 async function createUser() {
+  const form = $("#createUserForm");
+  if (!form.reportValidity()) return;
   const button = $("#createUser"),
-    body = Object.fromEntries(new FormData($("#createUserForm")));
+    body = Object.fromEntries(new FormData(form));
   busy(button, true, "Adding…");
   try {
     const result = await api("/api/signature/invitations", {
@@ -862,8 +871,9 @@ function fileDataUrl(file) {
 }
 async function createCampaign() {
   const button = $("#createCampaign"),
-    form = $("#campaignForm"),
-    body = Object.fromEntries(new FormData(form));
+    form = $("#campaignForm");
+  if (!form.reportValidity()) return;
+  const body = Object.fromEntries(new FormData(form));
   busy(button, true, "Rendering…");
   try {
     if (form.elements.overlayEnabled.checked) {

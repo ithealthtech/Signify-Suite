@@ -361,15 +361,17 @@ async function updatePreview() {
         signature: state.signature,
       }),
     });
-    if (sequence !== state.previewSequence) return;
+    if (sequence !== state.previewSequence) return false;
     state.rendered = rendered;
     els.preview.innerHTML = rendered.html;
     $("#previewMeta").textContent =
       `${state.builtins.find((item) => item.id === state.signature.templateId)?.name || "Custom"} · Outlook-safe HTML`;
     renderWorkflow();
+    return true;
   } catch (error) {
     if (sequence === state.previewSequence)
       els.preview.innerHTML = `<span class="loading">${escapeHtml(error.message)}</span>`;
+    return false;
   }
 }
 
@@ -521,8 +523,12 @@ document.addEventListener("click", (event) => {
     $("#profileMenu").hidden = true;
 });
 $("#logout").addEventListener("click", async () => {
-  await api("/api/signature/logout", { method: "POST", body: "{}" });
-  location.href = "/signature.html";
+  try {
+    await api("/api/signature/logout", { method: "POST", body: "{}" });
+    location.href = "/signature.html";
+  } catch (error) {
+    toast(error.message);
+  }
 });
 $("#workspaceSwitcher").addEventListener("change", async (event) => {
   try {
@@ -755,6 +761,7 @@ function bytesToBase64(bytes) {
 
 $("#saveSignature").addEventListener("click", saveSignature);
 async function saveSignature() {
+  if (!els.signatureForm.reportValidity()) return;
   const button = $("#saveSignature");
   setBusy(button, true, "Saving…");
   try {
@@ -804,7 +811,10 @@ els.submitApproval.addEventListener("click", async (event) => {
   }
 });
 $("#copySignature").addEventListener("click", async () => {
-  await updatePreview();
+  if (!(await updatePreview()) || !state.rendered) {
+    toast("Preview is unavailable");
+    return;
+  }
   try {
     if (window.ClipboardItem && navigator.clipboard?.write) {
       await navigator.clipboard.write([
@@ -822,9 +832,16 @@ $("#copySignature").addEventListener("click", async () => {
   }
 });
 $("#copyHtml").addEventListener("click", async () => {
-  await updatePreview();
-  await navigator.clipboard.writeText(state.rendered.html);
-  toast("HTML copied");
+  if (!(await updatePreview()) || !state.rendered) {
+    toast("Preview is unavailable");
+    return;
+  }
+  try {
+    await navigator.clipboard.writeText(state.rendered.html);
+    toast("HTML copied");
+  } catch {
+    toast("Clipboard access was blocked");
+  }
 });
 $("#emailSelf").addEventListener("click", async (event) => {
   const button = event.currentTarget;
@@ -842,7 +859,10 @@ $("#emailSelf").addEventListener("click", async (event) => {
   }
 });
 $("#downloadHtml").addEventListener("click", async () => {
-  await updatePreview();
+  if (!(await updatePreview()) || !state.rendered) {
+    toast("Preview is unavailable");
+    return;
+  }
   const documentHtml = `<!doctype html><html><head><meta charset="utf-8"><title>${escapeHtml(activeUser().displayName)} signature</title></head><body>${state.rendered.html}</body></html>`,
     blob = new Blob([documentHtml], { type: "text/html" }),
     link = document.createElement("a");
