@@ -27,6 +27,9 @@ const {
 const { redirect, textResponse } = require("./http-responses.cjs");
 const { writeTenantMedia } = require("./media-storage.cjs");
 const {
+  createPlatformOperationsRoutes,
+} = require("./routes/platform-operations.cjs");
+const {
   BRAND_FONT_STACKS,
   campaignInput,
   canonicalBrandFont,
@@ -1316,6 +1319,12 @@ function createSignaturePortal({
     return `/uploads/${row.organization_id}/${name}`;
   }
 
+  const handlePlatformOperations = createPlatformOperationsRoutes({
+    json,
+    operations,
+    readJsonBody,
+    recordAudit: recordApplicationAudit,
+  });
   return async function handle(req, res, url, requestId) {
     if (url.pathname === "/webhooks/stripe" && req.method === "POST") {
       const stripeConfiguration = stripeSettings(),
@@ -1758,143 +1767,8 @@ function createSignaturePortal({
           refreshCsrf(owner),
         );
       }
-      if (url.pathname === "/api/platform/operations" && req.method === "GET")
-        return json(res, 200, { backups: operations.listBackups() }, requestId);
-      if (
-        url.pathname === "/api/platform/operations/backups" &&
-        req.method === "POST"
-      ) {
-        const body = await readJsonBody(req),
-          reason = limited(body.reason, 500).trim();
-        if (reason.length < 3)
-          throw Object.assign(
-            new Error("A reason of at least 3 characters is required."),
-            { status: 400, code: "OPERATION_REASON_REQUIRED" },
-          );
-        const backup = operations.createBackup();
-        recordApplicationAudit(
-          owner,
-          "application.backup_created",
-          "backup",
-          backup.name,
-          null,
-          reason,
-          {},
-          requestId,
-        );
-        return json(res, 201, { backup }, requestId);
-      }
-      const backupDownload = url.pathname.match(
-        /^\/api\/platform\/operations\/backups\/([^/]+)\/download$/,
-      );
-      if (backupDownload && req.method === "GET") {
-        const name = decodeURIComponent(backupDownload[1]),
-          file = operations.managedFile(name);
-        if (!fs.existsSync(file))
-          throw Object.assign(new Error("Backup not found."), {
-            status: 404,
-            code: "BACKUP_NOT_FOUND",
-          });
-        const stat = fs.statSync(file);
-        res.writeHead(200, {
-          "Content-Type": "application/vnd.sqlite3",
-          "Content-Length": stat.size,
-          "Content-Disposition": `attachment; filename="${name}"`,
-          "Cache-Control": "no-store",
-          "X-Request-Id": requestId,
-        });
-        fs.createReadStream(file).pipe(res);
+      if (await handlePlatformOperations({ req, res, url, requestId, owner }))
         return;
-      }
-      const backupRestore = url.pathname.match(
-        /^\/api\/platform\/operations\/backups\/([^/]+)\/restore$/,
-      );
-      if (backupRestore && req.method === "POST") {
-        const body = await readJsonBody(req),
-          reason = limited(body.reason, 500).trim(),
-          name = decodeURIComponent(backupRestore[1]);
-        if (reason.length < 3)
-          throw Object.assign(
-            new Error("A reason of at least 3 characters is required."),
-            { status: 400, code: "OPERATION_REASON_REQUIRED" },
-          );
-        if (body.confirmation !== "RESTORE")
-          throw Object.assign(
-            new Error("Type RESTORE to confirm this operation."),
-            { status: 400, code: "RESTORE_CONFIRMATION_REQUIRED" },
-          );
-        const restore = operations.stageRestore(name);
-        recordApplicationAudit(
-          owner,
-          "application.restore_staged",
-          "backup",
-          name,
-          null,
-          reason,
-          {},
-          requestId,
-        );
-        return json(res, 202, { restore }, requestId);
-      }
-      if (
-        url.pathname === "/api/platform/operations/restore" &&
-        req.method === "DELETE"
-      ) {
-        const body = await readJsonBody(req),
-          reason = limited(body.reason, 500).trim();
-        if (reason.length < 3)
-          throw Object.assign(
-            new Error("A reason of at least 3 characters is required."),
-            { status: 400, code: "OPERATION_REASON_REQUIRED" },
-          );
-        operations.cancelRestore();
-        recordApplicationAudit(
-          owner,
-          "application.restore_canceled",
-          "backup",
-          "pending",
-          null,
-          reason,
-          {},
-          requestId,
-        );
-        return json(res, 200, { canceled: true }, requestId);
-      }
-      const backupDelete = url.pathname.match(
-        /^\/api\/platform\/operations\/backups\/([^/]+)$/,
-      );
-      if (backupDelete && req.method === "DELETE") {
-        const body = await readJsonBody(req),
-          reason = limited(body.reason, 500).trim(),
-          name = decodeURIComponent(backupDelete[1]);
-        if (reason.length < 3)
-          throw Object.assign(
-            new Error("A reason of at least 3 characters is required."),
-            { status: 400, code: "OPERATION_REASON_REQUIRED" },
-          );
-        operations.deleteBackup(name);
-        recordApplicationAudit(
-          owner,
-          "application.backup_deleted",
-          "backup",
-          name,
-          null,
-          reason,
-          {},
-          requestId,
-        );
-        return json(res, 200, { deleted: true }, requestId);
-      }
-      if (
-        url.pathname === "/api/platform/operations/updates" &&
-        req.method === "GET"
-      )
-        return json(
-          res,
-          200,
-          { update: await operations.checkForUpdates() },
-          requestId,
-        );
       if (url.pathname === "/api/platform/integrations" && req.method === "GET")
         return json(
           res,

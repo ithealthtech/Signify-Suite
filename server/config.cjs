@@ -1,5 +1,6 @@
 "use strict";
 const path = require("node:path");
+const { decodeKey } = require("./credential-vault.cjs");
 
 function bool(value, fallback = false) {
   if (value === undefined || value === "") return fallback;
@@ -134,6 +135,14 @@ function loadConfig(env = process.env, baseDir = path.join(__dirname, "..")) {
     throw new Error(
       "Stripe integration requires STRIPE_SECRET_KEY, STRIPE_WEBHOOK_SECRET, and at least one Stripe price.",
     );
+  const credentialEncryptionKey = String(
+    env.SIGNIFY_CREDENTIAL_ENCRYPTION_KEY || "",
+  ).trim();
+  if (production && !credentialEncryptionKey)
+    throw new Error(
+      "SIGNIFY_CREDENTIAL_ENCRYPTION_KEY is required in production.",
+    );
+  if (credentialEncryptionKey) decodeKey(credentialEncryptionKey);
   return {
     production,
     port,
@@ -175,9 +184,7 @@ function loadConfig(env = process.env, baseDir = path.join(__dirname, "..")) {
       ),
       allowRegistration: bool(env.SIGNIFY_ALLOW_REGISTRATION, !production),
       applicationOwnerEmail,
-      credentialEncryptionKey: String(
-        env.SIGNIFY_CREDENTIAL_ENCRYPTION_KEY || "",
-      ).trim(),
+      credentialEncryptionKey,
       microsoftClientId: String(
         env.MICROSOFT_CLIENT_ID || env.AZURE_CLIENT_ID || "",
       ).trim(),

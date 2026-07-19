@@ -356,10 +356,29 @@ async function main() {
       productionConfigRejected,
       "production started without an HTTPS public URL",
     );
+    let missingEncryptionRejected = false;
+    try {
+      loadConfig({
+        NODE_ENV: "production",
+        SIGNIFY_PUBLIC_URL: "https://signatures.example.com",
+        SIGNIFY_APPLICATION_OWNER_EMAIL: "owner@example.com",
+      });
+    } catch (error) {
+      missingEncryptionRejected = error.message.includes(
+        "SIGNIFY_CREDENTIAL_ENCRYPTION_KEY is required",
+      );
+    }
+    assert(
+      missingEncryptionRejected,
+      "production started without credential encryption",
+    );
     assert(
       loadConfig({
         NODE_ENV: "production",
         SIGNIFY_PUBLIC_URL: "https://signatures.example.com",
+        SIGNIFY_CREDENTIAL_ENCRYPTION_KEY: Buffer.alloc(32, 9).toString(
+          "base64",
+        ),
       }).signature.publicUrl === "https://signatures.example.com",
       "valid production configuration was rejected",
     );

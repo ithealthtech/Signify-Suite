@@ -30,3 +30,32 @@ jobs:
           path: dist/
           if-no-files-found: error
           retention-days: 14
+
+  publish-release:
+    if: github.event_name == 'release' && github.event.action == 'published'
+    needs: validate
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      id-token: write
+      attestations: write
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          name: signify-creator-${{ github.sha }}
+          path: dist
+      - name: Package immutable release
+        run: |
+          tar -C dist -czf "signify-creator-${{ github.event.release.tag_name }}.tar.gz" .
+          sha256sum "signify-creator-${{ github.event.release.tag_name }}.tar.gz" > "signify-creator-${{ github.event.release.tag_name }}.tar.gz.sha256"
+      - uses: actions/attest-build-provenance@v3
+        with:
+          subject-path: signify-creator-${{ github.event.release.tag_name }}.tar.gz
+      - name: Attach verified artifact to release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: >-
+          gh release upload "${{ github.event.release.tag_name }}"
+          "signify-creator-${{ github.event.release.tag_name }}.tar.gz"
+          "signify-creator-${{ github.event.release.tag_name }}.tar.gz.sha256"
+          --clobber

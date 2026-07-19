@@ -1,6 +1,8 @@
 "use strict";
 const fs = require("node:fs");
 const path = require("node:path");
+const { createHash } = require("node:crypto");
+const { execFileSync } = require("node:child_process");
 
 const root = path.join(__dirname, ".."),
   destination = path.join(root, "dist"),
@@ -34,6 +36,7 @@ const root = path.join(__dirname, ".."),
     "CHANGELOG.md",
     "DEPLOYMENT.md",
     "docs/OPERATIONS.md",
+    "docs/SAAS-READINESS.md",
     "docs/sbom.cdx.json",
     "signature.html",
     "signature.css",
@@ -85,4 +88,71 @@ fs.writeFileSync(
   path.join(destination, "public/generated-banners/.gitkeep"),
   "",
 );
-console.log(`Production artifact created at ${destination}`);
+
+function releaseFiles(directory) {
+  return fs
+    .readdirSync(directory, { withFileTypes: true })
+    .flatMap((entry) => {
+      const absolute = path.join(directory, entry.name);
+      return entry.isDirectory() ? releaseFiles(absolute) : [absolute];
+    })
+    .sort();
+}
+
+function sha256(file) {
+  return createHash("sha256").update(fs.readFileSync(file)).digest("hex");
+}
+
+function commitSha() {
+  if (process.env.GITHUB_SHA) return process.env.GITHUB_SHA;
+  try {
+    return execFileSync("git", ["rev-parse", "HEAD"], {
+      cwd: root,
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "ignore"],
+    }).trim();
+  } catch {
+    return "unknown";
+  }
+}
+
+const packageMetadata = JSON.parse(
+    fs.readFileSync(path.join(root, "package.json"), "utf8"),
+  ),
+  sourceDate = Number(process.env.SOURCE_DATE_EPOCH || 0),
+  builtAt = sourceDate
+    ? new Date(sourceDate * 1000).toISOString()
+    : new Date().toISOString(),
+  migrations = releaseFiles(path.join(destination, "server", "migrations"))
+    .filter((file) => file.endsWith(".sql"))
+    .map((file) => ({
+      version: path.basename(file),
+      sha256: sha256(file),
+    })),
+  manifest = {
+    schemaVersion: 1,
+    name: packageMetadata.name,
+    version: packageMetadata.version,
+    commit: commitSha(),
+    builtAt,
+    node: packageMetadata.engines.node,
+    migrations,
+  };
+fs.writeFileSync(
+  path.join(destination, "manifest.json"),
+  `${JSON.stringify(manifest, null, 2)}\n`,
+);
+
+const checksums = releaseFiles(destination)
+  .filter((file) => path.basename(file) !== "checksums.txt")
+  .map(
+    (file) =>
+      `${sha256(file)}  ${path.relative(destination, file).replaceAll(path.sep, "/")}`,
+  );
+fs.writeFileSync(
+  path.join(destination, "checksums.txt"),
+  `${checksums.join("\n")}\n`,
+);
+console.log(
+  `Production artifact ${packageMetadata.version} created at ${destination} with ${checksums.length} verified files`,
+);
