@@ -843,6 +843,17 @@ async function createCampaign() {
         });
       body.imageUrl = image.url;
     }
+    body.overlay = {
+      enabled: form.elements.overlayEnabled.checked,
+      ctaLabel: form.elements.ctaLabel.value,
+      badgeLabel: form.elements.badgeLabel.value,
+      eventLabel: form.elements.eventLabel.value,
+      color: form.elements.overlayColor.value,
+      font: form.elements.overlayFont.value,
+      fontWeight: Number(form.elements.overlayFontWeight.value),
+      headlineSize: Number(form.elements.headlineSize.value),
+      textColor: form.elements.overlayTextColor.value,
+    };
     delete body.overlayEnabled;
     delete body.ctaLabel;
     delete body.badgeLabel;
@@ -897,7 +908,17 @@ function openCampaignDialog(campaign = null) {
       "status",
     ])
       form.elements[name].value = campaign[name] || "";
-    form.elements.overlayEnabled.checked = false;
+    const overlay = campaign.overlay || {};
+    form.elements.overlayEnabled.checked = Boolean(overlay.enabled);
+    form.elements.ctaLabel.value = overlay.ctaLabel || "Learn more";
+    form.elements.badgeLabel.value = overlay.badgeLabel || "IT Done Right";
+    form.elements.eventLabel.value = overlay.eventLabel || "";
+    form.elements.overlayColor.value = overlay.color || "#2b2d8f";
+    form.elements.overlayFont.value =
+      overlay.font || 'Inter, "Segoe UI", Arial, sans-serif';
+    form.elements.overlayFontWeight.value = String(overlay.fontWeight || 700);
+    form.elements.headlineSize.value = String(overlay.headlineSize || 20);
+    form.elements.overlayTextColor.value = overlay.textColor || "#ffffff";
   }
   $("#campaignImageName").textContent = campaign?.imageUrl
     ? "Current campaign banner"

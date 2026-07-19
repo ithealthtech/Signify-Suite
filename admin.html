@@ -112,7 +112,7 @@
               id="userSearch"
               type="search"
               placeholder="Search people"
-            /><select id="userFilter">
+            /><select id="userFilter" aria-label="Filter people">
               <option value="all">All people</option>
               <option value="active">Active</option>
               <option value="disabled">Disabled</option>
@@ -142,7 +142,7 @@
                 taking precedence.</small
               >
             </div>
-            <select id="rolloutTemplate"></select
+            <select id="rolloutTemplate" aria-label="Rollout template"></select
             ><label
               ><input id="rolloutOverwrite" type="checkbox" /> Overwrite
               existing</label
@@ -536,6 +536,7 @@
                   id="headlineSize"
                   name="headlineSize"
                   type="range"
+                  aria-label="Headline size"
                   min="16"
                   max="26"
                   value="20"

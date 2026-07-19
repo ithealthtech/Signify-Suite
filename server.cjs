@@ -8,6 +8,11 @@ const { loadConfig } = require("./server/config.cjs");
 const { openDatabase } = require("./server/database.cjs");
 const { createSignaturePortal } = require("./server/signature-portal.cjs");
 const { startJobWorker } = require("./server/job-queue.cjs");
+const {
+  applyPendingRestore,
+  createApplicationOperations,
+} = require("./server/application-operations.cjs");
+const packageMetadata = require("./package.json");
 
 const contentTypes = {
   ".html": "text/html; charset=utf-8",
@@ -198,7 +203,14 @@ function serve(config, req, res, pathname, requestId) {
 
 function createApplication(options = {}) {
   const config = options.config || loadConfig(options.env);
+  const restored = options.db ? null : applyPendingRestore(config);
   const db = options.db || openDatabase(config.databasePath);
+  const operations = createApplicationOperations({
+    config,
+    db,
+    fetchImpl: options.fetchImpl,
+    version: packageMetadata.version,
+  });
   const signaturePortal = createSignaturePortal({
     db,
     production: config.production,
@@ -210,6 +222,7 @@ function createApplication(options = {}) {
     trustProxy: config.trustProxy,
     fetchImpl: options.fetchImpl,
     stripeFactory: options.stripeFactory,
+    operations,
   });
   const rateBuckets = new Map(),
     metrics = {
@@ -445,7 +458,7 @@ function createApplication(options = {}) {
       );
     }
   };
-  return { config, db, handler };
+  return { config, db, handler, operations, restored };
 }
 
 function startServer(options = {}) {

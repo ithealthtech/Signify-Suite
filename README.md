@@ -372,6 +372,12 @@ included as `docs/sbom.cdx.json` in release artifacts.
 
 ## Backups and Recovery
 
+Application Owners can manage on-demand snapshots from **Application > Updates
+& backups**. Creating and downloading backups is immediate. Restores are staged
+and applied safely on the next Node.js process restart; on Hostinger, use the
+hosting panel's application restart action after staging. The prior database is
+preserved automatically as a pre-restore safety backup.
+
 Create a consistent SQLite backup:
 
 ```powershell

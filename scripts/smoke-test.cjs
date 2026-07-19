@@ -100,6 +100,7 @@ async function main() {
   const env = {
     ...process.env,
     DATABASE_PATH: databasePath,
+    BACKUP_DIR: path.join(tempDir, "backups"),
     SIGNATURE_ALLOW_DEFAULT_ADMIN: "true",
     SIGNIFY_ALLOW_REGISTRATION: "true",
     SIGNIFY_BOOTSTRAP_EMAIL: "admin@signify.local",
@@ -1267,10 +1268,27 @@ async function main() {
         linkUrl: "https://example.com/event",
         startDate: "2026-07-01",
         endDate: "2026-07-31",
+        overlay: {
+          enabled: true,
+          ctaLabel: "Reserve seat",
+          badgeLabel: "QA Event",
+          eventLabel: "Jul 12 · 9 AM",
+          color: "#123abc",
+          font: "Georgia, serif",
+          fontWeight: 800,
+          headlineSize: 26,
+          textColor: "#fefefe",
+        },
       },
       jar: adminJar,
     });
-    assert(result.response.status === 201, "campaign creation failed");
+    assert(
+      result.response.status === 201 &&
+        result.body.campaign.overlay.ctaLabel === "Reserve seat" &&
+        result.body.campaign.overlay.font === "Georgia, serif" &&
+        result.body.campaign.overlay.headlineSize === 26,
+      "campaign creation or overlay persistence failed",
+    );
     const campaignId = result.body.id;
     result = await request(baseUrl, `/api/signature/campaigns/${campaignId}`, {
       method: "PUT",
@@ -1306,6 +1324,11 @@ async function main() {
         result.body.campaign.title === "Updated summer event" &&
         result.body.campaign.status === "paused",
       "campaign update failed",
+    );
+    assert(
+      result.body.campaign.overlay.ctaLabel === "Reserve seat" &&
+        result.body.campaign.overlay.badgeLabel === "QA Event",
+      "campaign update discarded overlay metadata",
     );
     result = await request(baseUrl, "/api/signature/admin-config", {
       jar: adminJar,
@@ -1351,6 +1374,38 @@ async function main() {
         result.body.stats.organizations >= 2 &&
         result.body.stats.microsoftConnected >= 1,
       "Application Owner control-plane summary failed",
+    );
+    result = await request(baseUrl, "/api/platform/operations/backups", {
+      method: "POST",
+      body: { reason: "Smoke-test recovery snapshot" },
+      jar: adminJar,
+    });
+    const smokeBackupName = result.body?.backup?.name;
+    assert(
+      result.response.status === 201 && smokeBackupName,
+      "Application Owner could not create a backup",
+    );
+    result = await request(baseUrl, "/api/platform/operations", {
+      jar: adminJar,
+    });
+    assert(
+      result.response.status === 200 &&
+        result.body.backups.some((backup) => backup.name === smokeBackupName),
+      "Managed backup listing failed",
+    );
+    result = await request(
+      baseUrl,
+      `/api/platform/operations/backups/${encodeURIComponent(smokeBackupName)}/restore`,
+      {
+        method: "POST",
+        body: { reason: "Reject incomplete confirmation", confirmation: "NO" },
+        jar: adminJar,
+      },
+    );
+    assert(
+      result.response.status === 400 &&
+        result.body.error.code === "RESTORE_CONFIRMATION_REQUIRED",
+      "Restore was accepted without explicit confirmation",
     );
     result = await request(baseUrl, "/api/platform/organizations", {
       method: "POST",

@@ -108,6 +108,42 @@ function validDate(value) {
 }
 
 function campaignInput(body = {}, existing = {}) {
+  const currentOverlay = safeJson(existing.overlay_json),
+    rawOverlay =
+      body.overlay &&
+      typeof body.overlay === "object" &&
+      !Array.isArray(body.overlay)
+        ? body.overlay
+        : currentOverlay,
+    allowedFonts = new Set([
+      'Inter, "Segoe UI", Arial, sans-serif',
+      "Arial, sans-serif",
+      '"Trebuchet MS", Arial, sans-serif',
+      "Georgia, serif",
+      "Verdana, sans-serif",
+    ]),
+    overlay = {
+      enabled: Boolean(rawOverlay.enabled),
+      ctaLabel: limited(rawOverlay.ctaLabel, 24) || "Learn more",
+      badgeLabel: limited(rawOverlay.badgeLabel, 28) || "IT Done Right",
+      eventLabel: limited(rawOverlay.eventLabel, 32),
+      color: /^#[0-9a-f]{6}$/i.test(String(rawOverlay.color || ""))
+        ? String(rawOverlay.color)
+        : "#2b2d8f",
+      font: allowedFonts.has(String(rawOverlay.font || ""))
+        ? String(rawOverlay.font)
+        : 'Inter, "Segoe UI", Arial, sans-serif',
+      fontWeight: [600, 700, 800].includes(Number(rawOverlay.fontWeight))
+        ? Number(rawOverlay.fontWeight)
+        : 700,
+      headlineSize: Math.min(
+        26,
+        Math.max(16, Number(rawOverlay.headlineSize) || 20),
+      ),
+      textColor: /^#[0-9a-f]{6}$/i.test(String(rawOverlay.textColor || ""))
+        ? String(rawOverlay.textColor)
+        : "#ffffff",
+    };
   return {
     title: limited(body.title ?? existing.title, 64),
     message: limited(body.message ?? existing.message, 240),
@@ -117,6 +153,7 @@ function campaignInput(body = {}, existing = {}) {
     endDate: String(body.endDate ?? existing.end_date ?? ""),
     status:
       String(body.status ?? existing.status) === "paused" ? "paused" : "active",
+    overlay,
   };
 }
 

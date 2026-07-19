@@ -144,6 +144,10 @@ function loadConfig(env = process.env, baseDir = path.join(__dirname, "..")) {
     publicRoot: path.join(baseDir, "public"),
     databasePath:
       env.DATABASE_PATH || path.join(baseDir, "data", "signify-creator.db"),
+    backupPath: env.BACKUP_DIR || path.join(baseDir, "backups"),
+    updateRepository: String(
+      env.SIGNIFY_UPDATE_REPOSITORY || "ithealthtech/Signify-Suite",
+    ).trim(),
     signature: {
       sessionHours,
       mediaLimitBytes: Math.floor(mediaLimitMb * 1024 * 1024),

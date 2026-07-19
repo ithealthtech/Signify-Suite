@@ -26,7 +26,7 @@ try {
     .all()
     .map((row) => row.version);
   assert.ok(migrations.includes("013_query_plan_optimization.sql"));
-  assert.equal(migrations.at(-1), "014_background_jobs.sql");
+  assert.equal(migrations.at(-1), "015_campaign_overlay_metadata.sql");
   assert.deepEqual(db.prepare("PRAGMA foreign_key_check").all(), []);
   assert.equal(
     db.prepare("PRAGMA integrity_check").get().integrity_check,

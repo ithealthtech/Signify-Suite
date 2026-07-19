@@ -34,6 +34,9 @@
         </button>
         <button data-section="integrations" type="button">Integrations</button>
         <button data-section="owners" type="button">Application Owners</button>
+        <button data-section="operations" type="button">
+          Updates &amp; backups
+        </button>
         <button data-section="audit" type="button">Application audit</button>
       </aside>
       <section class="admin-content">
@@ -373,6 +376,89 @@
             </table>
           </div>
         </section>
+        <section class="admin-section" data-admin-section="operations">
+          <div class="page-head">
+            <div>
+              <span class="eyebrow">Application resilience</span>
+              <h1>Updates &amp; backups</h1>
+              <p>Manage release checks and recoverable database snapshots.</p>
+            </div>
+            <button class="button" id="refreshOperations" type="button">
+              Refresh
+            </button>
+          </div>
+          <div class="operations-grid">
+            <section class="operation-panel">
+              <div class="operation-head">
+                <div>
+                  <span class="eyebrow">Release channel</span>
+                  <h2>Application updates</h2>
+                </div>
+                <button class="button primary" id="checkUpdates" type="button">
+                  Check for updates
+                </button>
+              </div>
+              <div class="update-status" id="updateStatus">
+                <strong>Not checked</strong
+                ><span
+                  >Check the official GitHub release channel for a newer
+                  version.</span
+                >
+              </div>
+              <a
+                class="button"
+                id="openRelease"
+                href="#"
+                target="_blank"
+                rel="noopener"
+                hidden
+                >Open release</a
+              >
+            </section>
+            <section class="operation-panel">
+              <div class="operation-head">
+                <div>
+                  <span class="eyebrow">On-demand snapshot</span>
+                  <h2>Create backup</h2>
+                </div>
+                <button class="button primary" id="createBackup" type="button">
+                  Create backup
+                </button>
+              </div>
+              <p>
+                A consistent SQLite snapshot is stored in the configured backup
+                directory.
+              </p>
+            </section>
+          </div>
+          <div class="pending-restore" id="pendingRestore" hidden>
+            <div>
+              <strong>Restore pending</strong
+              ><span id="pendingRestoreName"></span>
+            </div>
+            <button class="button danger" id="cancelRestore" type="button">
+              Cancel restore
+            </button>
+          </div>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Backup</th>
+                  <th>Created</th>
+                  <th>Size</th>
+                  <th>Status</th>
+                  <th></th>
+                </tr>
+              </thead>
+              <tbody id="backupRows"></tbody>
+            </table>
+          </div>
+          <p class="operations-note">
+            A staged restore is applied when the Node.js process restarts. The
+            application creates a pre-restore safety backup automatically.
+          </p>
+        </section>
       </section>
     </main>
 
@@ -563,6 +649,35 @@
           <button class="button" type="button" data-close-detail>Close</button>
         </div>
       </div>
+    </dialog>
+
+    <dialog id="operationDialog">
+      <form class="dialog-form" id="operationForm">
+        <div class="dialog-head">
+          <div>
+            <span class="eyebrow">Application operation</span>
+            <h2 id="operationTitle">Confirm operation</h2>
+          </div>
+          <button type="button" data-close-operation aria-label="Close">
+            &times;
+          </button>
+        </div>
+        <p id="operationMessage"></p>
+        <input name="backupName" type="hidden" />
+        <input name="action" type="hidden" />
+        <label>Reason<input name="reason" required minlength="3" /></label>
+        <label id="restoreConfirmation" hidden
+          >Type RESTORE to confirm<input name="confirmation" autocomplete="off"
+        /></label>
+        <div class="dialog-actions">
+          <button class="button" type="button" data-close-operation>
+            Cancel
+          </button>
+          <button class="button primary" id="confirmOperation" type="submit">
+            Continue
+          </button>
+        </div>
+      </form>
     </dialog>
     <div class="toast" id="toast" role="status" aria-live="polite"></div>
     <script src="signify-shared.js?v=20260718"></script>

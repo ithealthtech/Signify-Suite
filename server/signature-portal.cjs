@@ -84,6 +84,7 @@ function campaignDto(row) {
     startDate: row.start_date,
     endDate: row.end_date,
     status: row.status,
+    overlay: safeJson(row.overlay_json),
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
@@ -353,6 +354,7 @@ function createSignaturePortal({
   fetchImpl = fetch,
   stripeFactory = (key) =>
     new Stripe(key, { maxNetworkRetries: 2, timeout: 10000 }),
+  operations,
 }) {
   seed(db, signature);
   const credentialVault = createCredentialVault(
@@ -1756,6 +1758,143 @@ function createSignaturePortal({
           refreshCsrf(owner),
         );
       }
+      if (url.pathname === "/api/platform/operations" && req.method === "GET")
+        return json(res, 200, { backups: operations.listBackups() }, requestId);
+      if (
+        url.pathname === "/api/platform/operations/backups" &&
+        req.method === "POST"
+      ) {
+        const body = await readJsonBody(req),
+          reason = limited(body.reason, 500).trim();
+        if (reason.length < 3)
+          throw Object.assign(
+            new Error("A reason of at least 3 characters is required."),
+            { status: 400, code: "OPERATION_REASON_REQUIRED" },
+          );
+        const backup = operations.createBackup();
+        recordApplicationAudit(
+          owner,
+          "application.backup_created",
+          "backup",
+          backup.name,
+          null,
+          reason,
+          {},
+          requestId,
+        );
+        return json(res, 201, { backup }, requestId);
+      }
+      const backupDownload = url.pathname.match(
+        /^\/api\/platform\/operations\/backups\/([^/]+)\/download$/,
+      );
+      if (backupDownload && req.method === "GET") {
+        const name = decodeURIComponent(backupDownload[1]),
+          file = operations.managedFile(name);
+        if (!fs.existsSync(file))
+          throw Object.assign(new Error("Backup not found."), {
+            status: 404,
+            code: "BACKUP_NOT_FOUND",
+          });
+        const stat = fs.statSync(file);
+        res.writeHead(200, {
+          "Content-Type": "application/vnd.sqlite3",
+          "Content-Length": stat.size,
+          "Content-Disposition": `attachment; filename="${name}"`,
+          "Cache-Control": "no-store",
+          "X-Request-Id": requestId,
+        });
+        fs.createReadStream(file).pipe(res);
+        return;
+      }
+      const backupRestore = url.pathname.match(
+        /^\/api\/platform\/operations\/backups\/([^/]+)\/restore$/,
+      );
+      if (backupRestore && req.method === "POST") {
+        const body = await readJsonBody(req),
+          reason = limited(body.reason, 500).trim(),
+          name = decodeURIComponent(backupRestore[1]);
+        if (reason.length < 3)
+          throw Object.assign(
+            new Error("A reason of at least 3 characters is required."),
+            { status: 400, code: "OPERATION_REASON_REQUIRED" },
+          );
+        if (body.confirmation !== "RESTORE")
+          throw Object.assign(
+            new Error("Type RESTORE to confirm this operation."),
+            { status: 400, code: "RESTORE_CONFIRMATION_REQUIRED" },
+          );
+        const restore = operations.stageRestore(name);
+        recordApplicationAudit(
+          owner,
+          "application.restore_staged",
+          "backup",
+          name,
+          null,
+          reason,
+          {},
+          requestId,
+        );
+        return json(res, 202, { restore }, requestId);
+      }
+      if (
+        url.pathname === "/api/platform/operations/restore" &&
+        req.method === "DELETE"
+      ) {
+        const body = await readJsonBody(req),
+          reason = limited(body.reason, 500).trim();
+        if (reason.length < 3)
+          throw Object.assign(
+            new Error("A reason of at least 3 characters is required."),
+            { status: 400, code: "OPERATION_REASON_REQUIRED" },
+          );
+        operations.cancelRestore();
+        recordApplicationAudit(
+          owner,
+          "application.restore_canceled",
+          "backup",
+          "pending",
+          null,
+          reason,
+          {},
+          requestId,
+        );
+        return json(res, 200, { canceled: true }, requestId);
+      }
+      const backupDelete = url.pathname.match(
+        /^\/api\/platform\/operations\/backups\/([^/]+)$/,
+      );
+      if (backupDelete && req.method === "DELETE") {
+        const body = await readJsonBody(req),
+          reason = limited(body.reason, 500).trim(),
+          name = decodeURIComponent(backupDelete[1]);
+        if (reason.length < 3)
+          throw Object.assign(
+            new Error("A reason of at least 3 characters is required."),
+            { status: 400, code: "OPERATION_REASON_REQUIRED" },
+          );
+        operations.deleteBackup(name);
+        recordApplicationAudit(
+          owner,
+          "application.backup_deleted",
+          "backup",
+          name,
+          null,
+          reason,
+          {},
+          requestId,
+        );
+        return json(res, 200, { deleted: true }, requestId);
+      }
+      if (
+        url.pathname === "/api/platform/operations/updates" &&
+        req.method === "GET"
+      )
+        return json(
+          res,
+          200,
+          { update: await operations.checkForUpdates() },
+          requestId,
+        );
       if (url.pathname === "/api/platform/integrations" && req.method === "GET")
         return json(
           res,
@@ -4598,7 +4737,7 @@ function createSignaturePortal({
           requestId,
         );
       db.prepare(
-        "INSERT INTO signature_campaigns(id,organization_id,title,message,link_url,image_url,start_date,end_date,status,created_by) VALUES (?,?,?,?,?,?,?,?,?,?)",
+        "INSERT INTO signature_campaigns(id,organization_id,title,message,link_url,image_url,start_date,end_date,status,overlay_json,created_by) VALUES (?,?,?,?,?,?,?,?,?,?,?)",
       ).run(
         id,
         user.organizationId,
@@ -4609,6 +4748,7 @@ function createSignaturePortal({
         input.startDate,
         input.endDate,
         input.status,
+        JSON.stringify(input.overlay),
         user.id,
       );
       const campaign = db
@@ -4671,7 +4811,7 @@ function createSignaturePortal({
           requestId,
         );
       db.prepare(
-        `UPDATE signature_campaigns SET title=?,message=?,link_url=?,image_url=?,start_date=?,end_date=?,status=?,updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE id=? AND organization_id=?`,
+        `UPDATE signature_campaigns SET title=?,message=?,link_url=?,image_url=?,start_date=?,end_date=?,status=?,overlay_json=?,updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE id=? AND organization_id=?`,
       ).run(
         input.title,
         input.message,
@@ -4680,6 +4820,7 @@ function createSignaturePortal({
         input.startDate,
         input.endDate,
         input.status,
+        JSON.stringify(input.overlay),
         id,
         user.organizationId,
       );
