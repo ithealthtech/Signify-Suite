@@ -33,12 +33,30 @@ time.
 
 ## Backup And Restore
 
-Run `npm run backup` on a schedule and copy backups to a separate durable
-system. To restore, stop Node, preserve the failed database for analysis,
-restore the selected SQLite file, remove only stale `-wal` and `-shm` files that
-belong to the replaced database, then start Node and verify `/api/ready`, tenant
-login, and an Application Owner login. Never restore media from a different
-point in time without reconciling database references.
+Application Owners can open **Updates & backups** in the application control
+plane to create, download, delete, and stage managed database snapshots. A
+staged restore is applied before SQLite opens on the next Node.js process
+restart. The application validates database integrity and migration
+compatibility and creates a `signify-creator-pre-restore-*.db` safety copy first.
+
+On Hostinger, stage the restore, restart the Node.js application from the
+hosting panel, then verify `/api/ready`, tenant login, and an Application Owner
+login. Keep `DATABASE_PATH` and `BACKUP_DIR` on persistent writable storage.
+The UI does not restore uploaded media or generated banners; recover those from
+the matching external filesystem snapshot when required.
+
+Continue to run `npm run backup` on a schedule and copy backups to a separate
+durable system. The in-app backup repository is operational convenience, not an
+off-site disaster-recovery copy.
+
+## Updates
+
+The **Updates & backups** page compares the installed package version with the
+latest full GitHub release from `SIGNIFY_UPDATE_REPOSITORY`. It links to the
+release but does not overwrite running application code. Deploy the release to
+a new versioned directory using the process above so environment files,
+persistent data, rollback capability, and host process supervision remain
+intact.
 
 ## Rollback
 

@@ -64,6 +64,19 @@ async function main() {
     api("/slow", { timeoutMs: 10 }),
     (error) => error.code === "REQUEST_TIMEOUT",
   );
+  const platformSource = fs.readFileSync(
+    path.join(__dirname, "..", "platform.js"),
+    "utf8",
+  );
+  for (const unsafeAccess of [
+    "busy(event.currentTarget, false)",
+    "event.currentTarget.reset()",
+    "event.currentTarget.elements",
+  ])
+    assert.ok(
+      !platformSource.includes(unsafeAccess),
+      `Platform async handlers must capture currentTarget: ${unsafeAccess}`,
+    );
   console.log(
     "Frontend tests passed: GET deduplication, write isolation, structured errors, and timeouts",
   );

@@ -238,6 +238,57 @@ hr {
   display: block;
   overflow-wrap: anywhere;
 }
+.operations-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
+  margin-bottom: 18px;
+}
+.operation-panel {
+  padding: 18px;
+  border: 1px solid var(--line);
+  background: var(--panel);
+}
+.operation-head,
+.pending-restore {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+}
+.operation-head h2 {
+  margin: 3px 0 0;
+  font-size: 18px;
+}
+.operation-panel p,
+.operations-note,
+.update-status span {
+  color: var(--muted);
+}
+.update-status {
+  display: grid;
+  gap: 5px;
+  margin: 18px 0;
+}
+.pending-restore {
+  margin-bottom: 16px;
+  padding: 14px 16px;
+  border-left: 4px solid #c2413b;
+  background: #fff4f2;
+}
+.pending-restore div {
+  display: grid;
+  gap: 3px;
+}
+.backup-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+.operations-note {
+  margin: 12px 0 0;
+  font-size: 13px;
+}
 .setup-progress span {
   margin-top: 4px;
   color: var(--muted);
@@ -245,7 +296,18 @@ hr {
 }
 @media (max-width: 760px) {
   .integration-status,
-  .setup-progress {
+  .setup-progress,
+  .operations-grid {
     grid-template-columns: 1fr 1fr;
+  }
+}
+@media (max-width: 560px) {
+  .operations-grid {
+    grid-template-columns: 1fr;
+  }
+  .operation-head,
+  .pending-restore {
+    align-items: stretch;
+    flex-direction: column;
   }
 }

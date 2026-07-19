@@ -13,6 +13,13 @@ function dateLabel(value) {
   const date = new Date(value);
   return Number.isNaN(date.valueOf()) ? "Unknown" : date.toLocaleString();
 }
+function fileSize(value) {
+  const bytes = Number(value || 0);
+  if (bytes < 1024) return `${bytes} B`;
+  const units = ["KB", "MB", "GB"],
+    exponent = Math.min(Math.floor(Math.log(bytes) / Math.log(1024)), 3);
+  return `${(bytes / 1024 ** exponent).toFixed(exponent > 1 ? 1 : 0)} ${units[exponent - 1]}`;
+}
 function toast(message) {
   const element = $("#toast");
   element.textContent = message;
@@ -127,6 +134,99 @@ async function loadSetup({ navigate = false } = {}) {
   if (navigate && !result.complete) showSection("setup");
   return result;
 }
+async function loadOperations() {
+  const result = await api("/api/platform/operations"),
+    pending = result.backups.find((item) => item.pendingRestore);
+  $("#pendingRestore").hidden = !pending;
+  $("#pendingRestoreName").textContent = pending
+    ? `${pending.name} will be restored after restart.`
+    : "";
+  $("#backupRows").innerHTML = result.backups.length
+    ? result.backups
+        .map(
+          (backup) =>
+            `<tr><td><strong>${escapeHtml(backup.name)}</strong></td><td>${escapeHtml(dateLabel(backup.modifiedAt))}</td><td>${escapeHtml(fileSize(backup.size))}</td><td>${backup.pendingRestore ? '<span class="status-dot error">Pending restore</span>' : '<span class="status-dot active">Ready</span>'}</td><td><div class="backup-actions"><a class="button" href="/api/platform/operations/backups/${encodeURIComponent(backup.name)}/download">Download</a><button class="button" type="button" data-backup-action="restore" data-backup-name="${escapeHtml(backup.name)}">Restore</button><button class="button danger" type="button" data-backup-action="delete" data-backup-name="${escapeHtml(backup.name)}">Delete</button></div></td></tr>`,
+        )
+        .join("")
+    : '<tr><td colspan="5" class="muted">No managed backups yet.</td></tr>';
+}
+function openOperation(action, backupName = "") {
+  const form = $("#operationForm"),
+    restore = action === "restore",
+    labels = {
+      create: [
+        "Create backup",
+        "Create a consistent snapshot of the current application database.",
+      ],
+      restore: [
+        "Stage database restore",
+        `Restore ${backupName} when the application next restarts.`,
+      ],
+      delete: ["Delete backup", `Permanently delete ${backupName}.`],
+      cancel: ["Cancel restore", "Remove the pending restore request."],
+    };
+  form.reset();
+  form.elements.action.value = action;
+  form.elements.backupName.value = backupName;
+  $("#operationTitle").textContent = labels[action][0];
+  $("#operationMessage").textContent = labels[action][1];
+  $("#restoreConfirmation").hidden = !restore;
+  form.elements.confirmation.required = restore;
+  $("#confirmOperation").textContent = labels[action][0];
+  $("#confirmOperation").classList.toggle(
+    "danger",
+    ["restore", "delete"].includes(action),
+  );
+  $("#operationDialog").showModal();
+}
+async function submitOperation(event) {
+  event.preventDefault();
+  const form = event.currentTarget,
+    button = event.submitter,
+    body = Object.fromEntries(new FormData(form)),
+    name = encodeURIComponent(body.backupName);
+  const requests = {
+    create: ["/api/platform/operations/backups", "POST"],
+    restore: [`/api/platform/operations/backups/${name}/restore`, "POST"],
+    delete: [`/api/platform/operations/backups/${name}`, "DELETE"],
+    cancel: ["/api/platform/operations/restore", "DELETE"],
+  };
+  busy(button, true);
+  try {
+    await api(requests[body.action][0], {
+      method: requests[body.action][1],
+      body: JSON.stringify(body),
+      timeoutMs: 120000,
+    });
+    $("#operationDialog").close();
+    await loadOperations();
+    toast(
+      body.action === "restore"
+        ? "Restore staged. Restart the application to apply it."
+        : "Application operation completed",
+    );
+  } catch (error) {
+    toast(error.message);
+  } finally {
+    busy(button, false);
+  }
+}
+async function checkUpdates(event) {
+  const button = event.currentTarget;
+  busy(button, true, "Checking...");
+  try {
+    const { update } = await api("/api/platform/operations/updates"),
+      status = $("#updateStatus"),
+      link = $("#openRelease");
+    status.innerHTML = `<strong>${update.updateAvailable ? "Update available" : "Application is current"}</strong><span>Installed ${escapeHtml(update.currentVersion)} · Latest ${escapeHtml(update.latestVersion)} · Published ${escapeHtml(dateLabel(update.publishedAt))}</span>`;
+    link.href = update.releaseUrl;
+    link.hidden = !update.releaseUrl;
+  } catch (error) {
+    toast(error.message);
+  } finally {
+    busy(button, false);
+  }
+}
 async function saveApplicationSetup(event) {
   event.preventDefault();
   const button = event.submitter,
@@ -147,15 +247,16 @@ async function saveApplicationSetup(event) {
 }
 async function saveMicrosoftSetup(event) {
   event.preventDefault();
-  const button = event.submitter,
-    body = Object.fromEntries(new FormData(event.currentTarget));
+  const form = event.currentTarget,
+    button = event.submitter,
+    body = Object.fromEntries(new FormData(form));
   busy(button, true, "Verifying...");
   try {
     await api("/api/platform/integrations/microsoft/connect", {
       method: "POST",
       body: JSON.stringify(body),
     });
-    event.currentTarget.elements.clientSecret.value = "";
+    form.elements.clientSecret.value = "";
     await loadSetup();
     toast("Microsoft application verified");
   } catch (error) {
@@ -166,8 +267,9 @@ async function saveMicrosoftSetup(event) {
 }
 async function connectStripe(event) {
   event.preventDefault();
-  const button = event.submitter,
-    body = Object.fromEntries(new FormData(event.currentTarget));
+  const form = event.currentTarget,
+    button = event.submitter,
+    body = Object.fromEntries(new FormData(form));
   busy(button, true, "Verifying...");
   try {
     const result = await api("/api/platform/integrations/stripe/connect", {
@@ -175,7 +277,7 @@ async function connectStripe(event) {
       body: JSON.stringify(body),
     });
     state.stripePrices = result.prices;
-    event.currentTarget.reset();
+    form.reset();
     renderStripePrices();
     await loadIntegrations();
     $("#stripePlanForm").hidden = false;
@@ -448,6 +550,7 @@ function bindEvents() {
       if (button.dataset.section === "integrations") await loadIntegrations();
       if (button.dataset.section === "owners") await loadOwners();
       if (button.dataset.section === "audit") await loadAudit();
+      if (button.dataset.section === "operations") await loadOperations();
     }),
   );
   $("#openCreateTenant").addEventListener("click", () => {
@@ -502,16 +605,15 @@ function bindEvents() {
   });
   $("#ownerForm").addEventListener("submit", async (event) => {
     event.preventDefault();
-    const button = event.submitter;
+    const form = event.currentTarget,
+      button = event.submitter;
     busy(button, true, "Granting...");
     try {
       await api("/api/platform/owners", {
         method: "POST",
-        body: JSON.stringify(
-          Object.fromEntries(new FormData(event.currentTarget)),
-        ),
+        body: JSON.stringify(Object.fromEntries(new FormData(form))),
       });
-      event.currentTarget.reset();
+      form.reset();
       await loadOwners();
       toast("Application Owner access granted");
     } catch (error) {
@@ -539,6 +641,21 @@ function bindEvents() {
   $("#refreshAudit").addEventListener("click", () =>
     loadAudit().catch((error) => toast(error.message)),
   );
+  $("#refreshOperations").addEventListener("click", () =>
+    loadOperations().catch((error) => toast(error.message)),
+  );
+  $("#createBackup").addEventListener("click", () => openOperation("create"));
+  $("#checkUpdates").addEventListener("click", checkUpdates);
+  $("#cancelRestore").addEventListener("click", () => openOperation("cancel"));
+  $("#backupRows").addEventListener("click", (event) => {
+    const button = event.target.closest("[data-backup-action]");
+    if (button)
+      openOperation(button.dataset.backupAction, button.dataset.backupName);
+  });
+  $$("[data-close-operation]").forEach((button) =>
+    button.addEventListener("click", () => $("#operationDialog").close()),
+  );
+  $("#operationForm").addEventListener("submit", submitOperation);
   $("#refreshIntegrations").addEventListener("click", () =>
     loadIntegrations().catch((error) => toast(error.message)),
   );
@@ -621,7 +738,7 @@ async function boot() {
     );
 }
 boot().catch((error) => {
-  if (error.status === 401)
+  if ([401, 403].includes(error.status))
     location.href = "/signature.html?auth=account-required";
   else toast(error.message);
 });
