@@ -9,6 +9,7 @@
   "scripts": {
     "start": "node --env-file-if-exists=.env.local server.cjs",
     "worker": "node --env-file-if-exists=.env.local worker.cjs",
+    "media:migrate": "node --env-file-if-exists=.env.local scripts/migrate-media-to-s3.cjs",
     "setup": "node scripts/setup.cjs",
     "dev": "node scripts/dev.cjs",
     "build": "node scripts/build.cjs",

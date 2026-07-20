@@ -208,10 +208,16 @@ function createS3MediaStorage({ s3, client, presign = getSignedUrl }) {
           objects(`uploads/${tenant}/`),
           objects(`generated-banners/${tenant}/`),
         ]),
-        usageBytes = existing
-          .flat()
-          .reduce((total, item) => total + Number(item.Size || 0), 0);
-      if (usageBytes + bytes.length > limitBytes)
+        existingObjects = existing.flat(),
+        usageBytes = existingObjects.reduce(
+          (total, item) => total + Number(item.Size || 0),
+          0,
+        ),
+        replacedBytes = Number(
+          existingObjects.find((item) => item.Key === key)?.Size || 0,
+        ),
+        projectedUsage = usageBytes - replacedBytes + bytes.length;
+      if (projectedUsage > limitBytes)
         throw Object.assign(new Error("Tenant media storage limit reached."), {
           status: 413,
           code: "MEDIA_STORAGE_LIMIT",
@@ -232,7 +238,7 @@ function createS3MediaStorage({ s3, client, presign = getSignedUrl }) {
       return {
         url: `/${key}`,
         storedBytes: bytes.length,
-        usageBytes: usageBytes + bytes.length,
+        usageBytes: projectedUsage,
         limitBytes,
       };
     },

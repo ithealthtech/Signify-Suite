@@ -262,6 +262,17 @@ application. Configure bucket versioning and lifecycle retention at the storage
 provider. Do not make the bucket public. Static access keys are optional when
 the host supplies an IAM workload identity.
 
+Copy existing local media after configuring and testing the private bucket:
+
+```powershell
+npm run media:migrate
+```
+
+The command uploads every tenant object and verifies its SHA-256 content while
+leaving local files intact. After backups and application reads have been
+verified against S3, rerun with `-- --delete-source` to remove each local source
+only after its remote content passes verification.
+
 ### 5. Configure the reverse proxy
 
 Terminate TLS at nginx, Caddy, IIS, Apache, or the hosting platform. Proxy to

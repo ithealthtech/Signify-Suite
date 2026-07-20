@@ -7,6 +7,7 @@ const path = require("node:path");
 const { PassThrough, Readable } = require("node:stream");
 const { serveObjectMedia } = require("../server.cjs");
 const { loadConfig } = require("../server/config.cjs");
+const { migrateMedia } = require("./migrate-media-to-s3.cjs");
 const {
   cleanupOrphanMedia,
   createS3MediaStorage,
@@ -200,8 +201,66 @@ async function testS3() {
     () => mediaKey("uploads", "../escape", "logo.png"),
     (error) => error.code === "TENANT_STORAGE_INVALID",
   );
+  const migrationRoot = fs.mkdtempSync(
+      path.join(os.tmpdir(), "signify-media-migration-"),
+    ),
+    migrationDirectory = path.join(
+      migrationRoot,
+      "uploads",
+      "tenant-migration",
+    ),
+    migrated = new Map(),
+    migrationStorage = {
+      async write(input) {
+        migrated.set(
+          `${input.collection}/${input.organizationId}/${input.name}`,
+          Buffer.from(input.bytes),
+        );
+      },
+      async read(input) {
+        return {
+          body: Readable.from(
+            migrated.get(
+              `${input.collection}/${input.organizationId}/${input.name}`,
+            ),
+          ),
+        };
+      },
+    };
+  fs.mkdirSync(migrationDirectory, { recursive: true });
+  fs.writeFileSync(path.join(migrationDirectory, "existing.png"), "existing");
+  try {
+    const migration = await migrateMedia({
+      publicRoot: migrationRoot,
+      storage: migrationStorage,
+      limitBytes: 100,
+    });
+    assert.deepEqual(migration, {
+      discovered: 1,
+      copied: 1,
+      bytes: 8,
+      deleted: 0,
+    });
+    assert.equal(
+      fs.existsSync(path.join(migrationDirectory, "existing.png")),
+      true,
+    );
+    const destructive = await migrateMedia({
+      publicRoot: migrationRoot,
+      storage: migrationStorage,
+      limitBytes: 100,
+      deleteSource: true,
+    });
+    assert.equal(destructive.deleted, 1);
+    assert.equal(
+      fs.existsSync(path.join(migrationDirectory, "existing.png")),
+      false,
+    );
+  } finally {
+    fs.rmSync(migrationRoot, { recursive: true, force: true });
+  }
   console.log(
-    "S3 media tests passed: private writes, tenant quotas, reads, references, and orphan cleanup",
+    "S3 media tests passed: private writes, tenant quotas, reads, signed URLs, references, migration verification, and orphan cleanup",
   );
 }
 

@@ -17,6 +17,12 @@ bucket versioning before moving traffic. Stable signature media is proxied by
 the application; provider credentials and raw object keys are never returned to
 the browser.
 
+For an existing local-media installation, run `npm run media:migrate` to copy
+and SHA-256 verify objects without removing sources. Back up the local media,
+verify representative signature URLs, then use
+`npm run media:migrate -- --delete-source` only when the S3 copy is
+authoritative.
+
 ## Monitor
 
 - `GET /api/live` proves the Node process can serve requests.
