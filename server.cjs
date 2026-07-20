@@ -444,6 +444,7 @@ function createApplication(options = {}) {
             status: "ok",
             service: "signify-creator",
             database: "ready",
+            version: packageMetadata.version,
             time: new Date().toISOString(),
           },
           requestId,

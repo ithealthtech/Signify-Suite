@@ -131,6 +131,13 @@ run against the migrated schema, restore the matching pre-deployment database
 and media snapshot together. Never downgrade only the database file while the
 newer process is running.
 
+For SSH/VPS delivery, `npm run deploy:release -- <artifact-directory>` performs
+the checksum, dependency, copied-database migration, atomic activation, exact
+version readiness, and rollback transaction. The required environment is
+documented in `DEPLOYMENT.md`. Treat `DEPLOYMENT_ROLLED_BACK` as a failed
+release even when prior-version health is restored. `DEPLOYMENT_ROLLBACK_FAILED`
+is a SEV-1 because neither candidate nor prior release passed readiness.
+
 ## Capacity
 
 Track database size, WAL growth, backup duration, media usage, failed jobs, and

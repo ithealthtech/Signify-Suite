@@ -11,6 +11,10 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: signify-${{ github.event_name }}-${{ github.ref }}
+  cancel-in-progress: false
+
 jobs:
   validate:
     runs-on: ubuntu-latest
@@ -59,3 +63,79 @@ jobs:
           "signify-creator-${{ github.event.release.tag_name }}.tar.gz"
           "signify-creator-${{ github.event.release.tag_name }}.tar.gz.sha256"
           --clobber
+
+  deploy-staging:
+    if: github.event_name == 'release' && github.event.action == 'published'
+    needs: validate
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    environment:
+      name: staging
+      url: ${{ secrets.SIGNIFY_HEALTH_URL }}
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          name: signify-creator-${{ github.sha }}
+          path: dist
+      - name: Configure verified SSH host
+        env:
+          SSH_KEY: ${{ secrets.SIGNIFY_SSH_PRIVATE_KEY }}
+          SSH_KNOWN_HOSTS: ${{ secrets.SIGNIFY_SSH_KNOWN_HOSTS }}
+        run: |
+          install -m 700 -d ~/.ssh
+          printf '%s\n' "$SSH_KEY" > ~/.ssh/signify_deploy
+          chmod 600 ~/.ssh/signify_deploy
+          printf '%s\n' "$SSH_KNOWN_HOSTS" > ~/.ssh/known_hosts
+      - name: Upload and deploy staging artifact
+        env:
+          SSH_HOST: ${{ secrets.SIGNIFY_SSH_HOST }}
+          SSH_USER: ${{ secrets.SIGNIFY_SSH_USER }}
+          DEPLOY_ROOT: ${{ secrets.SIGNIFY_DEPLOY_ROOT }}
+          DEPLOY_COMMAND: ${{ secrets.SIGNIFY_DEPLOY_COMMAND }}
+        run: |
+          [[ "$SSH_HOST" =~ ^[A-Za-z0-9.-]+$ ]] || { echo "Invalid SSH host"; exit 1; }
+          [[ "$SSH_USER" =~ ^[A-Za-z0-9._-]+$ ]] || { echo "Invalid SSH user"; exit 1; }
+          [[ "$DEPLOY_ROOT" =~ ^/[A-Za-z0-9._/-]+$ ]] || { echo "Invalid deploy root"; exit 1; }
+          [[ "$DEPLOY_COMMAND" =~ ^/[A-Za-z0-9._/-]+$ ]] || { echo "Invalid deploy command"; exit 1; }
+          tar -C dist -czf signify-deploy.tar.gz .
+          ssh -i ~/.ssh/signify_deploy "$SSH_USER@$SSH_HOST" "mkdir -p '$DEPLOY_ROOT/incoming/${{ github.sha }}/artifact'"
+          scp -i ~/.ssh/signify_deploy signify-deploy.tar.gz "$SSH_USER@$SSH_HOST:$DEPLOY_ROOT/incoming/${{ github.sha }}/"
+          ssh -i ~/.ssh/signify_deploy "$SSH_USER@$SSH_HOST" "tar -xzf '$DEPLOY_ROOT/incoming/${{ github.sha }}/signify-deploy.tar.gz' -C '$DEPLOY_ROOT/incoming/${{ github.sha }}/artifact' && '$DEPLOY_COMMAND' '$DEPLOY_ROOT/incoming/${{ github.sha }}/artifact'"
+
+  deploy-production:
+    if: github.event_name == 'release' && github.event.action == 'published'
+    needs: deploy-staging
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    environment:
+      name: production
+      url: ${{ secrets.SIGNIFY_HEALTH_URL }}
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          name: signify-creator-${{ github.sha }}
+          path: dist
+      - name: Configure verified SSH host
+        env:
+          SSH_KEY: ${{ secrets.SIGNIFY_SSH_PRIVATE_KEY }}
+          SSH_KNOWN_HOSTS: ${{ secrets.SIGNIFY_SSH_KNOWN_HOSTS }}
+        run: |
+          install -m 700 -d ~/.ssh
+          printf '%s\n' "$SSH_KEY" > ~/.ssh/signify_deploy
+          chmod 600 ~/.ssh/signify_deploy
+          printf '%s\n' "$SSH_KNOWN_HOSTS" > ~/.ssh/known_hosts
+      - name: Upload and deploy production artifact
+        env:
+          SSH_HOST: ${{ secrets.SIGNIFY_SSH_HOST }}
+          SSH_USER: ${{ secrets.SIGNIFY_SSH_USER }}
+          DEPLOY_ROOT: ${{ secrets.SIGNIFY_DEPLOY_ROOT }}
+          DEPLOY_COMMAND: ${{ secrets.SIGNIFY_DEPLOY_COMMAND }}
+        run: |
+          [[ "$SSH_HOST" =~ ^[A-Za-z0-9.-]+$ ]] || { echo "Invalid SSH host"; exit 1; }
+          [[ "$SSH_USER" =~ ^[A-Za-z0-9._-]+$ ]] || { echo "Invalid SSH user"; exit 1; }
+          [[ "$DEPLOY_ROOT" =~ ^/[A-Za-z0-9._/-]+$ ]] || { echo "Invalid deploy root"; exit 1; }
+          [[ "$DEPLOY_COMMAND" =~ ^/[A-Za-z0-9._/-]+$ ]] || { echo "Invalid deploy command"; exit 1; }
+          tar -C dist -czf signify-deploy.tar.gz .
+          ssh -i ~/.ssh/signify_deploy "$SSH_USER@$SSH_HOST" "mkdir -p '$DEPLOY_ROOT/incoming/${{ github.sha }}/artifact'"
+          scp -i ~/.ssh/signify_deploy signify-deploy.tar.gz "$SSH_USER@$SSH_HOST:$DEPLOY_ROOT/incoming/${{ github.sha }}/"
+          ssh -i ~/.ssh/signify_deploy "$SSH_USER@$SSH_HOST" "tar -xzf '$DEPLOY_ROOT/incoming/${{ github.sha }}/signify-deploy.tar.gz' -C '$DEPLOY_ROOT/incoming/${{ github.sha }}/artifact' && '$DEPLOY_COMMAND' '$DEPLOY_ROOT/incoming/${{ github.sha }}/artifact'"

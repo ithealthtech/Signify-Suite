@@ -142,3 +142,56 @@ node --env-file=.env.local server.cjs
 ```
 
 Run the process under Windows Service Manager, NSSM, systemd, Docker, or another supervisor that restarts failed processes and captures stdout/stderr JSON logs.
+
+## 9. Immutable staging and production delivery
+
+The release workflow deploys a published artifact to the GitHub `staging`
+environment first. Production cannot start until staging has completed. Create
+both protected GitHub environments and configure these environment secrets:
+
+- `SIGNIFY_SSH_HOST` and `SIGNIFY_SSH_USER`
+- `SIGNIFY_SSH_PRIVATE_KEY`, limited to the deployment account
+- `SIGNIFY_SSH_KNOWN_HOSTS`, generated from a separately verified host key
+- `SIGNIFY_DEPLOY_ROOT`, an absolute host directory without shell metacharacters
+- `SIGNIFY_DEPLOY_COMMAND`, an absolute executable host-adapter path
+- `SIGNIFY_HEALTH_URL`, the environment readiness URL
+
+Require manual approval on the production environment. The deployment account
+must not have interactive root access and should only write the release and
+incoming directories and invoke the restart adapter.
+
+The host adapter receives the extracted artifact directory as its only
+argument. It must load the persistent environment and invoke the deployment
+controller from that artifact. Example `/opt/signify/bin/deploy`:
+
+```sh
+#!/bin/sh
+set -eu
+artifact="$1"
+exec node --env-file=/opt/signify/shared/.env.local \
+  "$artifact/scripts/deploy-release.cjs" "$artifact"
+```
+
+Configure the persistent environment:
+
+```env
+SIGNIFY_RELEASES_DIR=/opt/signify/releases
+SIGNIFY_CURRENT_LINK=/opt/signify/current
+SIGNIFY_DEPLOY_RESTART_SCRIPT=/opt/signify/bin/restart
+SIGNIFY_DEPLOY_HEALTH_URL=https://signify.example.com/api/ready
+DATABASE_PATH=/opt/signify/shared/data/signify-creator.db
+```
+
+The restart adapter takes no arguments and should restart the web and external
+worker supervisors. The controller verifies every artifact checksum, installs
+locked production dependencies, migrates a copied database as a preflight,
+atomically changes the current-release link, and requires readiness to report
+the candidate version. A failed restart or health gate restores the prior link,
+restarts it, and verifies rollback health. Database migrations remain
+forward-only, so create a recovery point immediately before deployment.
+
+Hostinger managed Node.js Web Apps may not provide SSH, stable symlinks, or a
+restart adapter. In that environment, keep GitHub production deployment
+disabled and use Hostinger's external deployment mechanism with the same
+artifact, staging, preflight, readiness, and rollback gates. A Hostinger VPS can
+use the supplied controller directly.
