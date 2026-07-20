@@ -470,6 +470,11 @@ backup, restore, rollback, and capacity runbook is in `docs/OPERATIONS.md`. A
 CycloneDX production dependency inventory is generated with `npm run sbom` and
 included as `docs/sbom.cdx.json` in release artifacts.
 
+Security reporting, ASVS evidence, privacy/retention baselines, subprocessors,
+incident response, and service-term requirements are shipped in `SECURITY.md`
+and the corresponding `docs/` records. Operators must complete legal entity,
+jurisdiction, provider, and contact details before commercial launch.
+
 ## Backups and Recovery
 
 Application Owners can manage on-demand snapshots from **Application > Updates

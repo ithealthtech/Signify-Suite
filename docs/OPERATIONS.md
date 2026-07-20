@@ -84,6 +84,13 @@ disconnects, Stripe subscription changes, and restore/delete operations require
 step-up authentication. A successful password and MFA check opens a ten-minute
 privileged window and writes a separate application audit event.
 
+Run `npm run security:access-review` at least quarterly and after staffing or
+incident changes. Confirm every active Application Owner still requires access,
+has MFA enrolled, recognizes active sessions, and has expected recent privileged
+activity. Revoke stale sessions and remove unnecessary owner grants through the
+control plane with a recorded reason. Store the reviewed JSON report in the
+operator's restricted compliance system, not in this repository.
+
 ## Backup And Restore
 
 Application Owners can open **Updates & backups** in the application control

@@ -46,11 +46,19 @@ for (const required of [
   ".env.example",
   "scripts/setup.cjs",
   "docs/OPERATIONS.md",
+  "SECURITY.md",
+  "docs/ASVS-REVIEW.md",
+  "docs/DATA-RETENTION.md",
+  "docs/INCIDENT-RESPONSE.md",
+  "docs/PRIVACY.md",
+  "docs/SUBPROCESSORS.md",
+  "docs/TERMS.md",
   "docs/SAAS-READINESS.md",
   "docs/sbom.cdx.json",
   "manifest.json",
   "checksums.txt",
   "public/signature-it-banner.png",
+  "scripts/access-review.cjs",
 ])
   if (!relativeFiles.includes(required))
     throw new Error(`Production artifact is missing ${required}.`);
