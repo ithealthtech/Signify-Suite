@@ -66,6 +66,13 @@ recovery codes are stored only as hashes and are consumed once. Enrollment and
 disablement revoke the owner's other sessions and create application audit
 records. Run `npm run credentials:rotate` while the application is stopped to
 rotate both provider credentials and MFA secrets in one database transaction.
+Owners can also review their active device history and revoke one or all other
+sessions. Session revocation requires a reason and is recorded in the
+application audit log.
+Owner grants, tenant lifecycle and entitlement changes, integration
+disconnects, Stripe subscription changes, and restore/delete operations require
+step-up authentication. A successful password and MFA check opens a ten-minute
+privileged window and writes a separate application audit event.
 
 ## Backup And Restore
 

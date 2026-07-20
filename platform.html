@@ -345,6 +345,31 @@
               </button>
             </div>
           </div>
+          <div class="control-form" id="ownerSessionsPanel">
+            <div class="page-head compact">
+              <div>
+                <h2>Active sessions</h2>
+                <p>Review devices signed in to your owner account.</p>
+              </div>
+              <button class="button" id="revokeOtherSessions" type="button">
+                Revoke other sessions
+              </button>
+            </div>
+            <div class="table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Device</th>
+                    <th>Last active</th>
+                    <th>Expires</th>
+                    <th>Security</th>
+                    <th></th>
+                  </tr>
+                </thead>
+                <tbody id="ownerSessionRows"></tbody>
+              </table>
+            </div>
+          </div>
           <form class="inline-form" id="ownerForm">
             <label
               >Existing account email<input
@@ -569,6 +594,37 @@
       </form>
     </dialog>
 
+    <dialog id="ownerReauthDialog">
+      <form class="dialog-form" id="ownerReauthForm">
+        <div class="dialog-head">
+          <div>
+            <span class="eyebrow">Protected action</span>
+            <h2>Confirm it is you</h2>
+          </div>
+          <button type="button" data-close-reauth aria-label="Close">
+            &times;
+          </button>
+        </div>
+        <p>Re-enter your credentials to continue this sensitive operation.</p>
+        <label
+          >Current password<input
+            name="password"
+            type="password"
+            autocomplete="current-password"
+            required
+        /></label>
+        <label id="ownerReauthCodeField"
+          >Authenticator or recovery code<input
+            name="code"
+            autocomplete="one-time-code"
+        /></label>
+        <div class="dialog-actions">
+          <button class="button" type="button" data-close-reauth>Cancel</button>
+          <button class="button primary" type="submit">Confirm</button>
+        </div>
+      </form>
+    </dialog>
+
     <dialog id="ownerMfaDialog">
       <div class="dialog-form">
         <div class="dialog-head">
@@ -588,6 +644,11 @@
               type="password"
               autocomplete="current-password"
               required
+          /></label>
+          <label id="ownerMfaCurrentCodeField" hidden
+            >Current authenticator or recovery code<input
+              name="currentCode"
+              autocomplete="one-time-code"
           /></label>
           <div class="dialog-actions">
             <button class="button" type="button" data-close-mfa>Cancel</button>

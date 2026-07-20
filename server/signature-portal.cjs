@@ -663,7 +663,7 @@ function createSignaturePortal({
       });
     const row = db
       .prepare(
-        `SELECT u.*,s.id AS session_id,s.organization_id,s.csrf_token_hash FROM signature_sessions s JOIN signature_users u ON u.id=s.user_id WHERE s.token_hash=? AND s.expires_at>strftime('%Y-%m-%dT%H:%M:%fZ','now') AND u.status='active'`,
+        `SELECT u.*,s.id AS session_id,s.organization_id,s.csrf_token_hash,s.mfa_verified_at FROM signature_sessions s JOIN signature_users u ON u.id=s.user_id WHERE s.token_hash=? AND s.expires_at>strftime('%Y-%m-%dT%H:%M:%fZ','now') AND u.status='active'`,
       )
       .get(tokenHash(token));
     if (!row)
@@ -684,8 +684,37 @@ function createSignaturePortal({
     Object.defineProperties(user, {
       sessionId: { value: row.session_id },
       csrfTokenHash: { value: row.csrf_token_hash || "" },
+      privilegedAt: { value: row.mfa_verified_at || "" },
     });
     return user;
+  }
+  function ownerActionRequiresReauthentication(req, pathname) {
+    if (["GET", "HEAD", "OPTIONS"].includes(req.method)) return false;
+    return (
+      /^\/api\/platform\/owners(?:\/|$)/.test(pathname) ||
+      /^\/api\/platform\/organizations\/[^/]+\/(?:status|subscription|billing\/subscription)$/.test(
+        pathname,
+      ) ||
+      (req.method === "DELETE" &&
+        /^\/api\/platform\/integrations\/(?:microsoft|stripe)$/.test(
+          pathname,
+        )) ||
+      /^\/api\/platform\/operations\/backups\/[^/]+\/restore$/.test(pathname) ||
+      (req.method === "DELETE" &&
+        /^\/api\/platform\/operations\/backups\/[^/]+$/.test(pathname))
+    );
+  }
+  function requireRecentOwnerAuthentication(owner) {
+    const recent = db
+      .prepare(
+        `SELECT 1 FROM signature_sessions WHERE id=? AND mfa_verified_at>=strftime('%Y-%m-%dT%H:%M:%fZ','now','-10 minutes')`,
+      )
+      .get(owner.sessionId);
+    if (!recent)
+      throw Object.assign(
+        new Error("Confirm your password and MFA code to continue."),
+        { status: 403, code: "PRIVILEGED_REAUTH_REQUIRED" },
+      );
   }
   function createSession(req, row, { mfaVerified = false } = {}) {
     const user = userDto(row),
@@ -2013,7 +2042,9 @@ function createSignaturePortal({
           { "Set-Cookie": clearOauthCookie },
         );
       }
-      const session = createSession(req, row);
+      const session = createSession(req, row, {
+        mfaVerified: isApplicationOwner(row.id) && !mfaRow(row.id, true),
+      });
       recordAudit(session.user, "profile.microsoft_synced", "user", row.id, {
         photoImported: Boolean(photoUrl && photoUrl !== current.photoUrl),
       });
@@ -2121,6 +2152,42 @@ function createSignaturePortal({
           ),
           { status: 403, code: "OWNER_MFA_REQUIRED" },
         );
+      if (url.pathname === "/api/platform/reauth" && req.method === "POST") {
+        const body = await readJsonBody(req, { limit: 8192 }),
+          account = db
+            .prepare(
+              "SELECT password_hash,email FROM signature_users WHERE id=?",
+            )
+            .get(owner.id),
+          mfaEnabled = Boolean(mfaRow(owner.id, true));
+        if (
+          !verifyPassword(body.password, account?.password_hash) ||
+          (mfaEnabled && !verifyMfaCode(owner.id, account.email, body.code))
+        )
+          throw Object.assign(
+            new Error("Password or verification code is invalid."),
+            { status: 403, code: "PRIVILEGED_REAUTH_FAILED" },
+          );
+        db.prepare(
+          `UPDATE signature_sessions SET mfa_verified_at=strftime('%Y-%m-%dT%H:%M:%fZ','now'),last_seen_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE id=?`,
+        ).run(owner.sessionId);
+        recordApplicationAudit(
+          owner,
+          "session.privileged_reauthenticated",
+          "session",
+          owner.sessionId,
+          null,
+          "Step-up authentication",
+          { mfa: mfaEnabled },
+          requestId,
+        );
+        return json(
+          res,
+          200,
+          { verifiedAt: new Date().toISOString(), validForSeconds: 600 },
+          requestId,
+        );
+      }
       if (
         url.pathname === "/api/platform/mfa/enroll" &&
         req.method === "POST"
@@ -2136,6 +2203,14 @@ function createSignaturePortal({
             status: 403,
             code: "PASSWORD_INVALID",
           });
+        if (
+          mfaRow(owner.id, true) &&
+          !verifyMfaCode(owner.id, account.email, body.currentCode)
+        )
+          throw Object.assign(
+            new Error("Current MFA verification code is invalid."),
+            { status: 403, code: "MFA_REPLACEMENT_DENIED" },
+          );
         if (!credentialVault.configured)
           throw Object.assign(
             new Error("Credential encryption is required before enabling MFA."),
@@ -2279,6 +2354,90 @@ function createSignaturePortal({
         }
         return json(res, 200, { ok: true }, requestId);
       }
+      if (url.pathname === "/api/platform/sessions" && req.method === "GET") {
+        const sessions = db
+          .prepare(
+            `SELECT id,created_at,last_seen_at,expires_at,created_ip,user_agent,mfa_verified_at
+             FROM signature_sessions WHERE user_id=? ORDER BY last_seen_at DESC,created_at DESC`,
+          )
+          .all(owner.id)
+          .map((row) => ({
+            id: row.id,
+            current: row.id === owner.sessionId,
+            createdAt: row.created_at,
+            lastSeenAt: row.last_seen_at,
+            expiresAt: row.expires_at,
+            ipAddress: row.created_ip,
+            userAgent: row.user_agent,
+            mfaVerifiedAt: row.mfa_verified_at,
+          }));
+        return json(res, 200, { sessions }, requestId);
+      }
+      if (
+        url.pathname === "/api/platform/sessions" &&
+        req.method === "DELETE"
+      ) {
+        const body = await readJsonBody(req, { limit: 8192 }),
+          reason = limited(body.reason, 500);
+        if (reason.length < 3)
+          throw Object.assign(new Error("A revocation reason is required."), {
+            status: 400,
+            code: "REASON_REQUIRED",
+          });
+        const revoked = db
+          .prepare("DELETE FROM signature_sessions WHERE user_id=? AND id<>?")
+          .run(owner.id, owner.sessionId).changes;
+        recordApplicationAudit(
+          owner,
+          "sessions.revoked",
+          "user",
+          owner.id,
+          null,
+          reason,
+          { revoked },
+          requestId,
+        );
+        return json(res, 200, { revoked }, requestId);
+      }
+      const ownerSessionMatch = url.pathname.match(
+        /^\/api\/platform\/sessions\/([^/]+)$/,
+      );
+      if (ownerSessionMatch && req.method === "DELETE") {
+        const body = await readJsonBody(req, { limit: 8192 }),
+          reason = limited(body.reason, 500),
+          id = ownerSessionMatch[1];
+        if (id === owner.sessionId)
+          throw Object.assign(
+            new Error("Use Sign out to end the current session."),
+            { status: 409, code: "CURRENT_SESSION" },
+          );
+        if (reason.length < 3)
+          throw Object.assign(new Error("A revocation reason is required."), {
+            status: 400,
+            code: "REASON_REQUIRED",
+          });
+        const revoked = db
+          .prepare("DELETE FROM signature_sessions WHERE id=? AND user_id=?")
+          .run(id, owner.id).changes;
+        if (!revoked)
+          throw Object.assign(new Error("Session not found."), {
+            status: 404,
+            code: "SESSION_NOT_FOUND",
+          });
+        recordApplicationAudit(
+          owner,
+          "session.revoked",
+          "session",
+          id,
+          null,
+          reason,
+          {},
+          requestId,
+        );
+        return json(res, 200, { ok: true }, requestId);
+      }
+      if (ownerActionRequiresReauthentication(req, url.pathname))
+        requireRecentOwnerAuthentication(owner);
       if (await handlePlatformOperations({ req, res, url, requestId, owner }))
         return;
       if (await handlePlatformJobs({ req, res, url, requestId, owner })) return;
@@ -4104,7 +4263,9 @@ function createSignaturePortal({
           { mfaRequired: true, ...issueMfaChallenge(req, row) },
           requestId,
         );
-      const session = createSession(req, row);
+      const session = createSession(req, row, {
+        mfaVerified: isApplicationOwner(row.id),
+      });
       if (session.user.organizationId)
         recordAudit(session.user, "session.login", "user", session.user.id);
       else

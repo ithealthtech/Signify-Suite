@@ -448,6 +448,10 @@ Application Owner can access only MFA setup until enrollment is complete.
 Enrollment requires the current password and a TOTP authenticator; ten one-time
 recovery codes are shown once. Owner sessions are limited to four hours, and
 enabling or disabling MFA revokes the owner's other sessions.
+The same security panel lists active devices, last activity, expiry, MFA
+evidence, and supports audited individual or bulk session revocation.
+High-impact owner changes require step-up authentication when the current
+password and MFA proof are more than ten minutes old.
 
 Rotate the integration and MFA credential-encryption key while the app is
 stopped:

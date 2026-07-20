@@ -1,5 +1,5 @@
 "use strict";
-const { $, $$, api, escapeHtml } = window.Signify;
+const { $, $$, api: rawApi, escapeHtml } = window.Signify;
 const state = {
   page: 1,
   pagination: null,
@@ -7,7 +7,19 @@ const state = {
   detail: null,
   stripePrices: [],
   mfa: null,
+  sessions: [],
 };
+let pendingReauthentication = null;
+
+async function api(path, options = {}) {
+  try {
+    return await rawApi(path, options);
+  } catch (error) {
+    if (error.code !== "PRIVILEGED_REAUTH_REQUIRED") throw error;
+    await requestOwnerReauthentication();
+    return rawApi(path, options);
+  }
+}
 
 function dateLabel(value) {
   if (!value) return "Never";
@@ -36,6 +48,49 @@ function busy(button, active, label = "Working...") {
   } else {
     button.textContent = button.dataset.label || button.textContent;
     button.disabled = false;
+  }
+}
+function requestOwnerReauthentication() {
+  if (pendingReauthentication) return pendingReauthentication.promise;
+  const form = $("#ownerReauthForm"),
+    dialog = $("#ownerReauthDialog"),
+    codeRequired = Boolean(state.mfa?.enabled);
+  form.reset();
+  $("#ownerReauthCodeField").hidden = !codeRequired;
+  form.elements.code.required = codeRequired;
+  dialog.showModal();
+  pendingReauthentication = {};
+  pendingReauthentication.promise = new Promise((resolve, reject) => {
+    pendingReauthentication.resolve = resolve;
+    pendingReauthentication.reject = reject;
+  });
+  form.elements.password.focus();
+  return pendingReauthentication.promise;
+}
+function cancelOwnerReauthentication() {
+  if (!pendingReauthentication) return;
+  pendingReauthentication.reject(new Error("Sensitive operation canceled."));
+  pendingReauthentication = null;
+  $("#ownerReauthDialog").close();
+}
+async function submitOwnerReauthentication(event) {
+  event.preventDefault();
+  const form = event.currentTarget,
+    button = event.submitter;
+  busy(button, true, "Confirming...");
+  try {
+    await rawApi("/api/platform/reauth", {
+      method: "POST",
+      body: JSON.stringify(Object.fromEntries(new FormData(form))),
+    });
+    const pending = pendingReauthentication;
+    pendingReauthentication = null;
+    $("#ownerReauthDialog").close();
+    pending?.resolve();
+  } catch (error) {
+    toast(error.message);
+  } finally {
+    busy(button, false);
   }
 }
 function showSection(name) {
@@ -71,6 +126,7 @@ async function loadSession() {
   });
   $("#ownerForm").hidden = enrollmentRequired;
   $("#ownerManagementTable").hidden = enrollmentRequired;
+  $("#ownerSessionsPanel").hidden = enrollmentRequired;
 }
 function resetMfaDialog(mode = "enroll") {
   const enroll = mode === "enroll";
@@ -79,9 +135,48 @@ function resetMfaDialog(mode = "enroll") {
   $("#ownerMfaConfirmForm").hidden = true;
   $("#ownerMfaRecovery").hidden = true;
   $("#ownerMfaDisableForm").hidden = enroll;
+  $("#ownerMfaCurrentCodeField").hidden = !state.mfa?.enabled;
+  $("#ownerMfaStartForm").elements.currentCode.required = Boolean(
+    state.mfa?.enabled,
+  );
   $("#ownerMfaStartForm").reset();
   $("#ownerMfaConfirmForm").reset();
   $("#ownerMfaDisableForm").reset();
+}
+function deviceLabel(userAgent) {
+  const value = String(userAgent || "");
+  const browser = value.includes("Edg/")
+      ? "Edge"
+      : value.includes("Chrome/")
+        ? "Chrome"
+        : value.includes("Firefox/")
+          ? "Firefox"
+          : value.includes("Safari/")
+            ? "Safari"
+            : "Browser",
+    system = value.includes("Windows")
+      ? "Windows"
+      : value.includes("Macintosh")
+        ? "macOS"
+        : value.includes("Android")
+          ? "Android"
+          : /iPhone|iPad/.test(value)
+            ? "iOS"
+            : "Unknown device";
+  return `${browser} on ${system}`;
+}
+async function loadOwnerSessions() {
+  const result = await api("/api/platform/sessions");
+  state.sessions = result.sessions;
+  $("#ownerSessionRows").innerHTML = result.sessions
+    .map(
+      (session) =>
+        `<tr><td><strong>${escapeHtml(deviceLabel(session.userAgent))}</strong><small>${escapeHtml(session.ipAddress || "Unknown address")}${session.current ? " · Current" : ""}</small></td><td>${escapeHtml(dateLabel(session.lastSeenAt))}</td><td>${escapeHtml(dateLabel(session.expiresAt))}</td><td>${session.mfaVerifiedAt ? '<span class="status-dot active">MFA</span>' : '<span class="status-dot pending">Password</span>'}</td><td><button class="button" type="button" data-session-id="${escapeHtml(session.id)}" ${session.current ? "disabled" : ""}>Revoke</button></td></tr>`,
+    )
+    .join("");
+  $("#revokeOtherSessions").disabled = !result.sessions.some(
+    (session) => !session.current,
+  );
 }
 async function startMfaEnrollment(event) {
   event.preventDefault();
@@ -118,6 +213,7 @@ async function confirmMfaEnrollment(event) {
     form.hidden = true;
     $("#ownerMfaRecovery").hidden = false;
     await loadSession();
+    await loadOwnerSessions();
     toast("Multi-factor authentication enabled");
   } catch (error) {
     toast(error.message);
@@ -675,11 +771,20 @@ async function openStripePortal() {
   }
 }
 function bindEvents() {
+  $("#ownerReauthForm").addEventListener("submit", submitOwnerReauthentication);
+  $$("[data-close-reauth]").forEach((button) =>
+    button.addEventListener("click", cancelOwnerReauthentication),
+  );
+  $("#ownerReauthDialog").addEventListener("cancel", (event) => {
+    event.preventDefault();
+    cancelOwnerReauthentication();
+  });
   $$("[data-section]").forEach((button) =>
     button.addEventListener("click", async () => {
       showSection(button.dataset.section);
       if (button.dataset.section === "integrations") await loadIntegrations();
-      if (button.dataset.section === "owners") await loadOwners();
+      if (button.dataset.section === "owners")
+        await Promise.all([loadOwners(), loadOwnerSessions()]);
       if (button.dataset.section === "audit") await loadAudit();
       if (button.dataset.section === "operations") await loadOperations();
       if (button.dataset.section === "jobs") await loadJobs();
@@ -780,6 +885,38 @@ function bindEvents() {
       });
       await loadOwners();
       toast("Application Owner access revoked");
+    } catch (error) {
+      toast(error.message);
+    }
+  });
+  $("#ownerSessionRows").addEventListener("click", async (event) => {
+    const button = event.target.closest("[data-session-id]");
+    if (!button || button.disabled) return;
+    const reason = prompt("Reason for revoking this session:");
+    if (!reason) return;
+    try {
+      await api(`/api/platform/sessions/${button.dataset.sessionId}`, {
+        method: "DELETE",
+        body: JSON.stringify({ reason }),
+      });
+      await loadOwnerSessions();
+      toast("Session revoked");
+    } catch (error) {
+      toast(error.message);
+    }
+  });
+  $("#revokeOtherSessions").addEventListener("click", async () => {
+    const reason = prompt("Reason for revoking all other sessions:");
+    if (!reason) return;
+    try {
+      const result = await api("/api/platform/sessions", {
+        method: "DELETE",
+        body: JSON.stringify({ reason }),
+      });
+      await loadOwnerSessions();
+      toast(
+        `${result.revoked} session${result.revoked === 1 ? "" : "s"} revoked`,
+      );
     } catch (error) {
       toast(error.message);
     }

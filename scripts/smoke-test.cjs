@@ -2032,13 +2032,27 @@ async function main() {
       result.response.status === 200 && result.body.recoveryCodes.length === 10,
       "MFA confirmation or recovery-code generation failed",
     );
-    const [firstRecoveryCode, secondRecoveryCode, disableRecoveryCode] =
-      result.body.recoveryCodes;
+    const [
+      firstRecoveryCode,
+      secondRecoveryCode,
+      disableRecoveryCode,
+      reauthRecoveryCode,
+    ] = result.body.recoveryCodes;
     result = await request(baseUrl, "/api/platform/session", { jar: adminJar });
     assert(
       result.body.mfa.enabled === true &&
         result.body.mfa.recoveryCodesRemaining === 10,
       "MFA status did not reflect enrollment",
+    );
+    result = await request(baseUrl, "/api/platform/mfa/enroll", {
+      method: "POST",
+      body: { password: "SignifyDemo123!" },
+      jar: adminJar,
+    });
+    assert(
+      result.response.status === 403 &&
+        result.body.error.code === "MFA_REPLACEMENT_DENIED",
+      "existing MFA could be replaced without current second-factor proof",
     );
     adminJar.clear();
     result = await request(baseUrl, "/api/signature/login", {
@@ -2089,6 +2103,111 @@ async function main() {
       jar: adminJar,
     });
     assert(result.response.status === 200, "second MFA recovery login failed");
+    application.db
+      .prepare(
+        `UPDATE signature_sessions SET mfa_verified_at=strftime('%Y-%m-%dT%H:%M:%fZ','now','-20 minutes')
+         WHERE user_id=?`,
+      )
+      .run(adminId);
+    result = await request(
+      baseUrl,
+      `/api/platform/organizations/${primaryOrganizationId}/status`,
+      {
+        method: "PUT",
+        body: { status: "active", reason: "Verify step-up policy" },
+        jar: adminJar,
+      },
+    );
+    assert(
+      result.response.status === 403 &&
+        result.body.error.code === "PRIVILEGED_REAUTH_REQUIRED",
+      "sensitive owner action did not require recent authentication",
+    );
+    result = await request(baseUrl, "/api/platform/reauth", {
+      method: "POST",
+      body: { password: "wrong", code: reauthRecoveryCode },
+      jar: adminJar,
+    });
+    assert(
+      result.response.status === 403 &&
+        result.body.error.code === "PRIVILEGED_REAUTH_FAILED",
+      "step-up authentication accepted an invalid password",
+    );
+    result = await request(baseUrl, "/api/platform/reauth", {
+      method: "POST",
+      body: {
+        password: "SignifyDemo123!",
+        code: reauthRecoveryCode,
+      },
+      jar: adminJar,
+    });
+    assert(result.response.status === 200, "step-up authentication failed");
+    result = await request(
+      baseUrl,
+      `/api/platform/organizations/${primaryOrganizationId}/status`,
+      {
+        method: "PUT",
+        body: { status: "active", reason: "Verified step-up action" },
+        jar: adminJar,
+      },
+    );
+    assert(
+      result.response.status === 200,
+      "sensitive owner action failed after step-up authentication",
+    );
+    result = await request(baseUrl, "/api/platform/sessions", {
+      jar: adminJar,
+    });
+    assert(
+      result.response.status === 200 &&
+        result.body.sessions.length >= 2 &&
+        result.body.sessions.filter((session) => session.current).length ===
+          1 &&
+        result.body.sessions.some((session) => session.mfaVerifiedAt),
+      "Application Owner session history was incomplete",
+    );
+    const currentOwnerSession = result.body.sessions.find(
+        (session) => session.current,
+      ),
+      previousOwnerSession = result.body.sessions.find(
+        (session) => !session.current,
+      );
+    result = await request(
+      baseUrl,
+      `/api/platform/sessions/${currentOwnerSession.id}`,
+      {
+        method: "DELETE",
+        body: { reason: "Must use sign out" },
+        jar: adminJar,
+      },
+    );
+    assert(
+      result.response.status === 409 &&
+        result.body.error.code === "CURRENT_SESSION",
+      "current session could be revoked without sign out",
+    );
+    result = await request(
+      baseUrl,
+      `/api/platform/sessions/${previousOwnerSession.id}`,
+      {
+        method: "DELETE",
+        body: { reason: "Smoke-test device revocation" },
+        jar: adminJar,
+      },
+    );
+    assert(
+      result.response.status === 200,
+      "individual session revocation failed",
+    );
+    result = await request(baseUrl, "/api/platform/sessions", {
+      method: "DELETE",
+      body: { reason: "Smoke-test global session revocation" },
+      jar: adminJar,
+    });
+    assert(
+      result.response.status === 200 && result.body.revoked >= 1,
+      "other-session revocation failed",
+    );
     result = await request(baseUrl, "/api/platform/mfa", {
       method: "DELETE",
       body: {
