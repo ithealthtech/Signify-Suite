@@ -32,6 +32,16 @@ for (const required of [
     `${required} is missing`,
   );
 
+const codeqlWorkflow = fs.readFileSync(
+  path.join(__dirname, "..", ".github", "workflows", "codeql.yml"),
+  "utf8",
+);
+assert.match(
+  codeqlWorkflow,
+  /^permissions:\r?\n(?: {2}.+\r?\n)* {2}actions: read$/m,
+  "CodeQL requires actions: read to access workflow-run metadata",
+);
+
 console.log(
   "Security test passed: high-confidence secret patterns and required governance controls",
 );
