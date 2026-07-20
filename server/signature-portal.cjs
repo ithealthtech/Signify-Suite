@@ -308,6 +308,8 @@ function subscriptionDto(row, includeProvider = false) {
         seats: row.seats,
         trialEndsAt: row.trial_ends_at,
         currentPeriodEnd: row.current_period_end,
+        billingSyncedAt: row.billing_synced_at || null,
+        billingError: row.billing_error || "",
         ...(includeProvider
           ? {
               stripeCustomerId: row.stripe_customer_id || null,
@@ -695,6 +697,7 @@ function createSignaturePortal({
       /^\/api\/platform\/organizations\/[^/]+\/(?:status|subscription|billing\/subscription)$/.test(
         pathname,
       ) ||
+      pathname === "/api/platform/billing/reconcile" ||
       (req.method === "DELETE" &&
         /^\/api\/platform\/integrations\/(?:microsoft|stripe)$/.test(
           pathname,
@@ -977,7 +980,7 @@ function createSignaturePortal({
       if (!organizationId) return;
       const plan = object.metadata?.plan || "starter";
       db.prepare(
-        `UPDATE organization_subscriptions SET plan=?,status='active',seats=?,stripe_customer_id=?,stripe_subscription_id=?,updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE organization_id=?`,
+        `UPDATE organization_subscriptions SET plan=?,status='active',seats=?,stripe_customer_id=?,stripe_subscription_id=?,billing_synced_at=strftime('%Y-%m-%dT%H:%M:%fZ','now'),billing_error='',updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE organization_id=?`,
       ).run(
         plan,
         seatsForPlan(plan),
@@ -999,7 +1002,7 @@ function createSignaturePortal({
           object.current_period_end ||
           object.items?.data?.[0]?.current_period_end;
       db.prepare(
-        `UPDATE organization_subscriptions SET plan=?,status=?,seats=?,stripe_customer_id=?,stripe_subscription_id=?,stripe_price_id=?,current_period_end=?,updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE organization_id=?`,
+        `UPDATE organization_subscriptions SET plan=?,status=?,seats=?,stripe_customer_id=?,stripe_subscription_id=?,stripe_price_id=?,current_period_end=?,billing_synced_at=strftime('%Y-%m-%dT%H:%M:%fZ','now'),billing_error='',updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE organization_id=?`,
       ).run(
         plan,
         stripeStatus(object.status),
@@ -1016,12 +1019,93 @@ function createSignaturePortal({
     }
     if (event.type === "invoice.payment_failed")
       db.prepare(
-        `UPDATE organization_subscriptions SET status='past_due',updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE organization_id=?`,
+        `UPDATE organization_subscriptions SET status='past_due',billing_synced_at=strftime('%Y-%m-%dT%H:%M:%fZ','now'),billing_error='',updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE organization_id=?`,
       ).run(organization.id);
     if (event.type === "invoice.paid")
       db.prepare(
-        `UPDATE organization_subscriptions SET status='active',updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE organization_id=? AND status<>'canceled'`,
+        `UPDATE organization_subscriptions SET status='active',billing_synced_at=strftime('%Y-%m-%dT%H:%M:%fZ','now'),billing_error='',updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE organization_id=? AND status<>'canceled'`,
       ).run(organization.id);
+  }
+
+  async function performBillingReconciliation() {
+    const settings = stripeSettings(),
+      stripe = stripeClient(settings);
+    if (!stripe) return { skipped: true, reason: "stripe_not_configured" };
+    const subscriptions = db
+        .prepare(
+          "SELECT * FROM organization_subscriptions WHERE stripe_subscription_id IS NOT NULL AND stripe_subscription_id<>'' ORDER BY organization_id",
+        )
+        .all(),
+      result = { checked: subscriptions.length, updated: 0, failed: 0 };
+    for (const local of subscriptions) {
+      try {
+        const remote = await stripeRequest(
+            () => stripe.subscriptions.retrieve(local.stripe_subscription_id),
+            "Stripe could not reconcile a subscription.",
+          ),
+          priceId = remote.items?.data?.[0]?.price?.id || "",
+          configuredPlan = Object.entries(settings.prices || {}).find(
+            ([, configured]) => configured && configured === priceId,
+          )?.[0],
+          plan = configuredPlan || local.plan,
+          status = stripeStatus(remote.status),
+          customerId =
+            typeof remote.customer === "string"
+              ? remote.customer
+              : remote.customer?.id || local.stripe_customer_id,
+          periodEnd =
+            remote.current_period_end ||
+            remote.items?.data?.[0]?.current_period_end,
+          periodEndIso = periodEnd
+            ? new Date(periodEnd * 1000).toISOString()
+            : null,
+          changed =
+            plan !== local.plan ||
+            status !== local.status ||
+            customerId !== local.stripe_customer_id ||
+            priceId !== (local.stripe_price_id || "") ||
+            periodEndIso !== local.current_period_end;
+        db.prepare(
+          `UPDATE organization_subscriptions SET plan=?,status=?,seats=?,stripe_customer_id=?,stripe_price_id=?,current_period_end=?,billing_synced_at=strftime('%Y-%m-%dT%H:%M:%fZ','now'),billing_error='',updated_at=CASE WHEN ? THEN strftime('%Y-%m-%dT%H:%M:%fZ','now') ELSE updated_at END WHERE organization_id=?`,
+        ).run(
+          plan,
+          status,
+          seatsForPlan(plan),
+          customerId || null,
+          priceId || null,
+          periodEndIso,
+          changed ? 1 : 0,
+          local.organization_id,
+        );
+        if (changed) {
+          result.updated += 1;
+          db.prepare(
+            "INSERT INTO application_audit_logs(id,organization_id,action,target_type,target_id,reason,metadata_json) VALUES (?,?,?,?,?,?,?)",
+          ).run(
+            randomUUID(),
+            local.organization_id,
+            "stripe.subscription_reconciled",
+            "organization_subscription",
+            local.organization_id,
+            "Automated Stripe reconciliation",
+            JSON.stringify({
+              previous: { plan: local.plan, status: local.status },
+              current: { plan, status },
+            }),
+          );
+        }
+      } catch (error) {
+        result.failed += 1;
+        db.prepare(
+          `UPDATE organization_subscriptions SET billing_error=?,updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE organization_id=?`,
+        ).run(limited(error.message, 500), local.organization_id);
+      }
+    }
+    if (result.failed)
+      throw new Error(
+        `Stripe reconciliation failed for ${result.failed} of ${result.checked} subscriptions.`,
+      );
+    return result;
   }
   function activeCampaign(user) {
     const today = new Date().toISOString().slice(0, 10),
@@ -1662,6 +1746,7 @@ function createSignaturePortal({
   }
 
   const workflowHandlers = {
+    "billing.reconcile": performBillingReconciliation,
     "directory.sync": performDirectorySync,
     "signature.rollout": performBulkRollout,
   };
@@ -3545,6 +3630,39 @@ function createSignaturePortal({
             stripeSubscriptionId: updated.id,
             cancelAtPeriodEnd: Boolean(updated.cancel_at_period_end),
           },
+          requestId,
+        );
+      }
+      if (
+        url.pathname === "/api/platform/billing/reconcile" &&
+        req.method === "POST"
+      ) {
+        const body = await readJsonBody(req, { limit: 4096 }),
+          reason = limited(body.reason, 500).trim();
+        if (reason.length < 3)
+          throw Object.assign(new Error("A reason is required."), {
+            status: 400,
+            code: "REASON_REQUIRED",
+          });
+        const job = enqueueJob(
+          "billing.reconcile",
+          {},
+          { dedupeKey: "billing.reconcile" },
+        );
+        recordApplicationAudit(
+          owner,
+          "stripe.reconciliation_queued",
+          "background_job",
+          job.id,
+          null,
+          reason,
+          {},
+          requestId,
+        );
+        return json(
+          res,
+          202,
+          { job: { id: job.id, status: job.status } },
           requestId,
         );
       }

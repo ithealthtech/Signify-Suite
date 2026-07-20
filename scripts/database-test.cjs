@@ -86,7 +86,7 @@ try {
     .all()
     .map((row) => row.version);
   assert.ok(migrations.includes("013_query_plan_optimization.sql"));
-  assert.equal(migrations.at(-1), "018_application_owner_mfa.sql");
+  assert.equal(migrations.at(-1), "019_billing_reconciliation.sql");
   assert.deepEqual(db.prepare("PRAGMA foreign_key_check").all(), []);
   assert.equal(
     db.prepare("PRAGMA integrity_check").get().integrity_check,

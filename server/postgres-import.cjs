@@ -1,6 +1,8 @@
 "use strict";
 
 const { DatabaseSync } = require("node:sqlite");
+const fs = require("node:fs");
+const path = require("node:path");
 
 const IMPORT_TABLES = [
   "install_profiles",
@@ -55,6 +57,22 @@ function openImportSource(databasePath) {
       `SQLite foreign-key check found ${foreignKeys.length} violation(s).`,
     );
   }
+  const expectedMigrations = fs
+      .readdirSync(path.join(__dirname, "migrations"))
+      .filter((name) => /^\d+.*\.sql$/.test(name))
+      .sort(),
+    appliedMigrations = db
+      .prepare("SELECT version FROM schema_migrations ORDER BY version")
+      .all()
+      .map((row) => row.version);
+  if (
+    JSON.stringify(appliedMigrations) !== JSON.stringify(expectedMigrations)
+  ) {
+    db.close();
+    throw new Error(
+      "SQLite source migration history does not match this release.",
+    );
+  }
   return db;
 }
 
@@ -73,6 +91,8 @@ function sourceTable(db, table) {
 
 function postgresValue(table, column, value) {
   if (value === null || value === undefined) return null;
+  if (table === "install_profiles" && column === "database_provider")
+    return "postgresql";
   if (BOOLEAN_COLUMNS.has(`${table}.${column}`)) return Boolean(value);
   return value;
 }

@@ -158,12 +158,21 @@ function startJobWorker(db, options = {}) {
   let stopped = false,
     active = false;
   queue.recoverStale();
-  queue.enqueue(
-    "maintenance.cleanup",
-    {},
-    { dedupeKey: "maintenance.cleanup" },
-  );
-  queue.enqueue("maintenance.media", {}, { dedupeKey: "maintenance.media" });
+  function scheduleRecurringJobs() {
+    queue.enqueue(
+      "maintenance.cleanup",
+      {},
+      { dedupeKey: "maintenance.cleanup" },
+    );
+    queue.enqueue("maintenance.media", {}, { dedupeKey: "maintenance.media" });
+    if (handlers["billing.reconcile"])
+      queue.enqueue(
+        "billing.reconcile",
+        {},
+        { dedupeKey: "billing.reconcile" },
+      );
+  }
+  scheduleRecurringJobs();
   async function poll() {
     if (stopped || active) return;
     active = true;
@@ -178,12 +187,18 @@ function startJobWorker(db, options = {}) {
     Math.max(250, options.pollIntervalMs || 1000),
   );
   timer.unref();
+  const recurringTimer = setInterval(
+    scheduleRecurringJobs,
+    Math.max(60000, options.recurringIntervalMs || 60 * 60 * 1000),
+  );
+  recurringTimer.unref();
   void poll();
   return {
     queue,
     async stop() {
       stopped = true;
       clearInterval(timer);
+      clearInterval(recurringTimer);
       while (active) await new Promise((resolve) => setTimeout(resolve, 10));
     },
   };

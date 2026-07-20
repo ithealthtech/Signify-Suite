@@ -126,3 +126,13 @@ intentionally configured `DATABASE_URL`. Both commands enforce production TLS,
 use bounded connection timeouts, and serialize migration writers with an
 advisory lock. Do not retire SQLite backups or select PostgreSQL for web traffic
 until repository conversion and imported-data isolation tests are complete.
+
+## Billing reconciliation
+
+The worker queues `billing.reconcile` at startup and hourly. It retrieves each
+Stripe-backed tenant subscription, repairs local plan/status/period drift,
+records `billing_synced_at`, clears or stores a bounded provider error, and
+audits changed projections. Application Owners can queue the same durable job
+from **Integrations > Stripe > Reconcile subscriptions**. Failed batches use the
+normal exponential retry and dead-letter controls. Webhooks remain the primary
+low-latency path; reconciliation covers missed or delayed events.

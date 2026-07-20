@@ -39,6 +39,10 @@ try {
     assert.equal(postgresValue("stripe_webhook_events", "livemode", 0), false);
     assert.equal(postgresValue("stripe_webhook_events", "livemode", 1), true);
     assert.equal(
+      postgresValue("install_profiles", "database_provider", "sqlite"),
+      "postgresql",
+    );
+    assert.equal(
       postgresValue("signature_users", "status", "active"),
       "active",
     );

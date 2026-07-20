@@ -516,6 +516,23 @@ async function testStripeCheckout(event) {
     busy(button, false);
   }
 }
+async function reconcileStripe() {
+  const button = $("#reconcileStripe"),
+    reason = prompt("Reason for reconciling Stripe subscriptions:");
+  if (!reason) return;
+  busy(button, true, "Queueing...");
+  try {
+    await api("/api/platform/billing/reconcile", {
+      method: "POST",
+      body: JSON.stringify({ reason }),
+    });
+    toast("Stripe reconciliation queued");
+  } catch (error) {
+    toast(error.message);
+  } finally {
+    busy(button, false);
+  }
+}
 async function loadTenants() {
   const params = new URLSearchParams({
     page: String(state.page),
@@ -1001,6 +1018,7 @@ function bindEvents() {
   $("#stripeConnectForm").addEventListener("submit", connectStripe);
   $("#stripePlanForm").addEventListener("submit", configureStripe);
   $("#stripeTestForm").addEventListener("submit", testStripeCheckout);
+  $("#reconcileStripe").addEventListener("click", reconcileStripe);
   $("#disconnectStripe").addEventListener("click", async () => {
     const reason = prompt("Reason for disconnecting Stripe:");
     if (!reason) return;

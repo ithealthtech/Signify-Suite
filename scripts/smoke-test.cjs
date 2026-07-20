@@ -224,6 +224,7 @@ async function main() {
       });
     throw new Error(`Unexpected external request in smoke test: ${url}`);
   };
+  let stripeRetrievedSubscription = null;
   const stripeSandboxPrices = [
       {
         id: "price_setup_starter",
@@ -269,11 +270,23 @@ async function main() {
               },
             },
             subscriptions: {
-              retrieve: async (id) => ({
-                id,
-                metadata: {},
-                items: { data: [{ id: "si_setup" }] },
-              }),
+              retrieve: async (id) =>
+                stripeRetrievedSubscription || {
+                  id,
+                  status: "active",
+                  customer: "cus_platform_smoke",
+                  metadata: {},
+                  current_period_end: 1893456000,
+                  items: {
+                    data: [
+                      {
+                        id: "si_setup",
+                        price: { id: "price_setup_team" },
+                        current_period_end: 1893456000,
+                      },
+                    ],
+                  },
+                },
               update: async (id, input) => ({
                 id,
                 cancel_at_period_end: Boolean(input.cancel_at_period_end),
@@ -1885,6 +1898,57 @@ async function main() {
     assert(
       result.response.status === 202 && result.body.cancelAtPeriodEnd === true,
       "provider-backed Stripe cancellation failed",
+    );
+    application.db
+      .prepare(
+        `UPDATE organization_subscriptions SET plan='starter',status='past_due',seats=10,stripe_price_id=NULL,current_period_end=NULL,billing_synced_at=NULL,billing_error='stale projection' WHERE organization_id=?`,
+      )
+      .run(controlPlaneOrganizationId);
+    stripeRetrievedSubscription = {
+      id: "sub_platform_smoke",
+      status: "active",
+      customer: "cus_platform_smoke",
+      current_period_end: 1893456000,
+      items: {
+        data: [
+          {
+            id: "si_setup",
+            price: { id: "price_setup_team" },
+            current_period_end: 1893456000,
+          },
+        ],
+      },
+    };
+    result = await request(baseUrl, "/api/platform/billing/reconcile", {
+      method: "POST",
+      body: { reason: "Verify scheduled billing projection" },
+      jar: adminJar,
+    });
+    assert(
+      result.response.status === 202 && result.body.job.id,
+      "Application Owner could not queue Stripe reconciliation",
+    );
+    while (await application.jobQueue.runOnce()) {}
+    const reconciledSubscription = application.db
+      .prepare(
+        "SELECT * FROM organization_subscriptions WHERE organization_id=?",
+      )
+      .get(controlPlaneOrganizationId);
+    assert(
+      reconciledSubscription.plan === "team" &&
+        reconciledSubscription.status === "active" &&
+        reconciledSubscription.seats === 50 &&
+        reconciledSubscription.stripe_price_id === "price_setup_team" &&
+        reconciledSubscription.current_period_end ===
+          "2030-01-01T00:00:00.000Z" &&
+        reconciledSubscription.billing_synced_at &&
+        reconciledSubscription.billing_error === "" &&
+        application.db
+          .prepare(
+            "SELECT COUNT(*) count FROM application_audit_logs WHERE action='stripe.subscription_reconciled' AND organization_id=?",
+          )
+          .get(controlPlaneOrganizationId).count === 1,
+      "Stripe reconciliation did not repair and audit local billing drift",
     );
     result = await request(baseUrl, "/api/platform/integrations/stripe", {
       method: "DELETE",
