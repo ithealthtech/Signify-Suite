@@ -176,6 +176,11 @@ async function main() {
           db: workerDb,
           jobHandlers: {},
           mediaStorage: null,
+          observability: {
+            start() {},
+            log() {},
+            async stop() {},
+          },
         },
         db: workerDb,
         config: {

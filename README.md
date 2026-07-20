@@ -211,6 +211,10 @@ BACKUP_DIR=/persistent/signify/backups
 SIGNATURE_SESSION_HOURS=12
 SIGNIFY_TENANT_MEDIA_LIMIT_MB=250
 SIGNIFY_TENANT_DELETION_GRACE_DAYS=7
+SIGNIFY_SERVICE_NAME=signify-creator
+SIGNIFY_ENVIRONMENT=production
+SIGNIFY_OBSERVABILITY_ENDPOINT=https://collector.example.com/events
+SIGNIFY_OBSERVABILITY_TOKEN=replace-with-collector-token
 SIGNATURE_ALLOW_DEFAULT_ADMIN=false
 SIGNIFY_BOOTSTRAP_EMAIL=owner@example.com
 SIGNIFY_BOOTSTRAP_PASSWORD=replace-with-a-long-random-password
@@ -230,6 +234,13 @@ reversible delay before a scheduled tenant purge and accepts 1 through 90 days.
 Keep the encryption key outside database backups.
 Losing the key makes credentials saved through the integration wizard
 unrecoverable.
+
+`SIGNIFY_OBSERVABILITY_ENDPOINT` is optional and must use HTTPS in production.
+When configured, the web and worker processes batch redacted diagnostic events
+to the collector. Store `SIGNIFY_OBSERVABILITY_TOKEN` in the hosting provider's
+secret store. Prometheus-compatible metrics remain available at
+`GET /api/metrics/prometheus`; see `docs/OBSERVABILITY.md` for alert and SLO
+operations.
 
 Set `TRUST_PROXY=true` only when the Node.js port is inaccessible directly and
 traffic arrives through a trusted reverse proxy.

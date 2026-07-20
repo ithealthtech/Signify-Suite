@@ -174,6 +174,17 @@ try {
   assert.notEqual(result.status, 0);
   assert.match(result.stderr, /DELETION_GRACE_DAYS/);
 
+  result = run(
+    { SIGNIFY_OBSERVABILITY_ENDPOINT: "http://collector.example.com/events" },
+    ["--no-write-env"],
+  );
+  assert.notEqual(result.status, 0);
+  assert.match(result.stderr, /OBSERVABILITY_ENDPOINT must use HTTPS/);
+
+  result = run({ SIGNIFY_OBSERVABILITY_BATCH_SIZE: "1.5" }, ["--no-write-env"]);
+  assert.notEqual(result.status, 0);
+  assert.match(result.stderr, /OBSERVABILITY_BATCH_SIZE/);
+
   console.log(
     "Setup test passed: configuration generation, credential generation, migrations, owner bootstrap, rerun safety, backups, and production validation",
   );

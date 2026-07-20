@@ -174,6 +174,43 @@ function loadConfig(env = process.env, baseDir = path.join(__dirname, "..")) {
       "SIGNIFY_CREDENTIAL_ENCRYPTION_KEY is required in production.",
     );
   if (credentialEncryptionKey) decodeKey(credentialEncryptionKey);
+  const observabilityEndpoint = httpUrl(
+      String(env.SIGNIFY_OBSERVABILITY_ENDPOINT || "").trim(),
+      "SIGNIFY_OBSERVABILITY_ENDPOINT",
+    ),
+    observabilityNumber = (
+      name,
+      fallback,
+      minimum,
+      maximum,
+      integer = false,
+    ) => {
+      const value = Number(env[name] || fallback);
+      if (
+        !Number.isFinite(value) ||
+        (integer && !Number.isInteger(value)) ||
+        value < minimum ||
+        value > maximum
+      )
+        throw new Error(`${name} must be from ${minimum} to ${maximum}.`);
+      return value;
+    };
+  if (
+    production &&
+    observabilityEndpoint &&
+    !observabilityEndpoint.startsWith("https://")
+  )
+    throw new Error(
+      "SIGNIFY_OBSERVABILITY_ENDPOINT must use HTTPS in production.",
+    );
+  if (
+    observabilityEndpoint &&
+    (new URL(observabilityEndpoint).username ||
+      new URL(observabilityEndpoint).password)
+  )
+    throw new Error(
+      "SIGNIFY_OBSERVABILITY_ENDPOINT must not contain URL credentials.",
+    );
   return {
     production,
     port,
@@ -183,6 +220,70 @@ function loadConfig(env = process.env, baseDir = path.join(__dirname, "..")) {
     jobMode,
     mediaStorage,
     deletionGraceDays,
+    observability: {
+      endpoint: observabilityEndpoint,
+      token: String(env.SIGNIFY_OBSERVABILITY_TOKEN || "").trim(),
+      service: String(env.SIGNIFY_SERVICE_NAME || "signify-creator").trim(),
+      environment: String(
+        env.SIGNIFY_ENVIRONMENT || (production ? "production" : "development"),
+      ).trim(),
+      batchSize: observabilityNumber(
+        "SIGNIFY_OBSERVABILITY_BATCH_SIZE",
+        100,
+        1,
+        500,
+        true,
+      ),
+      maxBuffer: observabilityNumber(
+        "SIGNIFY_OBSERVABILITY_MAX_BUFFER",
+        1000,
+        100,
+        10000,
+        true,
+      ),
+      flushIntervalMs: observabilityNumber(
+        "SIGNIFY_OBSERVABILITY_FLUSH_MS",
+        5000,
+        1000,
+        60000,
+        true,
+      ),
+      timeoutMs: observabilityNumber(
+        "SIGNIFY_OBSERVABILITY_TIMEOUT_MS",
+        5000,
+        500,
+        30000,
+        true,
+      ),
+      minimumRequestSample: observabilityNumber(
+        "SIGNIFY_ALERT_MIN_REQUESTS",
+        20,
+        1,
+        10000,
+        true,
+      ),
+      errorRateThreshold: observabilityNumber(
+        "SIGNIFY_ALERT_ERROR_RATE",
+        0.05,
+        0.001,
+        1,
+      ),
+      queueAgeThresholdSeconds: observabilityNumber(
+        "SIGNIFY_ALERT_QUEUE_AGE_SECONDS",
+        300,
+        30,
+        86400,
+        true,
+      ),
+      alertCooldownMs:
+        observabilityNumber(
+          "SIGNIFY_ALERT_COOLDOWN_SECONDS",
+          300,
+          30,
+          86400,
+          true,
+        ) * 1000,
+    },
     s3,
     sourceRoot: baseDir,
     publicRoot: path.join(baseDir, "public"),

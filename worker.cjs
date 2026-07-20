@@ -17,7 +17,7 @@ function startWorker(options = {}) {
         skipPendingRestore: true,
         stripeFactory: options.stripeFactory,
       }),
-    { db, mediaStorage } = application,
+    { db, mediaStorage, observability } = application,
     jobOptions = options.jobOptions || {},
     jobs = startJobWorker(db, {
       publicRoot: config.publicRoot,
@@ -28,28 +28,16 @@ function startWorker(options = {}) {
         ...(jobOptions.handlers || {}),
       },
     });
-  console.log(
-    JSON.stringify({
-      time: new Date().toISOString(),
-      level: "info",
-      event: "worker.started",
-      mode: config.jobMode,
-    }),
-  );
+  observability.start();
+  observability.log("info", "worker.started", { mode: config.jobMode });
   let stopping = false;
   async function stop(signal = "shutdown") {
     if (stopping) return;
     stopping = true;
     await jobs.stop();
+    observability.log("info", "worker.stopped", { signal });
+    await observability.stop();
     db.close();
-    console.log(
-      JSON.stringify({
-        time: new Date().toISOString(),
-        level: "info",
-        event: "worker.stopped",
-        signal,
-      }),
-    );
   }
   if (options.signals !== false) {
     process.once("SIGINT", () => void stop("SIGINT"));

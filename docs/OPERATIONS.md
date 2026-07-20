@@ -28,10 +28,20 @@ authoritative.
 - `GET /api/live` proves the Node process can serve requests.
 - `GET /api/ready` proves SQLite is reachable.
 - `GET /api/metrics` reports aggregate request counts, errors, status classes,
-  and average latency without tenant or user data.
+  average latency, queue health, provider failures, memory, and exporter state
+  without tenant or user data. `GET /api/metrics/prometheus` exposes the same
+  operational signals in Prometheus text format.
 - Application logs are JSON. Alert on `server.start_failed`, `request.error`,
   repeated HTTP 500 responses, failed provider verification, and jobs that
   exhaust their attempts.
+- Configure `SIGNIFY_OBSERVABILITY_ENDPOINT` to export bounded batches of
+  redacted diagnostics. Failed delivery stays buffered and retries; the process
+  never treats telemetry delivery as application success or availability.
+- Incoming valid W3C `traceparent` headers keep their trace ID. Every response
+  returns a child trace header and logs the same trace ID with the request ID.
+
+The SLOs, alert thresholds, incident severities, retention boundaries, and
+status communication procedure are defined in `docs/OBSERVABILITY.md`.
 
 ## Background Jobs
 

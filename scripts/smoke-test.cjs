@@ -335,6 +335,19 @@ async function main() {
         Number.isFinite(result.body?.averageDurationMs),
       "runtime metrics check failed",
     );
+    const prometheus = await fetch(`${baseUrl}/api/metrics/prometheus`, {
+      headers: {
+        traceparent: "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01",
+      },
+    });
+    assert(
+      prometheus.status === 200 &&
+        (await prometheus.text()).includes("signify_http_requests_total") &&
+        prometheus.headers
+          .get("traceparent")
+          ?.startsWith("00-4bf92f3577b34da6a3ce929d0e0e4736-"),
+      "Prometheus metrics or W3C trace propagation failed",
+    );
     assert(
       result.response.headers.get("content-security-policy") &&
         !result.response.headers.has("strict-transport-security"),

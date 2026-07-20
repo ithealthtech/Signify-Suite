@@ -9,6 +9,7 @@ const { openDatabase } = require("./server/database.cjs");
 const { createSignaturePortal } = require("./server/signature-portal.cjs");
 const { createJobQueue, startJobWorker } = require("./server/job-queue.cjs");
 const { createMediaStorage } = require("./server/media-storage.cjs");
+const { createObservability } = require("./server/observability.cjs");
 const {
   applyPendingRestore,
   createApplicationOperations,
@@ -278,13 +279,14 @@ function createApplication(options = {}) {
   });
   Object.assign(jobHandlers, signaturePortal.jobHandlers);
   const rateBuckets = new Map(),
-    metrics = {
-      startedAt: new Date().toISOString(),
-      requests: 0,
-      errors: 0,
-      durationMs: 0,
-      status: { success: 0, redirect: 0, clientError: 0, serverError: 0 },
-    };
+    observability =
+      options.observability ||
+      createObservability({
+        config,
+        db,
+        fetchImpl: options.fetchImpl,
+        output: options.logOutput,
+      });
   function clientIp(req) {
     if (config.trustProxy) {
       const forwarded = String(req.headers["x-forwarded-for"] || "")
@@ -329,53 +331,29 @@ function createApplication(options = {}) {
       ? Math.max(1, Math.ceil((bucket.resetAt - now) / 1000))
       : null;
   }
-  function log(level, event, fields = {}) {
-    if (config.logLevel === "silent") return;
-    const order = { debug: 10, info: 20, warn: 30, error: 40 };
-    if ((order[level] || 20) < (order[config.logLevel] || 20)) return;
-    console[level === "error" ? "error" : "log"](
-      JSON.stringify({
-        time: new Date().toISOString(),
-        level,
-        event,
-        ...fields,
-      }),
-    );
-  }
   const handler = async (req, res) => {
-    const requestId = randomUUID();
+    const requestId = randomUUID(),
+      trace = observability.traceContext(req.headers.traceparent),
+      spanId = randomUUID().replaceAll("-", "").slice(0, 16);
     const startedAt = Date.now();
     for (const [name, value] of Object.entries(
       securityHeaders(config.production),
     ))
       res.setHeader(name, value);
     res.setHeader("X-Request-Id", requestId);
+    res.setHeader("traceparent", `00-${trace.traceId}-${spanId}-01`);
     res.once("finish", () => {
       const durationMs = Date.now() - startedAt;
-      metrics.requests += 1;
-      metrics.durationMs += durationMs;
-      if (res.statusCode >= 500) {
-        metrics.status.serverError += 1;
-        metrics.errors += 1;
-      } else if (res.statusCode >= 400) metrics.status.clientError += 1;
-      else if (res.statusCode >= 300) metrics.status.redirect += 1;
-      else metrics.status.success += 1;
-      log(
-        res.statusCode >= 500
-          ? "error"
-          : res.statusCode >= 400
-            ? "warn"
-            : "info",
-        "http.request",
-        {
-          requestId,
-          method: req.method,
-          path: String(req.url || "").split("?")[0],
-          status: res.statusCode,
-          durationMs,
-          ip: clientIp(req),
-        },
-      );
+      observability.recordRequest({
+        requestId,
+        traceId: trace.traceId,
+        spanId,
+        method: req.method,
+        path: String(req.url || "").split("?")[0],
+        status: res.statusCode,
+        durationMs,
+        ip: clientIp(req),
+      });
     });
     try {
       const url = new URL(req.url || "/", "http://signature.local");
@@ -418,7 +396,7 @@ function createApplication(options = {}) {
           requestId,
         );
       }
-      if (url.pathname === "/api/metrics") {
+      if (["/api/metrics", "/api/metrics/prometheus"].includes(url.pathname)) {
         if (req.method !== "GET")
           return json(
             res,
@@ -432,20 +410,17 @@ function createApplication(options = {}) {
             requestId,
             { Allow: "GET" },
           );
-        return json(
-          res,
-          200,
-          {
-            startedAt: metrics.startedAt,
-            requests: metrics.requests,
-            errors: metrics.errors,
-            averageDurationMs: metrics.requests
-              ? Number((metrics.durationMs / metrics.requests).toFixed(2))
-              : 0,
-            status: metrics.status,
-          },
-          requestId,
-        );
+        if (url.pathname === "/api/metrics/prometheus") {
+          const body = Buffer.from(observability.prometheus());
+          res.writeHead(200, {
+            "Content-Type": "text/plain; version=0.0.4; charset=utf-8",
+            "Content-Length": body.length,
+            "Cache-Control": "no-store",
+            "X-Request-Id": requestId,
+          });
+          return res.end(body);
+        }
+        return json(res, 200, observability.snapshot(), requestId);
       }
       if (["/api/health", "/api/ready"].includes(url.pathname)) {
         if (req.method !== "GET")
@@ -495,7 +470,7 @@ function createApplication(options = {}) {
         );
       return serve(config, req, res, url.pathname, requestId);
     } catch (error) {
-      log(
+      observability.log(
         error.status && error.status < 500 ? "warn" : "error",
         "request.error",
         {
@@ -526,6 +501,7 @@ function createApplication(options = {}) {
     jobHandlers,
     jobQueue,
     mediaStorage,
+    observability,
     operations,
     restored,
   };
@@ -533,6 +509,7 @@ function createApplication(options = {}) {
 
 function startServer(options = {}) {
   const application = createApplication(options);
+  application.observability.start();
   const server = http.createServer(application.handler);
   const jobs =
     application.config.jobMode === "embedded"
@@ -546,41 +523,32 @@ function startServer(options = {}) {
   server.headersTimeout = 15000;
   server.keepAliveTimeout = 5000;
   server.once("error", async (error) => {
-    console.error(
-      JSON.stringify({
-        time: new Date().toISOString(),
-        level: "error",
-        event: "server.start_failed",
-        code: error.code || "LISTEN_FAILED",
-        message: error.message,
-      }),
-    );
+    application.observability.log("error", "server.start_failed", {
+      code: error.code || "LISTEN_FAILED",
+      message: error.message,
+    });
     await jobs.stop();
     application.db.close();
     process.exitCode = 1;
   });
   server.listen(application.config.port, application.config.host, () =>
-    console.log(
-      JSON.stringify({
-        time: new Date().toISOString(),
-        level: "info",
-        event: "server.started",
-        url: `http://${application.config.host}:${application.config.port}`,
-        jobMode: application.config.jobMode,
-      }),
-    ),
+    application.observability.log("info", "server.started", {
+      url: `http://${application.config.host}:${application.config.port}`,
+      jobMode: application.config.jobMode,
+    }),
   );
   let shuttingDown = false;
   async function shutdown(signal) {
     if (shuttingDown) return;
     shuttingDown = true;
-    console.log(`${signal} received; closing Signify Creator.`);
+    application.observability.log("info", "server.stopping", { signal });
     const forceClose = setTimeout(() => server.closeAllConnections(), 10000);
     forceClose.unref();
     server.closeIdleConnections();
     server.close(async () => {
       clearTimeout(forceClose);
       await jobs.stop();
+      await application.observability.stop();
       application.db.close();
       process.exit(0);
     });
