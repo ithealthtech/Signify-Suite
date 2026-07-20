@@ -243,6 +243,10 @@ function createApplicationOperations({
           headers: {
             Accept: "application/vnd.github+json",
             "User-Agent": "Signify-Creator",
+            "X-GitHub-Api-Version": "2022-11-28",
+            ...(config.updateGithubToken
+              ? { Authorization: `Bearer ${config.updateGithubToken}` }
+              : {}),
           },
           signal: AbortSignal.timeout(10000),
         },

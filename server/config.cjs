@@ -356,6 +356,7 @@ function loadConfig(env = process.env, baseDir = path.join(__dirname, "..")) {
     updateRepository: String(
       env.SIGNIFY_UPDATE_REPOSITORY || "ithealthtech/Signify-Suite",
     ).trim(),
+    updateGithubToken: String(env.SIGNIFY_UPDATE_GITHUB_TOKEN || "").trim(),
     signature: {
       sessionHours,
       mediaLimitBytes: Math.floor(mediaLimitMb * 1024 * 1024),

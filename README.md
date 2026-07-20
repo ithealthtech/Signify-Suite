@@ -314,6 +314,7 @@ configured later from **Application > First-time setup**.
 | `SIGNIFY_APPLICATION_OWNER_EMAIL`    | Email for the first Application Owner                    | Yes               |
 | `SIGNIFY_CREDENTIAL_ENCRYPTION_KEY`  | One generated 32-byte key; keep it permanently           | Yes               |
 | `SIGNIFY_JOB_MODE`                   | `embedded`, or `external` with a supervised worker       | Yes               |
+| `SIGNIFY_UPDATE_GITHUB_TOKEN`        | Fine-grained read-only token for private release checks  | Private repo only |
 | `SIGNIFY_MEDIA_STORAGE`              | `local` for one host, or `s3` for private object storage | Yes               |
 | `SIGNIFY_TENANT_DELETION_GRACE_DAYS` | Reversible tenant-deletion delay from `1` through `90`   | Yes               |
 | `S3_BUCKET` / `S3_REGION`            | Tenant-media bucket and its region                       | With `s3`         |
