@@ -75,6 +75,13 @@ services:
     environment:
       <<: *signify-environment
       SIGNIFY_JOB_MODE: external
+      SIGNIFY_WORKER_HEALTH_PATH: /tmp/signify-worker-health.json
+    healthcheck:
+      test: ["CMD", "node", "scripts/worker-health.cjs"]
+      interval: 20s
+      timeout: 5s
+      start_period: 20s
+      retries: 3
     depends_on:
       web:
         condition: service_healthy

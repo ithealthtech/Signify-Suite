@@ -186,6 +186,8 @@ async function main() {
         config: {
           jobMode: "external",
           publicRoot: path.join(temporaryDirectory, "public"),
+          workerHealthPath: path.join(temporaryDirectory, "worker-health.json"),
+          workerHeartbeatMs: 5000,
         },
         signals: false,
         jobOptions: {
@@ -201,8 +203,14 @@ async function main() {
         { organizationId: "tenant-1" },
         { dedupeKey: "tenant-1:acceptance" },
       );
+    assert.equal(
+      JSON.parse(fs.readFileSync(worker.config.workerHealthPath, "utf8"))
+        .status,
+      "ready",
+    );
     await waitForCompleted(workerDb, externalJob.id);
     await worker.stop("test");
+    assert.equal(fs.existsSync(worker.config.workerHealthPath), false);
     console.log(
       "Job tests passed: deduplication, atomic execution, retry, dead letters, tenant concurrency, completion, stale recovery, external execution, and graceful shutdown",
     );

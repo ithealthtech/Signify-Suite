@@ -7,6 +7,7 @@ const path = require("node:path");
 const { loadConfig } = require("../server/config.cjs");
 const { diagnose } = require("./doctor.cjs");
 const { migrate } = require("./migrate.cjs");
+const { checkWorkerHealth } = require("./worker-health.cjs");
 
 const root = path.join(__dirname, ".."),
   dockerfile = fs.readFileSync(path.join(root, "Dockerfile"), "utf8"),
@@ -30,10 +31,31 @@ try {
     "condition: service_healthy",
     "profiles: [tools]",
     '"127.0.0.1:${SIGNIFY_PORT:-4173}:4173"',
+    'test: ["CMD", "node", "scripts/worker-health.cjs"]',
+    "SIGNIFY_WORKER_HEALTH_PATH: /tmp/signify-worker-health.json",
   ])
     assert.ok(compose.includes(contract), `Compose is missing: ${contract}`);
   assert.doesNotMatch(example, /^SIGNIFY_CREDENTIAL_ENCRYPTION_KEY=.+$/m);
   assert.doesNotMatch(example, /^SIGNIFY_BOOTSTRAP_PASSWORD=.+$/m);
+
+  const heartbeatPath = path.join(temporary, "worker-health.json"),
+    healthEnv = {
+      SIGNIFY_WORKER_HEALTH_PATH: heartbeatPath,
+      SIGNIFY_WORKER_HEALTH_MAX_AGE_SECONDS: "45",
+    };
+  fs.writeFileSync(
+    heartbeatPath,
+    JSON.stringify({ status: "ready", updatedAt: new Date().toISOString() }),
+  );
+  assert.equal(checkWorkerHealth(healthEnv).status, "ready");
+  fs.writeFileSync(
+    heartbeatPath,
+    JSON.stringify({
+      status: "ready",
+      updatedAt: new Date(Date.now() - 60000).toISOString(),
+    }),
+  );
+  assert.throws(() => checkWorkerHealth(healthEnv), /stale/);
 
   const config = loadConfig(
       {

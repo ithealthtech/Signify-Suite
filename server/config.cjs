@@ -32,6 +32,17 @@ function loadConfig(env = process.env, baseDir = path.join(__dirname, "..")) {
   const sessionHours = Number(env.SIGNATURE_SESSION_HOURS || 12);
   if (!Number.isFinite(sessionHours) || sessionHours < 1 || sessionHours > 168)
     throw new Error("SIGNATURE_SESSION_HOURS must be from 1 to 168.");
+  const workerHeartbeatSeconds = Number(
+    env.SIGNIFY_WORKER_HEARTBEAT_SECONDS || 10,
+  );
+  if (
+    !Number.isInteger(workerHeartbeatSeconds) ||
+    workerHeartbeatSeconds < 5 ||
+    workerHeartbeatSeconds > 300
+  )
+    throw new Error(
+      "SIGNIFY_WORKER_HEARTBEAT_SECONDS must be an integer from 5 to 300.",
+    );
   const mediaLimitMb = Number(env.SIGNIFY_TENANT_MEDIA_LIMIT_MB || 250);
   if (
     !Number.isFinite(mediaLimitMb) ||
@@ -252,6 +263,8 @@ function loadConfig(env = process.env, baseDir = path.join(__dirname, "..")) {
     trustProxy: bool(env.TRUST_PROXY, false),
     logLevel,
     jobMode,
+    workerHealthPath: String(env.SIGNIFY_WORKER_HEALTH_PATH || "").trim(),
+    workerHeartbeatMs: workerHeartbeatSeconds * 1000,
     mediaStorage,
     deletionGraceDays,
     observability: {

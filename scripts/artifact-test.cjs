@@ -61,6 +61,7 @@ for (const required of [
   "scripts/access-review.cjs",
   "scripts/migrate.cjs",
   "scripts/doctor.cjs",
+  "scripts/worker-health.cjs",
 ])
   if (!relativeFiles.includes(required))
     throw new Error(`Production artifact is missing ${required}.`);
