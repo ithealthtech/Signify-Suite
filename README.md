@@ -214,6 +214,7 @@ configured later from **Application > First-time setup**.
 | `S3_ENDPOINT`                       | S3-compatible endpoint; blank for AWS                    | Provider-specific |
 | `S3_ACCESS_KEY_ID` / secret         | Static credentials, or workload identity                 | Provider-specific |
 | `SIGNATURE_ALLOW_DEFAULT_ADMIN`     | `false` after the first account exists                   | Yes               |
+| `SIGNIFY_REQUIRE_OWNER_MFA`         | `true` to require enrollment before control-plane use    | Yes               |
 | `TRUST_PROXY`                       | `true` only behind a trusted, private reverse proxy      | No                |
 | `MICROSOFT_*`                       | Leave blank and complete Microsoft setup in the owner UI | No                |
 | `STRIPE_*`                          | Leave blank and complete Stripe setup in the owner UI    | No                |
@@ -442,10 +443,11 @@ $env:SIGNIFY_OWNER_EMAIL="owner@example.com"
 npm run application:grant-owner
 ```
 
-Application Owners should open **Application > Application Owners** and enable
-multi-factor authentication. Enrollment requires the current password and a
-TOTP authenticator; ten one-time recovery codes are shown once. Enabling or
-disabling MFA revokes the owner's other sessions.
+Production defaults to `SIGNIFY_REQUIRE_OWNER_MFA=true`. On first sign-in, an
+Application Owner can access only MFA setup until enrollment is complete.
+Enrollment requires the current password and a TOTP authenticator; ten one-time
+recovery codes are shown once. Owner sessions are limited to four hours, and
+enabling or disabling MFA revokes the owner's other sessions.
 
 Rotate the integration and MFA credential-encryption key while the app is
 stopped:

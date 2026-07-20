@@ -690,17 +690,20 @@ function createSignaturePortal({
   function createSession(req, row, { mfaVerified = false } = {}) {
     const user = userDto(row),
       settings = workspaceSettings(user),
-      hours = Math.max(
+      configuredHours = Math.max(
         1,
         Math.min(
           168,
           Number(settings.sessionHours || signature.sessionHours || 12),
         ),
-      ),
+      );
+    user.applicationOwner = isApplicationOwner(user.id);
+    const hours = user.applicationOwner
+        ? Math.min(4, configuredHours)
+        : configuredHours,
       token = randomBytes(32).toString("base64url"),
       csrf = randomBytes(32).toString("base64url"),
       expires = new Date(Date.now() + hours * 3600000).toISOString();
-    user.applicationOwner = isApplicationOwner(user.id);
     db.exec(`DELETE FROM signature_sessions WHERE expires_at<=strftime('%Y-%m-%dT%H:%M:%fZ','now');
       DELETE FROM password_reset_tokens WHERE expires_at<=strftime('%Y-%m-%dT%H:%M:%fZ','now') OR used_at IS NOT NULL;
       DELETE FROM email_verification_tokens WHERE expires_at<=strftime('%Y-%m-%dT%H:%M:%fZ','now') OR used_at IS NOT NULL;
@@ -2092,6 +2095,7 @@ function createSignaturePortal({
                 .map(([plan]) => plan),
             },
             mfa: {
+              required: Boolean(signature.requireOwnerMfa),
               enabled: Boolean(mfaRow(owner.id, true)),
               recoveryCodesRemaining: db
                 .prepare(
@@ -2104,6 +2108,19 @@ function createSignaturePortal({
           refreshCsrf(owner),
         );
       }
+      if (
+        signature.requireOwnerMfa &&
+        !mfaRow(owner.id, true) &&
+        !["/api/platform/mfa/enroll", "/api/platform/mfa/confirm"].includes(
+          url.pathname,
+        )
+      )
+        throw Object.assign(
+          new Error(
+            "Set up multi-factor authentication before using the Application Owner control plane.",
+          ),
+          { status: 403, code: "OWNER_MFA_REQUIRED" },
+        );
       if (
         url.pathname === "/api/platform/mfa/enroll" &&
         req.method === "POST"

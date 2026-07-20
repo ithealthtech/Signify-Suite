@@ -208,6 +208,7 @@ function loadConfig(env = process.env, baseDir = path.join(__dirname, "..")) {
         "SIGNIFY_MEDIA_BASE_URL",
       ),
       allowRegistration: bool(env.SIGNIFY_ALLOW_REGISTRATION, !production),
+      requireOwnerMfa: bool(env.SIGNIFY_REQUIRE_OWNER_MFA, production),
       applicationOwnerEmail,
       credentialEncryptionKey,
       microsoftClientId: String(

@@ -59,6 +59,8 @@ count and terminal timestamp without replacing the original job identity.
 ## Application Owner MFA
 
 Each Application Owner can enroll a TOTP authenticator from the control plane.
+Production requires enrollment by default, blocks other owner operations until
+it is complete, and caps owner sessions at four hours.
 The authenticator secret is encrypted with `SIGNIFY_CREDENTIAL_ENCRYPTION_KEY`;
 recovery codes are stored only as hashes and are consumed once. Enrollment and
 disablement revoke the owner's other sessions and create application audit

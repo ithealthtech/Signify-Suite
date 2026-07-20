@@ -115,6 +115,7 @@ try {
 
   const configured = parseEnv(fs.readFileSync(environmentFile, "utf8"));
   assert.equal(configured.SIGNATURE_ALLOW_DEFAULT_ADMIN, "false");
+  assert.equal(configured.SIGNIFY_REQUIRE_OWNER_MFA, "true");
   assert.equal(configured.SIGNIFY_JOB_MODE, "external");
   assert.equal(configured.SIGNIFY_MEDIA_STORAGE, "local");
   assert.equal(configured.SIGNIFY_BOOTSTRAP_PASSWORD || "", "");

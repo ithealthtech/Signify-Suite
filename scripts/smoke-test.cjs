@@ -373,14 +373,15 @@ async function main() {
       missingEncryptionRejected,
       "production started without credential encryption",
     );
+    const validProductionConfig = loadConfig({
+      NODE_ENV: "production",
+      SIGNIFY_PUBLIC_URL: "https://signatures.example.com",
+      SIGNIFY_CREDENTIAL_ENCRYPTION_KEY: Buffer.alloc(32, 9).toString("base64"),
+    });
     assert(
-      loadConfig({
-        NODE_ENV: "production",
-        SIGNIFY_PUBLIC_URL: "https://signatures.example.com",
-        SIGNIFY_CREDENTIAL_ENCRYPTION_KEY: Buffer.alloc(32, 9).toString(
-          "base64",
-        ),
-      }).signature.publicUrl === "https://signatures.example.com",
+      validProductionConfig.signature.publicUrl ===
+        "https://signatures.example.com" &&
+        validProductionConfig.signature.requireOwnerMfa === true,
       "valid production configuration was rejected",
     );
     const escapedMedia = buildSignatureHtml("executive", {
@@ -470,6 +471,17 @@ async function main() {
         adminJar.has("sig_session") &&
         adminJar.has("sig_csrf"),
       "admin login or secure cookies failed",
+    );
+    const ownerSessionHours = application.db
+      .prepare(
+        `SELECT (julianday(s.expires_at)-julianday(s.created_at))*24 hours
+         FROM signature_sessions s JOIN signature_users u ON u.id=s.user_id
+         WHERE u.email='admin@signify.local' ORDER BY s.created_at DESC LIMIT 1`,
+      )
+      .get().hours;
+    assert(
+      ownerSessionHours > 3.9 && ownerSessionHours <= 4.01,
+      "Application Owner session was not capped at four hours",
     );
     application.db
       .prepare("UPDATE organization_subscriptions SET seats=100")
@@ -1973,6 +1985,18 @@ async function main() {
       result.response.status === 200,
       "tenant-independent Application Owner session failed",
     );
+    application.config.signature.requireOwnerMfa = true;
+    result = await request(baseUrl, "/api/platform/owners", { jar: adminJar });
+    assert(
+      result.response.status === 403 &&
+        result.body.error.code === "OWNER_MFA_REQUIRED",
+      "required MFA policy did not block an unenrolled owner",
+    );
+    result = await request(baseUrl, "/api/platform/session", { jar: adminJar });
+    assert(
+      result.response.status === 200 && result.body.mfa.required === true,
+      "required MFA policy was not reported to the control plane",
+    );
     result = await request(baseUrl, "/api/platform/mfa/enroll", {
       method: "POST",
       body: { password: "wrong" },
@@ -2075,6 +2099,13 @@ async function main() {
       jar: adminJar,
     });
     assert(result.response.status === 200, "MFA disable workflow failed");
+    result = await request(baseUrl, "/api/platform/owners", { jar: adminJar });
+    assert(
+      result.response.status === 403 &&
+        result.body.error.code === "OWNER_MFA_REQUIRED",
+      "required MFA policy did not resume after MFA was disabled",
+    );
+    application.config.signature.requireOwnerMfa = false;
     for (let attempt = 0; attempt < 12; attempt += 1) {
       result = await request(baseUrl, "/api/signature/login", {
         method: "POST",

@@ -65,6 +65,12 @@ async function loadSession() {
     ? "Replace authenticator"
     : "Set up MFA";
   $("#disableOwnerMfa").hidden = !result.mfa.enabled;
+  const enrollmentRequired = result.mfa.required && !result.mfa.enabled;
+  $$("[data-section]").forEach((button) => {
+    button.disabled = enrollmentRequired && button.dataset.section !== "owners";
+  });
+  $("#ownerForm").hidden = enrollmentRequired;
+  $("#ownerManagementTable").hidden = enrollmentRequired;
 }
 function resetMfaDialog(mode = "enroll") {
   const enroll = mode === "enroll";
@@ -882,6 +888,10 @@ function bindEvents() {
 async function boot() {
   await loadSession();
   bindEvents();
+  if (state.mfa.required && !state.mfa.enabled) {
+    showSection("owners");
+    return;
+  }
   await Promise.all([loadTenants(), loadSetup({ navigate: true })]);
   const billing = new URLSearchParams(location.search).get("billing");
   if (billing)
