@@ -185,6 +185,10 @@ try {
   assert.notEqual(result.status, 0);
   assert.match(result.stderr, /OBSERVABILITY_BATCH_SIZE/);
 
+  result = run({ SIGNIFY_BACKUP_RETENTION_DAYS: "0" }, ["--no-write-env"]);
+  assert.notEqual(result.status, 0);
+  assert.match(result.stderr, /BACKUP_RETENTION_DAYS/);
+
   console.log(
     "Setup test passed: configuration generation, credential generation, migrations, owner bootstrap, rerun safety, backups, and production validation",
   );

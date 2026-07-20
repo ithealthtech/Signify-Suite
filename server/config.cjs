@@ -89,6 +89,40 @@ function loadConfig(env = process.env, baseDir = path.join(__dirname, "..")) {
     throw new Error(
       "S3_ACCESS_KEY_ID and S3_SECRET_ACCESS_KEY must be configured together.",
     );
+  const backupStorage = String(
+      env.SIGNIFY_BACKUP_STORAGE || "local",
+    ).toLowerCase(),
+    backupAccessKeyId = String(env.BACKUP_S3_ACCESS_KEY_ID || "").trim(),
+    backupSecretAccessKey = String(
+      env.BACKUP_S3_SECRET_ACCESS_KEY || "",
+    ).trim(),
+    backupPrefix = String(env.BACKUP_S3_PREFIX || "signify-recovery")
+      .trim()
+      .replace(/^\/+|\/+$/g, ""),
+    backupRetentionDays = Number(env.SIGNIFY_BACKUP_RETENTION_DAYS || 30),
+    backupMinimumCopies = Number(env.SIGNIFY_BACKUP_MINIMUM_COPIES || 7);
+  if (!["local", "s3"].includes(backupStorage))
+    throw new Error("SIGNIFY_BACKUP_STORAGE must be local or s3.");
+  if (
+    !Number.isInteger(backupRetentionDays) ||
+    backupRetentionDays < 1 ||
+    backupRetentionDays > 3650
+  )
+    throw new Error("SIGNIFY_BACKUP_RETENTION_DAYS must be from 1 to 3650.");
+  if (
+    !Number.isInteger(backupMinimumCopies) ||
+    backupMinimumCopies < 1 ||
+    backupMinimumCopies > 365
+  )
+    throw new Error("SIGNIFY_BACKUP_MINIMUM_COPIES must be from 1 to 365.");
+  if (backupStorage === "s3" && !String(env.BACKUP_S3_BUCKET || "").trim())
+    throw new Error("BACKUP_S3_BUCKET is required for S3 backup storage.");
+  if (Boolean(backupAccessKeyId) !== Boolean(backupSecretAccessKey))
+    throw new Error(
+      "BACKUP_S3_ACCESS_KEY_ID and BACKUP_S3_SECRET_ACCESS_KEY must be configured together.",
+    );
+  if (!/^[a-zA-Z0-9][a-zA-Z0-9/_.-]{0,199}$/.test(backupPrefix))
+    throw new Error("BACKUP_S3_PREFIX contains unsupported characters.");
   if (allowDefaultAdmin && !validEmail(bootstrapEmail))
     throw new Error("SIGNIFY_BOOTSTRAP_EMAIL must be a valid email address.");
   if (allowDefaultAdmin && bootstrapPassword.length < 10)
@@ -283,6 +317,22 @@ function loadConfig(env = process.env, baseDir = path.join(__dirname, "..")) {
           86400,
           true,
         ) * 1000,
+    },
+    recovery: {
+      mode: backupStorage,
+      retentionDays: backupRetentionDays,
+      minimumCopies: backupMinimumCopies,
+      bucket: String(env.BACKUP_S3_BUCKET || "").trim(),
+      region: String(env.BACKUP_S3_REGION || "us-east-1").trim(),
+      endpoint: httpUrl(
+        String(env.BACKUP_S3_ENDPOINT || "").trim(),
+        "BACKUP_S3_ENDPOINT",
+      ),
+      prefix: backupPrefix,
+      forcePathStyle: bool(env.BACKUP_S3_FORCE_PATH_STYLE, false),
+      includeLocalMedia: bool(env.SIGNIFY_BACKUP_INCLUDE_LOCAL_MEDIA, true),
+      accessKeyId: backupAccessKeyId,
+      secretAccessKey: backupSecretAccessKey,
     },
     s3,
     sourceRoot: baseDir,

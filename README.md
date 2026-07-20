@@ -207,6 +207,13 @@ LOG_LEVEL=info
 
 DATABASE_PATH=/persistent/signify/data/signify-creator.db
 BACKUP_DIR=/persistent/signify/backups
+SIGNIFY_BACKUP_STORAGE=s3
+SIGNIFY_BACKUP_RETENTION_DAYS=30
+SIGNIFY_BACKUP_MINIMUM_COPIES=7
+SIGNIFY_BACKUP_INCLUDE_LOCAL_MEDIA=true
+BACKUP_S3_BUCKET=signify-production-recovery
+BACKUP_S3_REGION=us-east-1
+BACKUP_S3_PREFIX=signify-recovery
 
 SIGNATURE_SESSION_HOURS=12
 SIGNIFY_TENANT_MEDIA_LIMIT_MB=250
@@ -477,8 +484,21 @@ Create a consistent SQLite backup:
 npm run backup
 ```
 
-Schedule this command at least daily and copy backups to separate durable
-storage. Test restoration regularly.
+With `SIGNIFY_BACKUP_STORAGE=s3`, this validates the snapshot, requires bucket
+versioning, uploads it with SHA-256 metadata and server-side encryption,
+replicates local tenant media into versioned keys, and applies local/off-site
+retention while preserving `SIGNIFY_BACKUP_MINIMUM_COPIES`. Static backup keys
+are optional when the host supplies an IAM workload identity.
+
+Run a non-destructive recovery drill against the newest configured recovery
+point:
+
+```powershell
+npm run recovery:drill
+```
+
+Schedule backup at least daily and the drill at least quarterly. For local-only
+mode, copy backups and media to a separate durable system.
 
 Reset an existing Tenant Admin account:
 

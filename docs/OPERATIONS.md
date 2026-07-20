@@ -98,9 +98,21 @@ login. Keep `DATABASE_PATH` and `BACKUP_DIR` on persistent writable storage.
 The UI does not restore uploaded media or generated banners; recover those from
 the matching external filesystem snapshot when required.
 
-Continue to run `npm run backup` on a schedule and copy backups to a separate
-durable system. The in-app backup repository is operational convenience, not an
-off-site disaster-recovery copy.
+Run `npm run backup` at least daily. With `SIGNIFY_BACKUP_STORAGE=s3`, the job
+requires versioning on a separate private recovery bucket, uploads an encrypted
+and checksummed database snapshot, copies local tenant media into versioned
+keys, and enforces age retention while preserving a minimum number of recovery
+points. S3-native media must have versioning and an independent provider backup
+or replication policy. The in-app backup repository remains operational
+convenience, not the off-site authority.
+
+Run `npm run recovery:drill` at least quarterly and after storage/provider
+changes. It downloads or copies the newest recovery point into an isolated
+temporary directory, verifies SHA-256 metadata, SQLite integrity, and migration
+compatibility, and does not replace the live database. Record elapsed time and
+compare it with the four-hour RTO and 24-hour RPO. A full host drill must also
+restore the matching media versions on a sandbox host and exercise login,
+signature rendering, and tenant isolation before traffic is considered safe.
 
 ## Updates
 
