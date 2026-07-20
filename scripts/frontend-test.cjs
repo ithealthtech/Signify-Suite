@@ -98,9 +98,13 @@ async function main() {
   assert.equal(dateLabel("invalid"), "Unknown");
   assert.equal(dateLabel("invalid", { year: "numeric" }), "invalid");
   const platformSource = fs.readFileSync(
-    path.join(__dirname, "..", "platform.js"),
-    "utf8",
-  );
+      path.join(__dirname, "..", "platform.js"),
+      "utf8",
+    ),
+    signatureSource = fs.readFileSync(
+      path.join(__dirname, "..", "signature.js"),
+      "utf8",
+    );
   for (const unsafeAccess of [
     "busy(event.currentTarget, false)",
     "event.currentTarget.reset()",
@@ -110,6 +114,21 @@ async function main() {
       !platformSource.includes(unsafeAccess),
       `Platform async handlers must capture currentTarget: ${unsafeAccess}`,
     );
+  assert.match(
+    signatureSource,
+    /state\.me\.applicationOwner &&\s+\(state\.me\.onboardingRequired \|\| !state\.me\.organizationId\)/,
+    "Existing Application Owner sessions must resume onboarding",
+  );
+  assert.equal(
+    (signatureSource.match(/state\.me\.onboardingRequired \|\|/g) || []).length,
+    3,
+    "Existing sessions, password logins, and MFA logins must route owners to the control plane",
+  );
+  assert.match(
+    platformSource,
+    /loadSetup\(\{ navigate: true \}\)/,
+    "MFA completion must resume first-time setup discovery",
+  );
   console.log(
     "Frontend tests passed: GET deduplication, write isolation, structured errors, and timeouts",
   );

@@ -462,6 +462,26 @@ function createSignaturePortal({
         .get(key)?.setting_value ?? fallback
     );
   }
+  function applicationSetupState() {
+    const companyName = applicationSetting(
+        "company_name",
+        signature.companyName || "",
+      ),
+      publicUrl = applicationSetting("public_url", signature.publicUrl || ""),
+      stripeSkipped = applicationSetting("stripe_skipped") === "true";
+    return {
+      companyName,
+      publicUrl,
+      stripeSkipped,
+      complete: Boolean(
+        companyName &&
+        publicUrl &&
+        credentialVault.configured &&
+        microsoftAvailable() &&
+        (billingAvailable() || stripeSkipped),
+      ),
+    };
+  }
   function applicationPublicBase(req) {
     return cleanUrl(
       applicationSetting("public_url", signature.publicUrl || requestBase(req)),
@@ -685,6 +705,11 @@ function createSignaturePortal({
     ).run(row.session_id);
     const user = userDto(row);
     user.applicationOwner = isApplicationOwner(user.id);
+    user.onboardingRequired = Boolean(
+      user.applicationOwner &&
+      ((signature.requireOwnerMfa && !mfaRow(user.id, true)) ||
+        !applicationSetupState().complete),
+    );
     Object.defineProperties(user, {
       sessionId: { value: row.session_id },
       csrfTokenHash: { value: row.csrf_token_hash || "" },
@@ -772,6 +797,11 @@ function createSignaturePortal({
         ),
       );
     user.applicationOwner = isApplicationOwner(user.id);
+    user.onboardingRequired = Boolean(
+      user.applicationOwner &&
+      ((signature.requireOwnerMfa && !mfaRow(user.id, true)) ||
+        !applicationSetupState().complete),
+    );
     const hours = user.applicationOwner
         ? Math.min(4, configuredHours)
         : configuredHours,
@@ -2577,15 +2607,8 @@ function createSignaturePortal({
           requestId,
         );
       if (url.pathname === "/api/platform/setup" && req.method === "GET") {
-        const companyName = applicationSetting(
-            "company_name",
-            signature.companyName || "",
-          ),
-          publicUrl = applicationSetting(
-            "public_url",
-            signature.publicUrl || "",
-          ),
-          stripeSkipped = applicationSetting("stripe_skipped") === "true",
+        const { companyName, publicUrl, stripeSkipped, complete } =
+            applicationSetupState(),
           microsoft = microsoftSettings();
         return json(
           res,
@@ -2610,13 +2633,7 @@ function createSignaturePortal({
               configured: billingAvailable(),
               skipped: stripeSkipped,
             },
-            complete: Boolean(
-              companyName &&
-              publicUrl &&
-              credentialVault.configured &&
-              microsoftAvailable() &&
-              (billingAvailable() || stripeSkipped),
-            ),
+            complete,
           },
           requestId,
         );

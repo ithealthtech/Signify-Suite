@@ -555,7 +555,8 @@ async function main() {
     });
     assert(
       result.body?.user?.role === "admin" &&
-        result.body.user.applicationOwner === true,
+        result.body.user.applicationOwner === true &&
+        result.body.user.onboardingRequired === true,
       "admin session or Application Owner bootstrap failed",
     );
     const primaryOrganizationId = result.body.user.organizationId;
@@ -2287,7 +2288,8 @@ async function main() {
     assert(
       result.response.status === 200 &&
         result.body.user.applicationOwner === true &&
-        result.body.user.organizationId === null,
+        result.body.user.organizationId === null &&
+        result.body.user.onboardingRequired === false,
       `Application Owner without a tenant membership could not sign in: ${result.response.status} ${JSON.stringify(result.body)}`,
     );
     result = await request(baseUrl, "/api/platform/session", {

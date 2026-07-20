@@ -202,7 +202,11 @@ async function confirmMfaEnrollment(event) {
     form.hidden = true;
     $("#ownerMfaRecovery").hidden = false;
     await loadSession();
-    await loadOwnerSessions();
+    await Promise.all([
+      loadOwnerSessions(),
+      loadTenants(),
+      loadSetup({ navigate: true }),
+    ]);
     toast("Multi-factor authentication enabled");
   } catch (error) {
     toast(error.message);

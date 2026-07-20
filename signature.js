@@ -121,6 +121,13 @@ async function boot() {
   if (session.user) {
     state.me = session.user;
     state.workspaces = session.workspaces || [];
+    if (
+      state.me.applicationOwner &&
+      (state.me.onboardingRequired || !state.me.organizationId)
+    ) {
+      location.href = "/platform.html";
+      return;
+    }
     await loadApp();
   } else {
     els.authView.hidden = false;
@@ -359,7 +366,10 @@ els.loginForm.addEventListener("submit", async (event) => {
       return;
     }
     state.me = result.user;
-    if (state.me.applicationOwner && !state.me.organizationId) {
+    if (
+      state.me.applicationOwner &&
+      (state.me.onboardingRequired || !state.me.organizationId)
+    ) {
       location.href = "/platform.html";
       return;
     }
@@ -383,7 +393,10 @@ els.mfaForm.addEventListener("submit", async (event) => {
       ),
     });
     state.me = result.user;
-    if (state.me.applicationOwner && !state.me.organizationId) {
+    if (
+      state.me.applicationOwner &&
+      (state.me.onboardingRequired || !state.me.organizationId)
+    ) {
       location.href = "/platform.html";
       return;
     }
