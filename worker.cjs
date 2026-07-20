@@ -1,20 +1,32 @@
 "use strict";
 
 const { loadConfig } = require("./server/config.cjs");
-const { openDatabase } = require("./server/database.cjs");
 const { startJobWorker } = require("./server/job-queue.cjs");
-const { createMediaStorage } = require("./server/media-storage.cjs");
+const { createApplication } = require("./server.cjs");
 
 function startWorker(options = {}) {
   const config = options.config || loadConfig(),
-    db = options.db || openDatabase(config.databasePath),
-    mediaStorage =
-      options.mediaStorage ||
-      createMediaStorage(config, { s3Client: options.s3Client }),
+    application =
+      options.application ||
+      createApplication({
+        config,
+        db: options.db,
+        fetchImpl: options.fetchImpl,
+        mediaStorage: options.mediaStorage,
+        s3Client: options.s3Client,
+        skipPendingRestore: true,
+        stripeFactory: options.stripeFactory,
+      }),
+    { db, mediaStorage } = application,
+    jobOptions = options.jobOptions || {},
     jobs = startJobWorker(db, {
       publicRoot: config.publicRoot,
       mediaStorage,
-      ...(options.jobOptions || {}),
+      ...jobOptions,
+      handlers: {
+        ...application.jobHandlers,
+        ...(jobOptions.handlers || {}),
+      },
     });
   console.log(
     JSON.stringify({
@@ -43,7 +55,7 @@ function startWorker(options = {}) {
     process.once("SIGINT", () => void stop("SIGINT"));
     process.once("SIGTERM", () => void stop("SIGTERM"));
   }
-  return { config, db, jobs, mediaStorage, stop };
+  return { application, config, db, jobs, mediaStorage, stop };
 }
 
 if (require.main === module) startWorker();

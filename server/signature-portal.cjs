@@ -360,6 +360,7 @@ function createSignaturePortal({
   stripeFactory = (key) =>
     new Stripe(key, { maxNetworkRetries: 2, timeout: 10000 }),
   operations,
+  enqueueJob,
 }) {
   seed(db, signature);
   const credentialVault = createCredentialVault(
@@ -1321,6 +1322,236 @@ function createSignaturePortal({
     return `/uploads/${row.organization_id}/${name}`;
   }
 
+  function workflowActor(organizationId, actorUserId) {
+    const row = memberById(organizationId, actorUserId);
+    if (!row)
+      throw Object.assign(new Error("Workflow actor is no longer a member."), {
+        code: "WORKFLOW_ACTOR_NOT_FOUND",
+      });
+    return userDto(row);
+  }
+
+  function requestForOrigin(origin) {
+    const parsed = new URL(cleanUrl(origin) || "http://127.0.0.1:4173");
+    return {
+      headers: { host: parsed.host },
+      socket: { encrypted: parsed.protocol === "https:" },
+    };
+  }
+
+  async function performBulkRollout(payload) {
+    const user = workflowActor(payload.organizationId, payload.actorUserId),
+      overwrite = Boolean(payload.overwrite),
+      sendEmail = Boolean(payload.sendEmail),
+      rows = db
+        .prepare(
+          `${memberSelect} WHERE m.organization_id=? AND m.status='active'`,
+        )
+        .all(user.organizationId),
+      defaults = new Map(
+        db
+          .prepare(
+            "SELECT * FROM department_signature_defaults WHERE organization_id=?",
+          )
+          .all(user.organizationId)
+          .map((row) => [row.department.toLowerCase(), row]),
+      ),
+      updated = [],
+      skipped = [],
+      errors = [],
+      request = requestForOrigin(payload.origin);
+    if (sendEmail && !mailAvailable(user.organizationId))
+      throw Object.assign(
+        new Error("Microsoft 365 email delivery is not configured."),
+        { code: "MAIL_NOT_CONFIGURED" },
+      );
+    rolloutTemplatePatch(user.organizationId, payload.templateId);
+    let emailed = 0;
+    for (const row of rows) {
+      const sig = normalizeSignature(row);
+      if (!overwrite && sig.updatedAt) {
+        skipped.push(row.id);
+        continue;
+      }
+      const dept = defaults.get(
+          String(sig.fields.department || "").toLowerCase(),
+        ),
+        selectedTemplate = String(
+          dept?.template_id || payload.templateId || sig.templateId,
+        );
+      try {
+        const patch = rolloutTemplatePatch(
+            user.organizationId,
+            selectedTemplate,
+          ),
+          next = {
+            ...sig,
+            ...patch,
+            fields: sig.fields,
+            colors: { ...sig.colors, ...(patch.colors || {}) },
+            workflowStatus: "approved",
+            approvedAt: new Date().toISOString(),
+            approvedBy: user.id,
+          };
+        if (dept?.accent_color) next.colors.accent = dept.accent_color;
+        saveSignatureRow(user.organizationId, row.id, next);
+        updated.push(row.id);
+        if (sendEmail) {
+          try {
+            const target = userDto(memberById(user.organizationId, row.id)),
+              rendered = await renderSignature(
+                request,
+                target,
+                target.signature,
+              );
+            await sendGraphMail(
+              user.organizationId,
+              target.email,
+              "Your email signature is ready",
+              installEmailBody(rendered.html),
+            );
+            emailed += 1;
+          } catch (error) {
+            errors.push({
+              userId: row.id,
+              email: row.email,
+              code: error.code || "EMAIL_DELIVERY_FAILED",
+              message: "Signature updated, but its email could not be sent.",
+            });
+          }
+        }
+      } catch (error) {
+        errors.push({
+          userId: row.id,
+          email: row.email,
+          code: error.code || "ROLLOUT_FAILED",
+          message: limited(error.message || "Rollout failed.", 240),
+        });
+      }
+    }
+    const result = {
+      updated: updated.length,
+      skipped: skipped.length,
+      emailed,
+      errors,
+      total: rows.length,
+    };
+    recordAudit(
+      user,
+      "rollout.completed",
+      "organization",
+      user.organizationId,
+      { ...result, errors: errors.length, overwrite, sendEmail },
+    );
+    return result;
+  }
+
+  async function performDirectorySync(payload) {
+    const user = workflowActor(payload.organizationId, payload.actorUserId),
+      runId = payload.runId;
+    db.prepare(
+      "UPDATE directory_sync_runs SET status='running',error_message=NULL,completed_at=NULL WHERE id=? AND organization_id=?",
+    ).run(runId, user.organizationId);
+    let transactionStarted = false;
+    try {
+      const { token } = await graphAppToken(user.organizationId),
+        people = (await graphDirectoryUsers(token)).filter(
+          (item) => item.assignedLicenses?.length,
+        );
+      db.exec("BEGIN IMMEDIATE");
+      transactionStarted = true;
+      const subscription = db
+          .prepare(
+            "SELECT seats FROM organization_subscriptions WHERE organization_id=?",
+          )
+          .get(user.organizationId),
+        activeMembers = db
+          .prepare(
+            "SELECT COUNT(*) AS count FROM organization_memberships WHERE organization_id=? AND status='active'",
+          )
+          .get(user.organizationId).count,
+        availableSeats = Math.max(
+          0,
+          (subscription?.seats || 1) - activeMembers,
+        );
+      let added = 0;
+      for (const person of people) {
+        const email = String(
+          person.mail || person.userPrincipalName || "",
+        ).toLowerCase();
+        if (!validEmail(email)) continue;
+        const account = db
+            .prepare(
+              "SELECT * FROM signature_users WHERE lower(email)=lower(?)",
+            )
+            .get(email),
+          id = account?.id || randomUUID(),
+          personSignature = normalizeSignature(
+            { display_name: person.displayName, email, signature_json: "{}" },
+            {
+              fields: {
+                name: person.displayName,
+                email,
+                jobTitle: person.jobTitle || "",
+                department: person.department || "",
+                phone: person.businessPhones?.[0] || "",
+                mobile: person.mobilePhone || "",
+                company: workspaceRow(user).name,
+              },
+            },
+          ),
+          existingMembership = memberById(user.organizationId, id);
+        if (!existingMembership && added >= availableSeats) continue;
+        if (!account)
+          db.prepare(
+            `INSERT INTO signature_users(id,email,password_hash,display_name,role,status,signature_json,email_verified_at) VALUES (?,?,?,?,'editor','active',?,strftime('%Y-%m-%dT%H:%M:%fZ','now'))`,
+          ).run(
+            id,
+            email,
+            hashPassword(randomBytes(32).toString("hex")),
+            person.displayName || email,
+            JSON.stringify(personSignature),
+          );
+        if (!existingMembership) {
+          db.prepare(
+            `INSERT INTO organization_memberships(organization_id,user_id,role,status,signature_json) VALUES (?,?,'editor','active',?)`,
+          ).run(user.organizationId, id, JSON.stringify(personSignature));
+          added += 1;
+        }
+      }
+      db.prepare(
+        `UPDATE directory_sync_runs SET status='completed',users_seen=?,users_added=?,completed_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE id=?`,
+      ).run(people.length, added, runId);
+      db.prepare(
+        `UPDATE organization_microsoft_connections SET last_sync_at=strftime('%Y-%m-%dT%H:%M:%fZ','now'),last_verified_at=strftime('%Y-%m-%dT%H:%M:%fZ','now'),last_error='',updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE organization_id=?`,
+      ).run(user.organizationId);
+      recordAudit(
+        user,
+        "directory.synced",
+        "organization",
+        user.organizationId,
+        { seen: people.length, added },
+      );
+      db.exec("COMMIT");
+      transactionStarted = false;
+      return { seen: people.length, added, runId };
+    } catch (error) {
+      if (transactionStarted) db.exec("ROLLBACK");
+      db.prepare(
+        `UPDATE directory_sync_runs SET status='failed',error_message=?,completed_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE id=?`,
+      ).run(String(error.message).slice(0, 500), runId);
+      db.prepare(
+        `UPDATE organization_microsoft_connections SET last_error=?,updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE organization_id=?`,
+      ).run(String(error.message).slice(0, 500), user.organizationId);
+      throw error;
+    }
+  }
+
+  const workflowHandlers = {
+    "directory.sync": performDirectorySync,
+    "signature.rollout": performBulkRollout,
+  };
+
   const handlePlatformOperations = createPlatformOperationsRoutes({
       json,
       operations,
@@ -1333,7 +1564,7 @@ function createSignaturePortal({
       readJsonBody,
       recordAudit: recordApplicationAudit,
     });
-  return async function handle(req, res, url, requestId) {
+  const handle = async function handle(req, res, url, requestId) {
     if (url.pathname === "/webhooks/stripe" && req.method === "POST") {
       const stripeConfiguration = stripeSettings(),
         stripe = stripeClient(stripeConfiguration);
@@ -3582,6 +3813,44 @@ function createSignaturePortal({
     const user = requireSession(req);
     if (!["GET", "HEAD", "OPTIONS"].includes(req.method))
       enforceCsrf(req, user);
+    const jobMatch = url.pathname.match(/^\/api\/signature\/jobs\/([^/]+)$/);
+    if (jobMatch && req.method === "GET") {
+      requireAdmin(user);
+      const row = db
+        .prepare(
+          `SELECT id,type,status,attempts,max_attempts,result_json,last_error,created_at,updated_at,completed_at,dead_lettered_at
+           FROM background_jobs
+           WHERE id=? AND organization_id=? AND type IN ('directory.sync','signature.rollout')`,
+        )
+        .get(decodeURIComponent(jobMatch[1]), user.organizationId);
+      if (!row)
+        return json(
+          res,
+          404,
+          { error: { code: "JOB_NOT_FOUND", message: "Job not found." } },
+          requestId,
+        );
+      return json(
+        res,
+        200,
+        {
+          job: {
+            id: row.id,
+            type: row.type,
+            status: row.status,
+            attempts: row.attempts,
+            maxAttempts: row.max_attempts,
+            result: safeJson(row.result_json),
+            error: row.last_error,
+            createdAt: row.created_at,
+            updatedAt: row.updated_at,
+            completedAt: row.completed_at,
+            deadLetteredAt: row.dead_lettered_at,
+          },
+        },
+        requestId,
+      );
+    }
     if (
       url.pathname === "/api/signature/session/switch" &&
       req.method === "POST"
@@ -4860,22 +5129,7 @@ function createSignaturePortal({
       const body = await readJsonBody(req),
         overwrite = Boolean(body.overwrite ?? body.overwriteExisting),
         sendEmail = Boolean(body.sendEmail),
-        rows = db
-          .prepare(
-            `${memberSelect} WHERE m.organization_id=? AND m.status='active'`,
-          )
-          .all(user.organizationId),
-        defaults = new Map(
-          db
-            .prepare(
-              "SELECT * FROM department_signature_defaults WHERE organization_id=?",
-            )
-            .all(user.organizationId)
-            .map((row) => [row.department.toLowerCase(), row]),
-        ),
-        updated = [],
-        skipped = [],
-        errors = [];
+        templateId = String(body.templateId || "");
       if (sendEmail && !mailAvailable(user.organizationId))
         return json(
           res,
@@ -4888,90 +5142,30 @@ function createSignaturePortal({
           },
           requestId,
         );
-      rolloutTemplatePatch(user.organizationId, String(body.templateId || ""));
-      let emailed = 0;
-      for (const row of rows) {
-        const sig = normalizeSignature(row);
-        if (!overwrite && sig.updatedAt) {
-          skipped.push(row.id);
-          continue;
-        }
-        const dept = defaults.get(
-            String(sig.fields.department || "").toLowerCase(),
-          ),
-          selectedTemplate = String(
-            dept?.template_id || body.templateId || sig.templateId,
-          );
-        try {
-          const patch = rolloutTemplatePatch(
-              user.organizationId,
-              selectedTemplate,
-            ),
-            next = {
-              ...sig,
-              ...patch,
-              fields: sig.fields,
-              colors: { ...sig.colors, ...(patch.colors || {}) },
-              workflowStatus: "approved",
-              approvedAt: new Date().toISOString(),
-              approvedBy: user.id,
-            };
-          if (dept?.accent_color) next.colors.accent = dept.accent_color;
-          saveSignatureRow(user.organizationId, row.id, next);
-          updated.push(row.id);
-          if (sendEmail) {
-            try {
-              const target = userDto(memberById(user.organizationId, row.id)),
-                rendered = await renderSignature(req, target, target.signature);
-              await sendGraphMail(
-                user.organizationId,
-                target.email,
-                "Your email signature is ready",
-                installEmailBody(rendered.html),
-              );
-              emailed += 1;
-            } catch (error) {
-              errors.push({
-                userId: row.id,
-                email: row.email,
-                code: error.code || "EMAIL_DELIVERY_FAILED",
-                message: "Signature updated, but its email could not be sent.",
-              });
-            }
-          }
-        } catch (error) {
-          errors.push({
-            userId: row.id,
-            email: row.email,
-            code: error.code || "ROLLOUT_FAILED",
-            message: limited(error.message || "Rollout failed.", 240),
-          });
-        }
-      }
-      recordAudit(
-        user,
-        "rollout.completed",
-        "organization",
-        user.organizationId,
+      rolloutTemplatePatch(user.organizationId, templateId);
+      const job = enqueueJob(
+        "signature.rollout",
         {
-          updated: updated.length,
-          skipped: skipped.length,
-          emailed,
-          errors: errors.length,
+          organizationId: user.organizationId,
+          actorUserId: user.id,
+          templateId,
           overwrite,
           sendEmail,
+          origin: publicBase(req, user),
+        },
+        {
+          organizationId: user.organizationId,
+          dedupeKey: `signature.rollout:${user.organizationId}`,
         },
       );
+      recordAudit(user, "rollout.queued", "job", job.id, {
+        overwrite,
+        sendEmail,
+      });
       return json(
         res,
-        200,
-        {
-          updated: updated.length,
-          skipped: skipped.length,
-          emailed,
-          errors,
-          total: rows.length,
-        },
+        202,
+        { job: { id: job.id, status: job.status } },
         requestId,
       );
     }
@@ -5006,104 +5200,36 @@ function createSignaturePortal({
       req.method === "POST"
     ) {
       requireAdmin(user);
+      const active = db
+        .prepare(
+          "SELECT id,status FROM background_jobs WHERE organization_id=? AND type='directory.sync' AND status IN ('queued','running') ORDER BY created_at LIMIT 1",
+        )
+        .get(user.organizationId);
+      if (active)
+        return json(res, 202, { job: active, existing: true }, requestId);
       const runId = randomUUID();
       db.prepare(
-        `INSERT INTO directory_sync_runs(id,organization_id,status,started_by) VALUES (?,?,'running',?)`,
+        `INSERT INTO directory_sync_runs(id,organization_id,status,started_by) VALUES (?,?,'queued',?)`,
       ).run(runId, user.organizationId, user.id);
-      let transactionStarted = false;
-      try {
-        const { token } = await graphAppToken(user.organizationId),
-          people = (await graphDirectoryUsers(token)).filter(
-            (item) => item.assignedLicenses?.length,
-          );
-        db.exec("BEGIN IMMEDIATE");
-        transactionStarted = true;
-        const subscription = db
-            .prepare(
-              "SELECT seats FROM organization_subscriptions WHERE organization_id=?",
-            )
-            .get(user.organizationId),
-          activeMembers = db
-            .prepare(
-              "SELECT COUNT(*) AS count FROM organization_memberships WHERE organization_id=? AND status='active'",
-            )
-            .get(user.organizationId).count,
-          availableSeats = Math.max(
-            0,
-            (subscription?.seats || 1) - activeMembers,
-          );
-        let added = 0;
-        for (const person of people) {
-          const email = String(
-            person.mail || person.userPrincipalName || "",
-          ).toLowerCase();
-          if (!validEmail(email)) continue;
-          let account = db
-              .prepare(
-                "SELECT * FROM signature_users WHERE lower(email)=lower(?)",
-              )
-              .get(email),
-            id = account?.id || randomUUID(),
-            personSignature = normalizeSignature(
-              { display_name: person.displayName, email, signature_json: "{}" },
-              {
-                fields: {
-                  name: person.displayName,
-                  email,
-                  jobTitle: person.jobTitle || "",
-                  department: person.department || "",
-                  phone: person.businessPhones?.[0] || "",
-                  mobile: person.mobilePhone || "",
-                  company: workspaceRow(user).name,
-                },
-              },
-            );
-          const existingMembership = memberById(user.organizationId, id);
-          if (!existingMembership && added >= availableSeats) continue;
-          if (!account) {
-            db.prepare(
-              `INSERT INTO signature_users(id,email,password_hash,display_name,role,status,signature_json,email_verified_at) VALUES (?,?,?,?,'editor','active',?,strftime('%Y-%m-%dT%H:%M:%fZ','now'))`,
-            ).run(
-              id,
-              email,
-              hashPassword(randomBytes(32).toString("hex")),
-              person.displayName || email,
-              JSON.stringify(personSignature),
-            );
-          }
-          if (!existingMembership) {
-            db.prepare(
-              `INSERT INTO organization_memberships(organization_id,user_id,role,status,signature_json) VALUES (?,?,'editor','active',?)`,
-            ).run(user.organizationId, id, JSON.stringify(personSignature));
-            added += 1;
-          }
-        }
-        db.prepare(
-          `UPDATE directory_sync_runs SET status='completed',users_seen=?,users_added=?,completed_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE id=?`,
-        ).run(people.length, added, runId);
-        db.prepare(
-          `UPDATE organization_microsoft_connections SET last_sync_at=strftime('%Y-%m-%dT%H:%M:%fZ','now'),last_verified_at=strftime('%Y-%m-%dT%H:%M:%fZ','now'),last_error='',updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE organization_id=?`,
-        ).run(user.organizationId);
-        recordAudit(
-          user,
-          "directory.synced",
-          "organization",
-          user.organizationId,
-          { seen: people.length, added },
-        );
-        db.exec("COMMIT");
-        transactionStarted = false;
-        return json(res, 200, { seen: people.length, added }, requestId);
-      } catch (error) {
-        if (transactionStarted) db.exec("ROLLBACK");
-        db.prepare(
-          `UPDATE directory_sync_runs SET status='failed',error_message=?,completed_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE id=?`,
-        ).run(String(error.message).slice(0, 500), runId);
-        db.prepare(
-          `UPDATE organization_microsoft_connections SET last_error=?,updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE organization_id=?`,
-        ).run(String(error.message).slice(0, 500), user.organizationId);
-        throw error;
-      }
+      const job = enqueueJob(
+        "directory.sync",
+        {
+          organizationId: user.organizationId,
+          actorUserId: user.id,
+          runId,
+        },
+        {
+          organizationId: user.organizationId,
+          dedupeKey: `directory.sync:${user.organizationId}`,
+        },
+      );
+      recordAudit(user, "directory.sync_queued", "job", job.id, { runId });
+      return json(
+        res,
+        202,
+        { job: { id: job.id, status: job.status }, runId },
+        requestId,
+      );
     }
     if (
       url.pathname === "/api/signature/send-to-self" &&
@@ -5383,6 +5509,8 @@ function createSignaturePortal({
       requestId,
     );
   };
+  handle.jobHandlers = workflowHandlers;
+  return handle;
 }
 
 function seed(db, signature = {}) {

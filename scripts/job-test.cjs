@@ -29,7 +29,10 @@ async function main() {
   const queue = createJobQueue(
     db,
     {
-      successful: async (payload) => assert.equal(payload.value, 42),
+      successful: async (payload) => {
+        assert.equal(payload.value, 42);
+        return { accepted: true };
+      },
       retry: async () => {
         attempts += 1;
         if (attempts === 1) throw new Error("transient failure");
@@ -53,11 +56,28 @@ async function main() {
       );
     assert.equal(first.id, duplicate.id);
     assert.equal(await queue.runOnce(), true);
-    assert.equal(
-      db.prepare("SELECT status FROM background_jobs WHERE id=?").get(first.id)
-        .status,
-      "completed",
-    );
+    const completed = db
+      .prepare("SELECT * FROM background_jobs WHERE id=?")
+      .get(first.id);
+    assert.equal(completed.status, "completed");
+    assert.deepEqual(JSON.parse(completed.result_json), { accepted: true });
+
+    const activeDedupe = queue.enqueue(
+        "successful",
+        { value: 42 },
+        { dedupeKey: "active" },
+      ),
+      activeClaim = queue.claim(),
+      repeatedActive = queue.enqueue(
+        "successful",
+        { value: 99 },
+        { dedupeKey: "active" },
+      );
+    assert.equal(activeClaim.id, activeDedupe.id);
+    assert.equal(repeatedActive.id, activeDedupe.id);
+    assert.equal(repeatedActive.status, "running");
+    assert.deepEqual(JSON.parse(repeatedActive.payload_json), { value: 42 });
+    queue.complete(activeClaim.id);
 
     const retry = queue.enqueue("retry", {}, { maxAttempts: 2 });
     assert.equal(await queue.runOnce(), true);
@@ -131,6 +151,11 @@ async function main() {
         path.join(temporaryDirectory, "external-worker.db"),
       ),
       worker = startWorker({
+        application: {
+          db: workerDb,
+          jobHandlers: {},
+          mediaStorage: null,
+        },
         db: workerDb,
         config: {
           jobMode: "external",
@@ -157,7 +182,12 @@ async function main() {
     );
   } finally {
     db.close();
-    fs.rmSync(temporaryDirectory, { recursive: true, force: true });
+    fs.rmSync(temporaryDirectory, {
+      recursive: true,
+      force: true,
+      maxRetries: 10,
+      retryDelay: 100,
+    });
   }
 }
 

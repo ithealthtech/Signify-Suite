@@ -39,12 +39,17 @@ Jobs are stored in `background_jobs`. The worker atomically claims jobs, permits
 only one active job per tenant, retries transient errors with exponential
 backoff, and recovers stale locks after restart. Jobs that exhaust their retry
 budget move to `dead_lettered` with their terminal error and timestamp retained.
+Microsoft directory synchronization and bulk signature rollout are durable jobs;
+the initiating request returns after validation and queueing, while the tenant
+admin UI reads the persisted result from a tenant-scoped endpoint.
 
 Use `SIGNIFY_JOB_MODE=embedded` when the web server is the only supervised
 Node.js process. For a separately supervised worker, configure
 `SIGNIFY_JOB_MODE=external` on the web process and run `npm run worker` with the
 same environment and persistent storage. Stop both processes before replacing
-or restoring the SQLite database. Run exactly one worker for SQLite.
+or restoring the SQLite database. Start the web process before the worker after
+staging a restore; only the web process is permitted to apply it. Run exactly
+one worker for SQLite.
 
 Do not edit jobs manually. An Application Owner can inspect recent jobs in the
 control plane, diagnose the stored error, correct its root cause, and requeue a

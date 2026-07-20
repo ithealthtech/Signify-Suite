@@ -7,7 +7,7 @@ const { URL } = require("node:url");
 const { loadConfig } = require("./server/config.cjs");
 const { openDatabase } = require("./server/database.cjs");
 const { createSignaturePortal } = require("./server/signature-portal.cjs");
-const { startJobWorker } = require("./server/job-queue.cjs");
+const { createJobQueue, startJobWorker } = require("./server/job-queue.cjs");
 const { createMediaStorage } = require("./server/media-storage.cjs");
 const {
   applyPendingRestore,
@@ -244,7 +244,10 @@ async function serveObjectMedia(mediaStorage, req, res, pathname, requestId) {
 
 function createApplication(options = {}) {
   const config = options.config || loadConfig(options.env);
-  const restored = options.db ? null : applyPendingRestore(config);
+  const restored =
+    options.db || options.skipPendingRestore
+      ? null
+      : applyPendingRestore(config);
   const db = options.db || openDatabase(config.databasePath);
   const operations = createApplicationOperations({
     config,
@@ -255,6 +258,8 @@ function createApplication(options = {}) {
   const mediaStorage =
     options.mediaStorage ||
     createMediaStorage(config, { s3Client: options.s3Client });
+  const jobHandlers = {},
+    jobQueue = createJobQueue(db, jobHandlers);
   const signaturePortal = createSignaturePortal({
     db,
     production: config.production,
@@ -268,7 +273,9 @@ function createApplication(options = {}) {
     fetchImpl: options.fetchImpl,
     stripeFactory: options.stripeFactory,
     operations,
+    enqueueJob: jobQueue.enqueue,
   });
+  Object.assign(jobHandlers, signaturePortal.jobHandlers);
   const rateBuckets = new Map(),
     metrics = {
       startedAt: new Date().toISOString(),
@@ -507,7 +514,16 @@ function createApplication(options = {}) {
       );
     }
   };
-  return { config, db, handler, mediaStorage, operations, restored };
+  return {
+    config,
+    db,
+    handler,
+    jobHandlers,
+    jobQueue,
+    mediaStorage,
+    operations,
+    restored,
+  };
 }
 
 function startServer(options = {}) {
@@ -518,6 +534,7 @@ function startServer(options = {}) {
       ? startJobWorker(application.db, {
           publicRoot: application.config.publicRoot,
           mediaStorage: application.mediaStorage,
+          handlers: application.jobHandlers,
         })
       : { stop: async () => {} };
   server.requestTimeout = 30000;

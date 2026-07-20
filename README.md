@@ -254,6 +254,10 @@ npm run worker
 
 Run exactly one worker for a SQLite deployment. The queue uses atomic claims,
 but additional worker processes do not improve SQLite write throughput.
+Microsoft directory synchronization and bulk signature rollout always execute
+through this queue. Their status and result survive browser refreshes and web
+process restarts; the tenant admin UI polls the authenticated, tenant-scoped job
+endpoint until work completes.
 
 For multi-instance or disposable application hosts, set
 `SIGNIFY_MEDIA_STORAGE=s3`. Signify stores private, server-side-encrypted

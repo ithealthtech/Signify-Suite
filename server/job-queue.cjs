@@ -22,8 +22,9 @@ function createJobQueue(db, handlers = {}, options = {}) {
            payload_json=excluded.payload_json,
            status='queued',attempts=0,max_attempts=excluded.max_attempts,
            available_at=strftime('%Y-%m-%dT%H:%M:%fZ','now'),locked_at=NULL,
-           completed_at=NULL,dead_lettered_at=NULL,last_error='',
-           updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now')`,
+           completed_at=NULL,dead_lettered_at=NULL,last_error='',result_json='{}',
+           updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now')
+         WHERE background_jobs.status IN ('completed','dead_lettered')`,
       ).run(
         id,
         jobOptions.organizationId || null,
@@ -87,12 +88,12 @@ function createJobQueue(db, handlers = {}, options = {}) {
     }
   }
 
-  function complete(id) {
+  function complete(id, result = {}) {
     db.prepare(
       `UPDATE background_jobs SET status='completed',locked_at=NULL,
        completed_at=strftime('%Y-%m-%dT%H:%M:%fZ','now'),dead_lettered_at=NULL,last_error='',
-       updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE id=?`,
-    ).run(id);
+       result_json=?,updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE id=?`,
+    ).run(JSON.stringify(result ?? {}), id);
   }
 
   function fail(job, error) {
@@ -119,8 +120,8 @@ function createJobQueue(db, handlers = {}, options = {}) {
     try {
       const handler = handlers[job.type];
       if (!handler) throw new Error(`No handler registered for ${job.type}.`);
-      await handler(JSON.parse(job.payload_json), job);
-      complete(job.id);
+      const result = await handler(JSON.parse(job.payload_json), job);
+      complete(job.id, result);
     } catch (error) {
       fail(job, error);
     }

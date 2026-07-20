@@ -37,6 +37,19 @@ function busy(button, on, label = "Working…") {
     button.disabled = false;
   }
 }
+async function waitForJob(id, onStatus = () => {}) {
+  for (let attempt = 0; attempt < 120; attempt += 1) {
+    const { job } = await api(`/api/signature/jobs/${encodeURIComponent(id)}`);
+    onStatus(job);
+    if (job.status === "completed") return job.result;
+    if (job.status === "dead_lettered")
+      throw new Error(job.error || "The background operation failed.");
+    await new Promise((resolve) => setTimeout(resolve, 1000));
+  }
+  throw new Error(
+    "The operation is still queued. Its status remains available after refresh.",
+  );
+}
 function dateLabel(value) {
   if (!value) return "Never";
   const date = new Date(value);
@@ -471,10 +484,16 @@ async function syncDirectory(event) {
   busy(button, true, "Syncing…");
   $("#syncStatus").textContent = "Connecting to Microsoft 365…";
   try {
-    const result = await api("/api/signature/directory-sync", {
-      method: "POST",
-      body: "{}",
-    });
+    const accepted = await api("/api/signature/directory-sync", {
+        method: "POST",
+        body: "{}",
+      }),
+      result = await waitForJob(accepted.job.id, (job) => {
+        $("#syncStatus").textContent =
+          job.status === "running"
+            ? "Importing licensed Microsoft 365 users..."
+            : "Directory sync queued...";
+      });
     $("#syncStatus").textContent =
       `${result.seen} licensed users found · ${result.added} added`;
     const users = await api("/api/signature/users");
@@ -493,14 +512,15 @@ async function runRollout(event) {
   const button = event.currentTarget;
   busy(button, true, "Rolling out…");
   try {
-    const result = await api("/api/signature/bulk-rollout", {
-      method: "POST",
-      body: JSON.stringify({
-        templateId: $("#rolloutTemplate").value,
-        overwrite: $("#rolloutOverwrite").checked,
-        sendEmail: $("#rolloutEmail").checked,
+    const accepted = await api("/api/signature/bulk-rollout", {
+        method: "POST",
+        body: JSON.stringify({
+          templateId: $("#rolloutTemplate").value,
+          overwrite: $("#rolloutOverwrite").checked,
+          sendEmail: $("#rolloutEmail").checked,
+        }),
       }),
-    });
+      result = await waitForJob(accepted.job.id);
     const details = [
       `Updated ${result.updated} of ${result.total} signatures`,
       result.emailed ? `${result.emailed} emailed` : "",

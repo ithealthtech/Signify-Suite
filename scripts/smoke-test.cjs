@@ -479,9 +479,30 @@ async function main() {
       jar: adminJar,
     });
     assert(
+      result.response.status === 202 && result.body.job?.id,
+      "Microsoft directory sync was not queued",
+    );
+    const directoryJobId = result.body.job.id;
+    result = await request(baseUrl, "/api/signature/directory-sync", {
+      method: "POST",
+      body: {},
+      jar: adminJar,
+    });
+    assert(
+      result.response.status === 202 &&
+        result.body.existing === true &&
+        result.body.job.id === directoryJobId,
+      "duplicate directory sync created parallel work",
+    );
+    await application.jobQueue.runOnce();
+    result = await request(baseUrl, `/api/signature/jobs/${directoryJobId}`, {
+      jar: adminJar,
+    });
+    assert(
       result.response.status === 200 &&
-        result.body?.seen === 2 &&
-        result.body?.added === 2 &&
+        result.body.job?.status === "completed" &&
+        result.body.job.result?.seen === 2 &&
+        result.body.job.result?.added === 2 &&
         graphRequests.some((url) => url.includes("$skiptoken=second-page")) &&
         application.db
           .prepare(
@@ -1219,12 +1240,29 @@ async function main() {
       jar: adminJar,
     });
     assert(
+      result.response.status === 202 && result.body.job?.id,
+      "rollout was not queued",
+    );
+    const rolloutJobId = result.body.job.id;
+    await application.jobQueue.runOnce();
+    result = await request(baseUrl, `/api/signature/jobs/${rolloutJobId}`, {
+      jar: adminJar,
+    });
+    assert(
       result.response.status === 200 &&
-        result.body.emailed === result.body.updated &&
+        result.body.job.status === "completed" &&
+        result.body.job.result.emailed === result.body.job.result.updated &&
         graphRequests.some((url) =>
           url.includes("users/signatures%40example.com/sendMail"),
         ),
       "rollout email did not use the tenant Microsoft connection",
+    );
+    result = await request(baseUrl, `/api/signature/jobs/${rolloutJobId}`, {
+      jar: editorJar,
+    });
+    assert(
+      result.response.status === 403,
+      "non-admin could read tenant workflow results",
     );
     result = await request(baseUrl, "/api/signature/bulk-rollout", {
       method: "POST",
@@ -1232,10 +1270,21 @@ async function main() {
       jar: adminJar,
     });
     assert(
+      result.response.status === 202,
+      "saved-template rollout was not queued",
+    );
+    await application.jobQueue.runOnce();
+    result = await request(
+      baseUrl,
+      `/api/signature/jobs/${result.body.job.id}`,
+      { jar: adminJar },
+    );
+    assert(
       result.response.status === 200 &&
-        result.body.updated === 4 &&
-        result.body.skipped === 0 &&
-        result.body.errors.length === 0,
+        result.body.job.status === "completed" &&
+        result.body.job.result.updated === 4 &&
+        result.body.job.result.skipped === 0 &&
+        result.body.job.result.errors.length === 0,
       "saved-template rollout failed",
     );
     result = await request(baseUrl, "/api/signature/users", { jar: adminJar });
