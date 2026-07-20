@@ -2043,7 +2043,7 @@ async function main() {
     assert(
       result.response.status === 200 &&
         result.body.fleet.version === "0.4.0" &&
-        result.body.fleet.migrations >= 21 &&
+        result.body.fleet.migrations >= 22 &&
         result.body.tenants.some(
           (tenant) => tenant.id === controlPlaneOrganizationId,
         ),

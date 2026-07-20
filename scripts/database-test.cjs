@@ -86,7 +86,15 @@ try {
     .all()
     .map((row) => row.version);
   assert.ok(migrations.includes("013_query_plan_optimization.sql"));
-  assert.equal(migrations.at(-1), "021_control_plane_governance.sql");
+  assert.equal(migrations.at(-1), "022_runtime_leases.sql");
+  assert.equal(
+    db
+      .prepare(
+        "SELECT COUNT(*) count FROM sqlite_master WHERE type='table' AND name='runtime_leases'",
+      )
+      .get().count,
+    1,
+  );
   assert.deepEqual(db.prepare("PRAGMA foreign_key_check").all(), []);
   assert.equal(
     db.prepare("PRAGMA integrity_check").get().integrity_check,

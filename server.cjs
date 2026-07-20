@@ -10,6 +10,7 @@ const { createSignaturePortal } = require("./server/signature-portal.cjs");
 const { createJobQueue, startJobWorker } = require("./server/job-queue.cjs");
 const { createMediaStorage } = require("./server/media-storage.cjs");
 const { createObservability } = require("./server/observability.cjs");
+const { acquireRuntimeLease } = require("./server/runtime-lease.cjs");
 const {
   applyPendingRestore,
   createApplicationOperations,
@@ -245,6 +246,7 @@ async function serveObjectMedia(mediaStorage, req, res, pathname, requestId) {
 
 function createApplication(options = {}) {
   const config = options.config || loadConfig(options.env);
+  const runtimeHealth = options.runtimeHealth || { ready: true, error: null };
   const restored =
     options.db || options.skipPendingRestore
       ? null
@@ -438,6 +440,20 @@ function createApplication(options = {}) {
             { Allow: "GET" },
           );
         db.prepare("SELECT 1").get();
+        if (!runtimeHealth.ready)
+          return json(
+            res,
+            503,
+            {
+              status: "unavailable",
+              service: "signify-creator",
+              database: "ready",
+              runtime: runtimeHealth.error || "runtime lease unavailable",
+              version: packageMetadata.version,
+              time: new Date().toISOString(),
+            },
+            requestId,
+          );
         return json(
           res,
           200,
@@ -445,6 +461,7 @@ function createApplication(options = {}) {
             status: "ok",
             service: "signify-creator",
             database: "ready",
+            runtime: "ready",
             version: packageMetadata.version,
             time: new Date().toISOString(),
           },
@@ -506,11 +523,24 @@ function createApplication(options = {}) {
     observability,
     operations,
     restored,
+    runtimeHealth,
   };
 }
 
 function startServer(options = {}) {
-  const application = createApplication(options);
+  const runtimeHealth = { ready: true, error: null },
+    application = createApplication({ ...options, runtimeHealth });
+  const runtimeLease = acquireRuntimeLease(application.db, {
+    onHealth(ready, error) {
+      runtimeHealth.ready = ready;
+      runtimeHealth.error = error?.message || null;
+      if (error)
+        application.observability.log("error", "runtime.lease_unhealthy", {
+          code: error.code,
+          message: error.message,
+        });
+    },
+  });
   application.observability.start();
   const server = http.createServer(application.handler);
   const jobs =
@@ -530,6 +560,7 @@ function startServer(options = {}) {
       message: error.message,
     });
     await jobs.stop();
+    runtimeLease.release();
     application.db.close();
     process.exitCode = 1;
   });
@@ -551,13 +582,14 @@ function startServer(options = {}) {
       clearTimeout(forceClose);
       await jobs.stop();
       await application.observability.stop();
+      runtimeLease.release();
       application.db.close();
       process.exit(0);
     });
   }
   process.once("SIGINT", () => shutdown("SIGINT"));
   process.once("SIGTERM", () => shutdown("SIGTERM"));
-  return { ...application, jobs, server };
+  return { ...application, jobs, runtimeLease, server };
 }
 
 if (require.main === module) startServer();

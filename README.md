@@ -162,6 +162,12 @@ This SQLite Compose topology supports one web container and one worker on a
 single host. Do not add web or worker replicas until PostgreSQL is the verified
 runtime authority.
 
+The web process holds a renewable transactional lease in SQLite. A second web
+replica using the same database fails fast instead of accepting traffic with
+ambiguous runtime ownership. One external worker remains supported. The
+PostgreSQL commands currently migrate, validate, and import data; they do not
+yet make `DATABASE_URL` the live application database.
+
 ### Install a release package
 
 Extract the GitHub release, open a terminal in that directory, and run:

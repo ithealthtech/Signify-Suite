@@ -24,6 +24,13 @@ The current SQLite topology is limited to one host, one web process, and one
 worker process. Horizontal replicas require the documented PostgreSQL runtime
 conversion and acceptance suite.
 
+At startup, the web process acquires a renewable transactional lease in the
+SQLite database. A concurrent web instance using that database exits with
+`RUNTIME_LEASE_HELD`; readiness becomes unavailable if the running process loses
+its lease. This is a deployment guard, not horizontal scaling. Keep one web and
+one worker on the same host and durable volume until the live application
+runtime has been converted to PostgreSQL.
+
 ## 1. Build and install
 
 ```powershell

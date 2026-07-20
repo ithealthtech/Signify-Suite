@@ -51,6 +51,11 @@ function diagnose(config = loadConfig()) {
       database.close();
     }
   });
+  check(
+    "runtime_topology",
+    () =>
+      "SQLite authority; one web replica; external worker supported on the same durable volume",
+  );
   check("credential_vault", () => {
     if (!config.signature.credentialEncryptionKey)
       throw new Error("Credential encryption key is not configured.");

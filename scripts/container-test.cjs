@@ -75,7 +75,7 @@ try {
     ),
     migration = migrate(config),
     diagnosis = diagnose(config);
-  assert.ok(migration.applied.length >= 21);
+  assert.ok(migration.applied.length >= 22);
   assert.equal(diagnosis.ok, true, JSON.stringify(diagnosis));
   assert.equal(
     diagnosis.checks.find((item) => item.id === "database").ok,
