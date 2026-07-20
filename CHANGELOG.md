@@ -1,5 +1,32 @@
 # Changelog
 
+## Unreleased
+
+### Added
+
+- Resumable Application Owner onboarding with authoritative server-side
+  readiness and MFA gating.
+- Non-root, read-only OCI image and hardened Compose topology with one-shot
+  setup/migration tools and independently supervised web and worker services.
+- Durable worker heartbeat health checks and transactional SQLite web-instance
+  ownership leases.
+- Optional authenticated GitHub release checks for private release channels.
+
+### Changed
+
+- Release deployment now rejects unlisted artifact files and accidental version
+  downgrades before activation.
+- Provider credential forms opt out of login autofill and identify secrets as
+  new credentials.
+- Readiness reports runtime lease health and fails closed when ownership is lost.
+
+### Verified
+
+- Full lint, security, unit, integration, smoke, SBOM, build, artifact, and
+  production-startup gates pass with 22 SQLite migrations.
+- HTTPS production-loopback browser checks pass for MFA enforcement, setup,
+  signature preview, backup creation, and mobile/tablet overflow.
+
 ## 0.4.0 - 2026-07-18
 
 ### Added

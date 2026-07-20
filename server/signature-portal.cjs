@@ -10,6 +10,7 @@ const {
 } = require("node:crypto");
 const { GIFEncoder, quantize, applyPalette } = require("gifenc");
 const QRCode = require("qrcode");
+const OTPAuth = require("otpauth");
 const Stripe = require("stripe");
 const sharp = require("sharp");
 const { createCredentialVault } = require("./credential-vault.cjs");
@@ -26,6 +27,17 @@ const {
 } = require("./auth-security.cjs");
 const { redirect, textResponse } = require("./http-responses.cjs");
 const { writeTenantMedia } = require("./media-storage.cjs");
+const {
+  createPlatformOperationsRoutes,
+} = require("./routes/platform-operations.cjs");
+const { createPlatformJobRoutes } = require("./routes/platform-jobs.cjs");
+const { createTenantLifecycle } = require("./routes/platform-tenants.cjs");
+const {
+  createPlatformControlRoutes,
+} = require("./routes/platform-control.cjs");
+const {
+  createPublicSignatureRoutes,
+} = require("./routes/public-signature.cjs");
 const {
   BRAND_FONT_STACKS,
   campaignInput,
@@ -303,6 +315,8 @@ function subscriptionDto(row, includeProvider = false) {
         seats: row.seats,
         trialEndsAt: row.trial_ends_at,
         currentPeriodEnd: row.current_period_end,
+        billingSyncedAt: row.billing_synced_at || null,
+        billingError: row.billing_error || "",
         ...(includeProvider
           ? {
               stripeCustomerId: row.stripe_customer_id || null,
@@ -350,11 +364,15 @@ function createSignaturePortal({
   readJsonBody,
   readBody,
   publicRoot = path.join(__dirname, "..", "public"),
+  mediaStorage,
   trustProxy = false,
   fetchImpl = fetch,
   stripeFactory = (key) =>
     new Stripe(key, { maxNetworkRetries: 2, timeout: 10000 }),
   operations,
+  enqueueJob,
+  deletionGraceDays = 7,
+  packageVersion = "unknown",
 }) {
   seed(db, signature);
   const credentialVault = createCredentialVault(
@@ -443,6 +461,26 @@ function createSignaturePortal({
         )
         .get(key)?.setting_value ?? fallback
     );
+  }
+  function applicationSetupState() {
+    const companyName = applicationSetting(
+        "company_name",
+        signature.companyName || "",
+      ),
+      publicUrl = applicationSetting("public_url", signature.publicUrl || ""),
+      stripeSkipped = applicationSetting("stripe_skipped") === "true";
+    return {
+      companyName,
+      publicUrl,
+      stripeSkipped,
+      complete: Boolean(
+        companyName &&
+        publicUrl &&
+        credentialVault.configured &&
+        microsoftAvailable() &&
+        (billingAvailable() || stripeSkipped),
+      ),
+    };
   }
   function applicationPublicBase(req) {
     return cleanUrl(
@@ -560,6 +598,11 @@ function createSignaturePortal({
       )
       .get(organizationId, email);
   }
+  const publicSignatureRoutes = createPublicSignatureRoutes({
+    db,
+    memberById,
+    normalizeSignature,
+  });
   function userWorkspaces(userId) {
     return db
       .prepare(
@@ -625,11 +668,32 @@ function createSignaturePortal({
       error.code = "AUTH_REQUIRED";
       throw error;
     }
-    const row = db
+    db.prepare(
+      "UPDATE support_access_grants SET status='expired',updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE status='active' AND expires_at<=strftime('%Y-%m-%dT%H:%M:%fZ','now')",
+    ).run();
+    let row = db
       .prepare(
         `SELECT u.*,m.role AS membership_role,m.status AS membership_status,o.id AS organization_id,o.name AS organization_name,o.slug AS organization_slug,o.settings_json AS organization_settings,s.id AS session_id,s.csrf_token_hash FROM signature_sessions s JOIN signature_users u ON u.id=s.user_id JOIN organization_memberships m ON m.user_id=u.id AND m.organization_id=s.organization_id JOIN organizations o ON o.id=m.organization_id WHERE s.token_hash=? AND s.expires_at>strftime('%Y-%m-%dT%H:%M:%fZ','now') AND u.status='active' AND m.status='active' AND o.status='active'`,
       )
       .get(tokenHash(token));
+    if (!row)
+      row = db
+        .prepare(
+          `SELECT u.*,u.signature_json,'admin' AS membership_role,'active' AS membership_status,
+           o.id AS organization_id,o.name AS organization_name,o.slug AS organization_slug,
+           o.status AS organization_status,o.settings_json AS organization_settings,
+           s.id AS session_id,s.csrf_token_hash
+           FROM signature_sessions s
+           JOIN signature_users u ON u.id=s.user_id
+           JOIN application_owners ao ON ao.user_id=u.id AND ao.status='active'
+           JOIN organizations o ON o.id=s.organization_id AND o.status='active'
+           JOIN support_access_grants g ON g.session_id=s.id AND g.owner_user_id=u.id
+             AND g.organization_id=o.id AND g.status='active'
+             AND g.expires_at>strftime('%Y-%m-%dT%H:%M:%fZ','now')
+           WHERE s.token_hash=? AND s.expires_at>strftime('%Y-%m-%dT%H:%M:%fZ','now')
+             AND u.status='active'`,
+        )
+        .get(tokenHash(token));
     if (!row) {
       const error = new Error("Session expired.");
       error.status = 401;
@@ -641,6 +705,11 @@ function createSignaturePortal({
     ).run(row.session_id);
     const user = userDto(row);
     user.applicationOwner = isApplicationOwner(user.id);
+    user.onboardingRequired = Boolean(
+      user.applicationOwner &&
+      ((signature.requireOwnerMfa && !mfaRow(user.id, true)) ||
+        !applicationSetupState().complete),
+    );
     Object.defineProperties(user, {
       sessionId: { value: row.session_id },
       csrfTokenHash: { value: row.csrf_token_hash || "" },
@@ -656,7 +725,7 @@ function createSignaturePortal({
       });
     const row = db
       .prepare(
-        `SELECT u.*,s.id AS session_id,s.organization_id,s.csrf_token_hash FROM signature_sessions s JOIN signature_users u ON u.id=s.user_id WHERE s.token_hash=? AND s.expires_at>strftime('%Y-%m-%dT%H:%M:%fZ','now') AND u.status='active'`,
+        `SELECT u.*,s.id AS session_id,s.organization_id,s.csrf_token_hash,s.mfa_verified_at FROM signature_sessions s JOIN signature_users u ON u.id=s.user_id WHERE s.token_hash=? AND s.expires_at>strftime('%Y-%m-%dT%H:%M:%fZ','now') AND u.status='active'`,
       )
       .get(tokenHash(token));
     if (!row)
@@ -677,29 +746,75 @@ function createSignaturePortal({
     Object.defineProperties(user, {
       sessionId: { value: row.session_id },
       csrfTokenHash: { value: row.csrf_token_hash || "" },
+      privilegedAt: { value: row.mfa_verified_at || "" },
     });
     return user;
   }
-  function createSession(req, row) {
+  function ownerActionRequiresReauthentication(req, pathname) {
+    if (["GET", "HEAD", "OPTIONS"].includes(req.method)) return false;
+    return (
+      /^\/api\/platform\/owners(?:\/|$)/.test(pathname) ||
+      /^\/api\/platform\/organizations\/[^/]+\/(?:status|subscription|billing\/subscription)$/.test(
+        pathname,
+      ) ||
+      /^\/api\/platform\/organizations\/[^/]+\/(?:export|deletion)$/.test(
+        pathname,
+      ) ||
+      /^\/api\/platform\/organizations\/[^/]+\/(?:feature-flags|support-access)(?:\/|$)/.test(
+        pathname,
+      ) ||
+      pathname === "/api/platform/support-access" ||
+      pathname === "/api/platform/billing/reconcile" ||
+      (req.method === "DELETE" &&
+        /^\/api\/platform\/integrations\/(?:microsoft|stripe)$/.test(
+          pathname,
+        )) ||
+      /^\/api\/platform\/operations\/backups\/[^/]+\/restore$/.test(pathname) ||
+      (req.method === "DELETE" &&
+        /^\/api\/platform\/operations\/backups\/[^/]+$/.test(pathname))
+    );
+  }
+  function requireRecentOwnerAuthentication(owner) {
+    const recent = db
+      .prepare(
+        `SELECT 1 FROM signature_sessions WHERE id=? AND mfa_verified_at>=strftime('%Y-%m-%dT%H:%M:%fZ','now','-10 minutes')`,
+      )
+      .get(owner.sessionId);
+    if (!recent)
+      throw Object.assign(
+        new Error("Confirm your password and MFA code to continue."),
+        { status: 403, code: "PRIVILEGED_REAUTH_REQUIRED" },
+      );
+  }
+  function createSession(req, row, { mfaVerified = false } = {}) {
     const user = userDto(row),
       settings = workspaceSettings(user),
-      hours = Math.max(
+      configuredHours = Math.max(
         1,
         Math.min(
           168,
           Number(settings.sessionHours || signature.sessionHours || 12),
         ),
-      ),
+      );
+    user.applicationOwner = isApplicationOwner(user.id);
+    user.onboardingRequired = Boolean(
+      user.applicationOwner &&
+      ((signature.requireOwnerMfa && !mfaRow(user.id, true)) ||
+        !applicationSetupState().complete),
+    );
+    const hours = user.applicationOwner
+        ? Math.min(4, configuredHours)
+        : configuredHours,
       token = randomBytes(32).toString("base64url"),
       csrf = randomBytes(32).toString("base64url"),
       expires = new Date(Date.now() + hours * 3600000).toISOString();
-    user.applicationOwner = isApplicationOwner(user.id);
     db.exec(`DELETE FROM signature_sessions WHERE expires_at<=strftime('%Y-%m-%dT%H:%M:%fZ','now');
       DELETE FROM password_reset_tokens WHERE expires_at<=strftime('%Y-%m-%dT%H:%M:%fZ','now') OR used_at IS NOT NULL;
       DELETE FROM email_verification_tokens WHERE expires_at<=strftime('%Y-%m-%dT%H:%M:%fZ','now') OR used_at IS NOT NULL;
-      DELETE FROM oauth_states WHERE expires_at<=strftime('%Y-%m-%dT%H:%M:%fZ','now');`);
+      DELETE FROM oauth_states WHERE expires_at<=strftime('%Y-%m-%dT%H:%M:%fZ','now');
+      DELETE FROM mfa_login_challenges WHERE expires_at<=strftime('%Y-%m-%dT%H:%M:%fZ','now');`);
     db.prepare(
-      "INSERT INTO signature_sessions(id,user_id,token_hash,expires_at,organization_id,csrf_token_hash,created_ip,user_agent) VALUES (?,?,?,?,?,?,?,?)",
+      "INSERT INTO signature_sessions(id,user_id,token_hash,expires_at,organization_id,csrf_token_hash,created_ip,user_agent,mfa_verified_at) VALUES (?,?,?,?,?,?,?,?,?)",
     ).run(
       randomUUID(),
       user.id,
@@ -709,6 +824,7 @@ function createSignaturePortal({
       tokenHash(csrf),
       String(req.socket.remoteAddress || "").slice(0, 80),
       String(req.headers["user-agent"] || "").slice(0, 500),
+      mfaVerified ? new Date().toISOString() : null,
     );
     db.prepare(
       `UPDATE signature_users SET last_login_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE id=?`,
@@ -722,6 +838,85 @@ function createSignaturePortal({
         ],
       },
     };
+  }
+  function mfaRow(userId, enabledOnly = false) {
+    return db
+      .prepare(
+        `SELECT * FROM application_owner_mfa WHERE user_id=?${enabledOnly ? " AND status='enabled'" : ""}`,
+      )
+      .get(userId);
+  }
+  function mfaTotp(userId, email, row = mfaRow(userId)) {
+    if (!row) return null;
+    const secret = credentialVault.decrypt(
+      `mfa:${userId}`,
+      row.encrypted_secret,
+    ).secret;
+    return new OTPAuth.TOTP({
+      issuer: "Signify Creator",
+      label: email,
+      algorithm: "SHA1",
+      digits: 6,
+      period: 30,
+      secret: OTPAuth.Secret.fromBase32(secret),
+    });
+  }
+  function normalizedRecoveryCode(value) {
+    return String(value || "")
+      .toUpperCase()
+      .replace(/[^A-F0-9]/g, "");
+  }
+  function verifyMfaCode(userId, email, value, enabledOnly = true) {
+    const code = String(value || "").trim(),
+      row = mfaRow(userId, enabledOnly);
+    if (!row) return false;
+    if (/^\d{6}$/.test(code)) {
+      const totp = mfaTotp(userId, email, row),
+        delta = totp.validate({ token: code, window: 1 });
+      if (delta === null) return false;
+      const counter = totp.counter() + delta;
+      return Boolean(
+        db
+          .prepare(
+            `UPDATE application_owner_mfa SET last_counter=?,updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE user_id=? AND last_counter<?`,
+          )
+          .run(counter, userId, counter).changes,
+      );
+    }
+    const recovery = normalizedRecoveryCode(code);
+    if (recovery.length !== 16 || !enabledOnly) return false;
+    return Boolean(
+      db
+        .prepare(
+          `UPDATE application_owner_mfa_recovery_codes SET used_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE user_id=? AND code_hash=? AND used_at IS NULL`,
+        )
+        .run(userId, tokenHash(recovery)).changes,
+    );
+  }
+  function issueMfaChallenge(req, row) {
+    const token = randomBytes(32).toString("base64url"),
+      expiresAt = new Date(Date.now() + 5 * 60 * 1000).toISOString();
+    db.prepare("DELETE FROM mfa_login_challenges WHERE user_id=?").run(row.id);
+    db.prepare(
+      `INSERT INTO mfa_login_challenges(token_hash,user_id,organization_id,expires_at,created_ip,user_agent) VALUES (?,?,?,?,?,?)`,
+    ).run(
+      tokenHash(token),
+      row.id,
+      row.organization_id || null,
+      expiresAt,
+      String(req.socket.remoteAddress || "").slice(0, 80),
+      String(req.headers["user-agent"] || "").slice(0, 500),
+    );
+    return { challenge: token, expiresAt };
+  }
+  function loginRowForChallenge(challenge) {
+    if (challenge.organization_id)
+      return memberById(challenge.organization_id, challenge.user_id);
+    return db
+      .prepare(
+        `SELECT u.id,u.email,u.password_hash,u.display_name,u.role,u.status,u.created_at,u.updated_at,u.last_login_at,u.email_verified_at,u.signature_json,NULL AS membership_role,NULL AS membership_status,NULL AS organization_id,'' AS organization_name,'' AS organization_slug,'active' AS organization_status,'{}' AS organization_settings FROM signature_users u JOIN application_owners ao ON ao.user_id=u.id AND ao.status='active' WHERE u.id=? AND u.status='active' LIMIT 1`,
+      )
+      .get(challenge.user_id);
   }
   function refreshCsrf(user) {
     const csrf = randomBytes(32).toString("base64url");
@@ -857,7 +1052,7 @@ function createSignaturePortal({
       if (!organizationId) return;
       const plan = object.metadata?.plan || "starter";
       db.prepare(
-        `UPDATE organization_subscriptions SET plan=?,status='active',seats=?,stripe_customer_id=?,stripe_subscription_id=?,updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE organization_id=?`,
+        `UPDATE organization_subscriptions SET plan=?,status='active',seats=?,stripe_customer_id=?,stripe_subscription_id=?,billing_synced_at=strftime('%Y-%m-%dT%H:%M:%fZ','now'),billing_error='',updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE organization_id=?`,
       ).run(
         plan,
         seatsForPlan(plan),
@@ -879,7 +1074,7 @@ function createSignaturePortal({
           object.current_period_end ||
           object.items?.data?.[0]?.current_period_end;
       db.prepare(
-        `UPDATE organization_subscriptions SET plan=?,status=?,seats=?,stripe_customer_id=?,stripe_subscription_id=?,stripe_price_id=?,current_period_end=?,updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE organization_id=?`,
+        `UPDATE organization_subscriptions SET plan=?,status=?,seats=?,stripe_customer_id=?,stripe_subscription_id=?,stripe_price_id=?,current_period_end=?,billing_synced_at=strftime('%Y-%m-%dT%H:%M:%fZ','now'),billing_error='',updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE organization_id=?`,
       ).run(
         plan,
         stripeStatus(object.status),
@@ -896,12 +1091,93 @@ function createSignaturePortal({
     }
     if (event.type === "invoice.payment_failed")
       db.prepare(
-        `UPDATE organization_subscriptions SET status='past_due',updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE organization_id=?`,
+        `UPDATE organization_subscriptions SET status='past_due',billing_synced_at=strftime('%Y-%m-%dT%H:%M:%fZ','now'),billing_error='',updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE organization_id=?`,
       ).run(organization.id);
     if (event.type === "invoice.paid")
       db.prepare(
-        `UPDATE organization_subscriptions SET status='active',updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE organization_id=? AND status<>'canceled'`,
+        `UPDATE organization_subscriptions SET status='active',billing_synced_at=strftime('%Y-%m-%dT%H:%M:%fZ','now'),billing_error='',updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE organization_id=? AND status<>'canceled'`,
       ).run(organization.id);
+  }
+
+  async function performBillingReconciliation() {
+    const settings = stripeSettings(),
+      stripe = stripeClient(settings);
+    if (!stripe) return { skipped: true, reason: "stripe_not_configured" };
+    const subscriptions = db
+        .prepare(
+          "SELECT * FROM organization_subscriptions WHERE stripe_subscription_id IS NOT NULL AND stripe_subscription_id<>'' ORDER BY organization_id",
+        )
+        .all(),
+      result = { checked: subscriptions.length, updated: 0, failed: 0 };
+    for (const local of subscriptions) {
+      try {
+        const remote = await stripeRequest(
+            () => stripe.subscriptions.retrieve(local.stripe_subscription_id),
+            "Stripe could not reconcile a subscription.",
+          ),
+          priceId = remote.items?.data?.[0]?.price?.id || "",
+          configuredPlan = Object.entries(settings.prices || {}).find(
+            ([, configured]) => configured && configured === priceId,
+          )?.[0],
+          plan = configuredPlan || local.plan,
+          status = stripeStatus(remote.status),
+          customerId =
+            typeof remote.customer === "string"
+              ? remote.customer
+              : remote.customer?.id || local.stripe_customer_id,
+          periodEnd =
+            remote.current_period_end ||
+            remote.items?.data?.[0]?.current_period_end,
+          periodEndIso = periodEnd
+            ? new Date(periodEnd * 1000).toISOString()
+            : null,
+          changed =
+            plan !== local.plan ||
+            status !== local.status ||
+            customerId !== local.stripe_customer_id ||
+            priceId !== (local.stripe_price_id || "") ||
+            periodEndIso !== local.current_period_end;
+        db.prepare(
+          `UPDATE organization_subscriptions SET plan=?,status=?,seats=?,stripe_customer_id=?,stripe_price_id=?,current_period_end=?,billing_synced_at=strftime('%Y-%m-%dT%H:%M:%fZ','now'),billing_error='',updated_at=CASE WHEN ? THEN strftime('%Y-%m-%dT%H:%M:%fZ','now') ELSE updated_at END WHERE organization_id=?`,
+        ).run(
+          plan,
+          status,
+          seatsForPlan(plan),
+          customerId || null,
+          priceId || null,
+          periodEndIso,
+          changed ? 1 : 0,
+          local.organization_id,
+        );
+        if (changed) {
+          result.updated += 1;
+          db.prepare(
+            "INSERT INTO application_audit_logs(id,organization_id,action,target_type,target_id,reason,metadata_json) VALUES (?,?,?,?,?,?,?)",
+          ).run(
+            randomUUID(),
+            local.organization_id,
+            "stripe.subscription_reconciled",
+            "organization_subscription",
+            local.organization_id,
+            "Automated Stripe reconciliation",
+            JSON.stringify({
+              previous: { plan: local.plan, status: local.status },
+              current: { plan, status },
+            }),
+          );
+        }
+      } catch (error) {
+        result.failed += 1;
+        db.prepare(
+          `UPDATE organization_subscriptions SET billing_error=?,updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE organization_id=?`,
+        ).run(limited(error.message, 500), local.organization_id);
+      }
+    }
+    if (result.failed)
+      throw new Error(
+        `Stripe reconciliation failed for ${result.failed} of ${result.checked} subscriptions.`,
+      );
+    return result;
   }
   function activeCampaign(user) {
     const today = new Date().toISOString().slice(0, 10),
@@ -1316,7 +1592,268 @@ function createSignaturePortal({
     return `/uploads/${row.organization_id}/${name}`;
   }
 
-  return async function handle(req, res, url, requestId) {
+  function workflowActor(organizationId, actorUserId) {
+    const row = memberById(organizationId, actorUserId);
+    if (!row)
+      throw Object.assign(new Error("Workflow actor is no longer a member."), {
+        code: "WORKFLOW_ACTOR_NOT_FOUND",
+      });
+    return userDto(row);
+  }
+
+  function requestForOrigin(origin) {
+    const parsed = new URL(cleanUrl(origin) || "http://127.0.0.1:4173");
+    return {
+      headers: { host: parsed.host },
+      socket: { encrypted: parsed.protocol === "https:" },
+    };
+  }
+
+  async function performBulkRollout(payload) {
+    const user = workflowActor(payload.organizationId, payload.actorUserId),
+      overwrite = Boolean(payload.overwrite),
+      sendEmail = Boolean(payload.sendEmail),
+      rows = db
+        .prepare(
+          `${memberSelect} WHERE m.organization_id=? AND m.status='active'`,
+        )
+        .all(user.organizationId),
+      defaults = new Map(
+        db
+          .prepare(
+            "SELECT * FROM department_signature_defaults WHERE organization_id=?",
+          )
+          .all(user.organizationId)
+          .map((row) => [row.department.toLowerCase(), row]),
+      ),
+      updated = [],
+      skipped = [],
+      errors = [],
+      request = requestForOrigin(payload.origin);
+    if (sendEmail && !mailAvailable(user.organizationId))
+      throw Object.assign(
+        new Error("Microsoft 365 email delivery is not configured."),
+        { code: "MAIL_NOT_CONFIGURED" },
+      );
+    rolloutTemplatePatch(user.organizationId, payload.templateId);
+    let emailed = 0;
+    for (const row of rows) {
+      const sig = normalizeSignature(row);
+      if (!overwrite && sig.updatedAt) {
+        skipped.push(row.id);
+        continue;
+      }
+      const dept = defaults.get(
+          String(sig.fields.department || "").toLowerCase(),
+        ),
+        selectedTemplate = String(
+          dept?.template_id || payload.templateId || sig.templateId,
+        );
+      try {
+        const patch = rolloutTemplatePatch(
+            user.organizationId,
+            selectedTemplate,
+          ),
+          next = {
+            ...sig,
+            ...patch,
+            fields: sig.fields,
+            colors: { ...sig.colors, ...(patch.colors || {}) },
+            workflowStatus: "approved",
+            approvedAt: new Date().toISOString(),
+            approvedBy: user.id,
+          };
+        if (dept?.accent_color) next.colors.accent = dept.accent_color;
+        saveSignatureRow(user.organizationId, row.id, next);
+        updated.push(row.id);
+        if (sendEmail) {
+          try {
+            const target = userDto(memberById(user.organizationId, row.id)),
+              rendered = await renderSignature(
+                request,
+                target,
+                target.signature,
+              );
+            await sendGraphMail(
+              user.organizationId,
+              target.email,
+              "Your email signature is ready",
+              installEmailBody(rendered.html),
+            );
+            emailed += 1;
+          } catch (error) {
+            errors.push({
+              userId: row.id,
+              email: row.email,
+              code: error.code || "EMAIL_DELIVERY_FAILED",
+              message: "Signature updated, but its email could not be sent.",
+            });
+          }
+        }
+      } catch (error) {
+        errors.push({
+          userId: row.id,
+          email: row.email,
+          code: error.code || "ROLLOUT_FAILED",
+          message: limited(error.message || "Rollout failed.", 240),
+        });
+      }
+    }
+    const result = {
+      updated: updated.length,
+      skipped: skipped.length,
+      emailed,
+      errors,
+      total: rows.length,
+    };
+    recordAudit(
+      user,
+      "rollout.completed",
+      "organization",
+      user.organizationId,
+      { ...result, errors: errors.length, overwrite, sendEmail },
+    );
+    return result;
+  }
+
+  async function performDirectorySync(payload) {
+    const user = workflowActor(payload.organizationId, payload.actorUserId),
+      runId = payload.runId;
+    db.prepare(
+      "UPDATE directory_sync_runs SET status='running',error_message=NULL,completed_at=NULL WHERE id=? AND organization_id=?",
+    ).run(runId, user.organizationId);
+    let transactionStarted = false;
+    try {
+      const { token } = await graphAppToken(user.organizationId),
+        people = (await graphDirectoryUsers(token)).filter(
+          (item) => item.assignedLicenses?.length,
+        );
+      db.exec("BEGIN IMMEDIATE");
+      transactionStarted = true;
+      const subscription = db
+          .prepare(
+            "SELECT seats FROM organization_subscriptions WHERE organization_id=?",
+          )
+          .get(user.organizationId),
+        activeMembers = db
+          .prepare(
+            "SELECT COUNT(*) AS count FROM organization_memberships WHERE organization_id=? AND status='active'",
+          )
+          .get(user.organizationId).count,
+        availableSeats = Math.max(
+          0,
+          (subscription?.seats || 1) - activeMembers,
+        );
+      let added = 0;
+      for (const person of people) {
+        const email = String(
+          person.mail || person.userPrincipalName || "",
+        ).toLowerCase();
+        if (!validEmail(email)) continue;
+        const account = db
+            .prepare(
+              "SELECT * FROM signature_users WHERE lower(email)=lower(?)",
+            )
+            .get(email),
+          id = account?.id || randomUUID(),
+          personSignature = normalizeSignature(
+            { display_name: person.displayName, email, signature_json: "{}" },
+            {
+              fields: {
+                name: person.displayName,
+                email,
+                jobTitle: person.jobTitle || "",
+                department: person.department || "",
+                phone: person.businessPhones?.[0] || "",
+                mobile: person.mobilePhone || "",
+                company: workspaceRow(user).name,
+              },
+            },
+          ),
+          existingMembership = memberById(user.organizationId, id);
+        if (!existingMembership && added >= availableSeats) continue;
+        if (!account)
+          db.prepare(
+            `INSERT INTO signature_users(id,email,password_hash,display_name,role,status,signature_json,email_verified_at) VALUES (?,?,?,?,'editor','active',?,strftime('%Y-%m-%dT%H:%M:%fZ','now'))`,
+          ).run(
+            id,
+            email,
+            hashPassword(randomBytes(32).toString("hex")),
+            person.displayName || email,
+            JSON.stringify(personSignature),
+          );
+        if (!existingMembership) {
+          db.prepare(
+            `INSERT INTO organization_memberships(organization_id,user_id,role,status,signature_json) VALUES (?,?,'editor','active',?)`,
+          ).run(user.organizationId, id, JSON.stringify(personSignature));
+          added += 1;
+        }
+      }
+      db.prepare(
+        `UPDATE directory_sync_runs SET status='completed',users_seen=?,users_added=?,completed_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE id=?`,
+      ).run(people.length, added, runId);
+      db.prepare(
+        `UPDATE organization_microsoft_connections SET last_sync_at=strftime('%Y-%m-%dT%H:%M:%fZ','now'),last_verified_at=strftime('%Y-%m-%dT%H:%M:%fZ','now'),last_error='',updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE organization_id=?`,
+      ).run(user.organizationId);
+      recordAudit(
+        user,
+        "directory.synced",
+        "organization",
+        user.organizationId,
+        { seen: people.length, added },
+      );
+      db.exec("COMMIT");
+      transactionStarted = false;
+      return { seen: people.length, added, runId };
+    } catch (error) {
+      if (transactionStarted) db.exec("ROLLBACK");
+      db.prepare(
+        `UPDATE directory_sync_runs SET status='failed',error_message=?,completed_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE id=?`,
+      ).run(String(error.message).slice(0, 500), runId);
+      db.prepare(
+        `UPDATE organization_microsoft_connections SET last_error=?,updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE organization_id=?`,
+      ).run(String(error.message).slice(0, 500), user.organizationId);
+      throw error;
+    }
+  }
+
+  const workflowHandlers = {
+    "billing.reconcile": performBillingReconciliation,
+    "directory.sync": performDirectorySync,
+    "signature.rollout": performBulkRollout,
+  };
+
+  const handlePlatformOperations = createPlatformOperationsRoutes({
+      json,
+      operations,
+      readJsonBody,
+      recordAudit: recordApplicationAudit,
+    }),
+    handlePlatformJobs = createPlatformJobRoutes({
+      db,
+      json,
+      readJsonBody,
+      recordAudit: recordApplicationAudit,
+    }),
+    tenantLifecycle = createTenantLifecycle({
+      db,
+      json,
+      readJsonBody,
+      recordAudit: recordApplicationAudit,
+      enqueueJob,
+      mediaStorage,
+      deletionGraceDays,
+    }),
+    platformControl = createPlatformControlRoutes({
+      db,
+      json,
+      readJsonBody,
+      recordAudit: recordApplicationAudit,
+      packageVersion,
+      mediaStorage,
+    });
+  Object.assign(workflowHandlers, tenantLifecycle.jobHandlers);
+  const handle = async function handle(req, res, url, requestId) {
     if (url.pathname === "/webhooks/stripe" && req.method === "POST") {
       const stripeConfiguration = stripeSettings(),
         stripe = stripeClient(stripeConfiguration);
@@ -1672,53 +2209,24 @@ function createSignaturePortal({
         photoUrl,
       });
       row = memberById(row.organization_id, row.id);
-      const session = createSession(req, row);
+      if (isApplicationOwner(row.id) && mfaRow(row.id, true)) {
+        const challenge = issueMfaChallenge(req, row);
+        return redirect(
+          res,
+          `/signature.html#mfa=${encodeURIComponent(challenge.challenge)}`,
+          { "Set-Cookie": clearOauthCookie },
+        );
+      }
+      const session = createSession(req, row, {
+        mfaVerified: isApplicationOwner(row.id) && !mfaRow(row.id, true),
+      });
       recordAudit(session.user, "profile.microsoft_synced", "user", row.id, {
         photoImported: Boolean(photoUrl && photoUrl !== current.photoUrl),
       });
       session.header["Set-Cookie"].push(clearOauthCookie);
       return redirect(res, "/signature.html", session.header);
     }
-    const redirectMatch = url.pathname.match(/^\/r\/([^/]+)$/);
-    if (redirectMatch && req.method === "GET") {
-      const row = db
-        .prepare("SELECT * FROM signature_tracking_links WHERE id=?")
-        .get(redirectMatch[1]);
-      if (!row || !validUrl(row.destination_url)) return redirect(res, "/");
-      db.prepare(
-        `UPDATE signature_tracking_links SET clicks=clicks+1,last_clicked_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE id=?`,
-      ).run(row.id);
-      return redirect(res, row.destination_url);
-    }
-    const vcardMatch = url.pathname.match(/^\/vcard\/([^/]+)\/([^/]+)\.vcf$/);
-    if (vcardMatch && req.method === "GET") {
-      const row = memberById(vcardMatch[1], vcardMatch[2]);
-      if (!row) return textResponse(res, 404, "Contact not found.");
-      const sig = normalizeSignature(row),
-        f = sig.fields,
-        escape = (v) =>
-          String(v || "")
-            .replace(/([,;\\])/g, "\\$1")
-            .replace(/\n/g, "\\n"),
-        card = [
-          "BEGIN:VCARD",
-          "VERSION:3.0",
-          `FN:${escape(f.name)}`,
-          `TITLE:${escape(f.jobTitle)}`,
-          `ORG:${escape(f.company)}`,
-          `EMAIL;TYPE=INTERNET:${escape(f.email)}`,
-          f.phone ? `TEL;TYPE=WORK,VOICE:${escape(f.phone)}` : "",
-          f.mobile ? `TEL;TYPE=CELL:${escape(f.mobile)}` : "",
-          f.website ? `URL:${escape(f.website)}` : "",
-          f.address ? `ADR;TYPE=WORK:;;${escape(f.address)};;;;` : "",
-          "END:VCARD",
-        ]
-          .filter(Boolean)
-          .join("\r\n");
-      return textResponse(res, 200, card, "text/vcard; charset=utf-8", {
-        "Content-Disposition": `attachment; filename="${slug(f.name)}.vcf"`,
-      });
-    }
+    if (publicSignatureRoutes.routes({ req, res, url })) return;
     if (url.pathname.startsWith("/api/platform/")) {
       const owner = requireApplicationSession(req);
       requireApplicationOwner(owner);
@@ -1753,148 +2261,326 @@ function createSignaturePortal({
                 .filter(([, price]) => Boolean(price))
                 .map(([plan]) => plan),
             },
+            mfa: {
+              required: Boolean(signature.requireOwnerMfa),
+              enabled: Boolean(mfaRow(owner.id, true)),
+              recoveryCodesRemaining: db
+                .prepare(
+                  "SELECT COUNT(*) count FROM application_owner_mfa_recovery_codes WHERE user_id=? AND used_at IS NULL",
+                )
+                .get(owner.id).count,
+            },
           },
           requestId,
           refreshCsrf(owner),
         );
       }
-      if (url.pathname === "/api/platform/operations" && req.method === "GET")
-        return json(res, 200, { backups: operations.listBackups() }, requestId);
       if (
-        url.pathname === "/api/platform/operations/backups" &&
-        req.method === "POST"
-      ) {
-        const body = await readJsonBody(req),
-          reason = limited(body.reason, 500).trim();
-        if (reason.length < 3)
-          throw Object.assign(
-            new Error("A reason of at least 3 characters is required."),
-            { status: 400, code: "OPERATION_REASON_REQUIRED" },
-          );
-        const backup = operations.createBackup();
-        recordApplicationAudit(
-          owner,
-          "application.backup_created",
-          "backup",
-          backup.name,
-          null,
-          reason,
-          {},
-          requestId,
-        );
-        return json(res, 201, { backup }, requestId);
-      }
-      const backupDownload = url.pathname.match(
-        /^\/api\/platform\/operations\/backups\/([^/]+)\/download$/,
-      );
-      if (backupDownload && req.method === "GET") {
-        const name = decodeURIComponent(backupDownload[1]),
-          file = operations.managedFile(name);
-        if (!fs.existsSync(file))
-          throw Object.assign(new Error("Backup not found."), {
-            status: 404,
-            code: "BACKUP_NOT_FOUND",
-          });
-        const stat = fs.statSync(file);
-        res.writeHead(200, {
-          "Content-Type": "application/vnd.sqlite3",
-          "Content-Length": stat.size,
-          "Content-Disposition": `attachment; filename="${name}"`,
-          "Cache-Control": "no-store",
-          "X-Request-Id": requestId,
-        });
-        fs.createReadStream(file).pipe(res);
-        return;
-      }
-      const backupRestore = url.pathname.match(
-        /^\/api\/platform\/operations\/backups\/([^/]+)\/restore$/,
-      );
-      if (backupRestore && req.method === "POST") {
-        const body = await readJsonBody(req),
-          reason = limited(body.reason, 500).trim(),
-          name = decodeURIComponent(backupRestore[1]);
-        if (reason.length < 3)
-          throw Object.assign(
-            new Error("A reason of at least 3 characters is required."),
-            { status: 400, code: "OPERATION_REASON_REQUIRED" },
-          );
-        if (body.confirmation !== "RESTORE")
-          throw Object.assign(
-            new Error("Type RESTORE to confirm this operation."),
-            { status: 400, code: "RESTORE_CONFIRMATION_REQUIRED" },
-          );
-        const restore = operations.stageRestore(name);
-        recordApplicationAudit(
-          owner,
-          "application.restore_staged",
-          "backup",
-          name,
-          null,
-          reason,
-          {},
-          requestId,
-        );
-        return json(res, 202, { restore }, requestId);
-      }
-      if (
-        url.pathname === "/api/platform/operations/restore" &&
-        req.method === "DELETE"
-      ) {
-        const body = await readJsonBody(req),
-          reason = limited(body.reason, 500).trim();
-        if (reason.length < 3)
-          throw Object.assign(
-            new Error("A reason of at least 3 characters is required."),
-            { status: 400, code: "OPERATION_REASON_REQUIRED" },
-          );
-        operations.cancelRestore();
-        recordApplicationAudit(
-          owner,
-          "application.restore_canceled",
-          "backup",
-          "pending",
-          null,
-          reason,
-          {},
-          requestId,
-        );
-        return json(res, 200, { canceled: true }, requestId);
-      }
-      const backupDelete = url.pathname.match(
-        /^\/api\/platform\/operations\/backups\/([^/]+)$/,
-      );
-      if (backupDelete && req.method === "DELETE") {
-        const body = await readJsonBody(req),
-          reason = limited(body.reason, 500).trim(),
-          name = decodeURIComponent(backupDelete[1]);
-        if (reason.length < 3)
-          throw Object.assign(
-            new Error("A reason of at least 3 characters is required."),
-            { status: 400, code: "OPERATION_REASON_REQUIRED" },
-          );
-        operations.deleteBackup(name);
-        recordApplicationAudit(
-          owner,
-          "application.backup_deleted",
-          "backup",
-          name,
-          null,
-          reason,
-          {},
-          requestId,
-        );
-        return json(res, 200, { deleted: true }, requestId);
-      }
-      if (
-        url.pathname === "/api/platform/operations/updates" &&
-        req.method === "GET"
+        signature.requireOwnerMfa &&
+        !mfaRow(owner.id, true) &&
+        !["/api/platform/mfa/enroll", "/api/platform/mfa/confirm"].includes(
+          url.pathname,
+        )
       )
+        throw Object.assign(
+          new Error(
+            "Set up multi-factor authentication before using the Application Owner control plane.",
+          ),
+          { status: 403, code: "OWNER_MFA_REQUIRED" },
+        );
+      if (url.pathname === "/api/platform/reauth" && req.method === "POST") {
+        const body = await readJsonBody(req, { limit: 8192 }),
+          account = db
+            .prepare(
+              "SELECT password_hash,email FROM signature_users WHERE id=?",
+            )
+            .get(owner.id),
+          mfaEnabled = Boolean(mfaRow(owner.id, true));
+        if (
+          !verifyPassword(body.password, account?.password_hash) ||
+          (mfaEnabled && !verifyMfaCode(owner.id, account.email, body.code))
+        )
+          throw Object.assign(
+            new Error("Password or verification code is invalid."),
+            { status: 403, code: "PRIVILEGED_REAUTH_FAILED" },
+          );
+        db.prepare(
+          `UPDATE signature_sessions SET mfa_verified_at=strftime('%Y-%m-%dT%H:%M:%fZ','now'),last_seen_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE id=?`,
+        ).run(owner.sessionId);
+        recordApplicationAudit(
+          owner,
+          "session.privileged_reauthenticated",
+          "session",
+          owner.sessionId,
+          null,
+          "Step-up authentication",
+          { mfa: mfaEnabled },
+          requestId,
+        );
         return json(
           res,
           200,
-          { update: await operations.checkForUpdates() },
+          { verifiedAt: new Date().toISOString(), validForSeconds: 600 },
           requestId,
         );
+      }
+      if (
+        url.pathname === "/api/platform/mfa/enroll" &&
+        req.method === "POST"
+      ) {
+        const body = await readJsonBody(req, { limit: 8192 }),
+          account = db
+            .prepare(
+              "SELECT password_hash,email FROM signature_users WHERE id=?",
+            )
+            .get(owner.id);
+        if (!verifyPassword(body.password, account?.password_hash))
+          throw Object.assign(new Error("Current password is incorrect."), {
+            status: 403,
+            code: "PASSWORD_INVALID",
+          });
+        if (
+          mfaRow(owner.id, true) &&
+          !verifyMfaCode(owner.id, account.email, body.currentCode)
+        )
+          throw Object.assign(
+            new Error("Current MFA verification code is invalid."),
+            { status: 403, code: "MFA_REPLACEMENT_DENIED" },
+          );
+        if (!credentialVault.configured)
+          throw Object.assign(
+            new Error("Credential encryption is required before enabling MFA."),
+            { status: 503, code: "CREDENTIAL_VAULT_NOT_CONFIGURED" },
+          );
+        const secret = new OTPAuth.Secret({ size: 20 }),
+          encrypted = credentialVault.encrypt(`mfa:${owner.id}`, {
+            secret: secret.base32,
+          }),
+          totp = new OTPAuth.TOTP({
+            issuer: "Signify Creator",
+            label: account.email,
+            secret,
+          });
+        db.prepare(
+          `INSERT INTO application_owner_mfa(user_id,status,encrypted_secret,credential_key_id,last_counter)
+           VALUES (?,'pending',?,?,-1)
+           ON CONFLICT(user_id) DO UPDATE SET status='pending',encrypted_secret=excluded.encrypted_secret,
+             credential_key_id=excluded.credential_key_id,last_counter=-1,enrolled_at=NULL,
+             updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now')`,
+        ).run(owner.id, encrypted, credentialVault.keyId);
+        db.prepare(
+          "DELETE FROM application_owner_mfa_recovery_codes WHERE user_id=?",
+        ).run(owner.id);
+        recordApplicationAudit(
+          owner,
+          "mfa.enrollment_started",
+          "user",
+          owner.id,
+          null,
+          "Application Owner initiated MFA enrollment",
+          {},
+          requestId,
+        );
+        return json(
+          res,
+          200,
+          {
+            secret: secret.base32,
+            qrCode: await QRCode.toDataURL(totp.toString(), {
+              margin: 1,
+              width: 240,
+            }),
+          },
+          requestId,
+        );
+      }
+      if (
+        url.pathname === "/api/platform/mfa/confirm" &&
+        req.method === "POST"
+      ) {
+        const body = await readJsonBody(req, { limit: 8192 });
+        if (!verifyMfaCode(owner.id, owner.email, body.code, false))
+          throw Object.assign(new Error("Verification code is invalid."), {
+            status: 400,
+            code: "MFA_INVALID",
+          });
+        const recoveryCodes = Array.from({ length: 10 }, () =>
+          randomBytes(8).toString("hex").toUpperCase().match(/.{4}/g).join("-"),
+        );
+        db.exec("BEGIN IMMEDIATE");
+        try {
+          db.prepare(
+            `UPDATE application_owner_mfa SET status='enabled',enrolled_at=strftime('%Y-%m-%dT%H:%M:%fZ','now'),updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE user_id=? AND status='pending'`,
+          ).run(owner.id);
+          db.prepare(
+            "DELETE FROM application_owner_mfa_recovery_codes WHERE user_id=?",
+          ).run(owner.id);
+          const insert = db.prepare(
+            "INSERT INTO application_owner_mfa_recovery_codes(id,user_id,code_hash) VALUES (?,?,?)",
+          );
+          for (const code of recoveryCodes)
+            insert.run(
+              randomUUID(),
+              owner.id,
+              tokenHash(normalizedRecoveryCode(code)),
+            );
+          db.prepare(
+            "DELETE FROM signature_sessions WHERE user_id=? AND id<>?",
+          ).run(owner.id, owner.sessionId);
+          db.prepare(
+            `UPDATE signature_sessions SET mfa_verified_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE id=?`,
+          ).run(owner.sessionId);
+          recordApplicationAudit(
+            owner,
+            "mfa.enabled",
+            "user",
+            owner.id,
+            null,
+            "Application Owner enabled MFA",
+            { recoveryCodes: recoveryCodes.length },
+            requestId,
+          );
+          db.exec("COMMIT");
+        } catch (error) {
+          db.exec("ROLLBACK");
+          throw error;
+        }
+        return json(res, 200, { recoveryCodes }, requestId);
+      }
+      if (url.pathname === "/api/platform/mfa" && req.method === "DELETE") {
+        const body = await readJsonBody(req, { limit: 8192 }),
+          account = db
+            .prepare(
+              "SELECT password_hash,email FROM signature_users WHERE id=?",
+            )
+            .get(owner.id);
+        if (
+          !verifyPassword(body.password, account?.password_hash) ||
+          !verifyMfaCode(owner.id, account.email, body.code)
+        )
+          throw Object.assign(
+            new Error("Password or verification code is invalid."),
+            { status: 403, code: "MFA_DISABLE_DENIED" },
+          );
+        db.exec("BEGIN IMMEDIATE");
+        try {
+          db.prepare(
+            "DELETE FROM application_owner_mfa_recovery_codes WHERE user_id=?",
+          ).run(owner.id);
+          db.prepare("DELETE FROM application_owner_mfa WHERE user_id=?").run(
+            owner.id,
+          );
+          db.prepare(
+            "DELETE FROM signature_sessions WHERE user_id=? AND id<>?",
+          ).run(owner.id, owner.sessionId);
+          recordApplicationAudit(
+            owner,
+            "mfa.disabled",
+            "user",
+            owner.id,
+            null,
+            limited(body.reason || "Application Owner disabled MFA", 500),
+            {},
+            requestId,
+          );
+          db.exec("COMMIT");
+        } catch (error) {
+          db.exec("ROLLBACK");
+          throw error;
+        }
+        return json(res, 200, { ok: true }, requestId);
+      }
+      if (url.pathname === "/api/platform/sessions" && req.method === "GET") {
+        const sessions = db
+          .prepare(
+            `SELECT id,created_at,last_seen_at,expires_at,created_ip,user_agent,mfa_verified_at
+             FROM signature_sessions WHERE user_id=? ORDER BY last_seen_at DESC,created_at DESC`,
+          )
+          .all(owner.id)
+          .map((row) => ({
+            id: row.id,
+            current: row.id === owner.sessionId,
+            createdAt: row.created_at,
+            lastSeenAt: row.last_seen_at,
+            expiresAt: row.expires_at,
+            ipAddress: row.created_ip,
+            userAgent: row.user_agent,
+            mfaVerifiedAt: row.mfa_verified_at,
+          }));
+        return json(res, 200, { sessions }, requestId);
+      }
+      if (
+        url.pathname === "/api/platform/sessions" &&
+        req.method === "DELETE"
+      ) {
+        const body = await readJsonBody(req, { limit: 8192 }),
+          reason = limited(body.reason, 500);
+        if (reason.length < 3)
+          throw Object.assign(new Error("A revocation reason is required."), {
+            status: 400,
+            code: "REASON_REQUIRED",
+          });
+        const revoked = db
+          .prepare("DELETE FROM signature_sessions WHERE user_id=? AND id<>?")
+          .run(owner.id, owner.sessionId).changes;
+        recordApplicationAudit(
+          owner,
+          "sessions.revoked",
+          "user",
+          owner.id,
+          null,
+          reason,
+          { revoked },
+          requestId,
+        );
+        return json(res, 200, { revoked }, requestId);
+      }
+      const ownerSessionMatch = url.pathname.match(
+        /^\/api\/platform\/sessions\/([^/]+)$/,
+      );
+      if (ownerSessionMatch && req.method === "DELETE") {
+        const body = await readJsonBody(req, { limit: 8192 }),
+          reason = limited(body.reason, 500),
+          id = ownerSessionMatch[1];
+        if (id === owner.sessionId)
+          throw Object.assign(
+            new Error("Use Sign out to end the current session."),
+            { status: 409, code: "CURRENT_SESSION" },
+          );
+        if (reason.length < 3)
+          throw Object.assign(new Error("A revocation reason is required."), {
+            status: 400,
+            code: "REASON_REQUIRED",
+          });
+        const revoked = db
+          .prepare("DELETE FROM signature_sessions WHERE id=? AND user_id=?")
+          .run(id, owner.id).changes;
+        if (!revoked)
+          throw Object.assign(new Error("Session not found."), {
+            status: 404,
+            code: "SESSION_NOT_FOUND",
+          });
+        recordApplicationAudit(
+          owner,
+          "session.revoked",
+          "session",
+          id,
+          null,
+          reason,
+          {},
+          requestId,
+        );
+        return json(res, 200, { ok: true }, requestId);
+      }
+      if (ownerActionRequiresReauthentication(req, url.pathname))
+        requireRecentOwnerAuthentication(owner);
+      if (await handlePlatformOperations({ req, res, url, requestId, owner }))
+        return;
+      if (await handlePlatformJobs({ req, res, url, requestId, owner })) return;
+      if (await tenantLifecycle.routes({ req, res, url, requestId, owner }))
+        return;
+      if (await platformControl.routes({ req, res, url, requestId, owner }))
+        return;
       if (url.pathname === "/api/platform/integrations" && req.method === "GET")
         return json(
           res,
@@ -1921,15 +2607,8 @@ function createSignaturePortal({
           requestId,
         );
       if (url.pathname === "/api/platform/setup" && req.method === "GET") {
-        const companyName = applicationSetting(
-            "company_name",
-            signature.companyName || "",
-          ),
-          publicUrl = applicationSetting(
-            "public_url",
-            signature.publicUrl || "",
-          ),
-          stripeSkipped = applicationSetting("stripe_skipped") === "true",
+        const { companyName, publicUrl, stripeSkipped, complete } =
+            applicationSetupState(),
           microsoft = microsoftSettings();
         return json(
           res,
@@ -1954,13 +2633,7 @@ function createSignaturePortal({
               configured: billingAvailable(),
               skipped: stripeSkipped,
             },
-            complete: Boolean(
-              companyName &&
-              publicUrl &&
-              credentialVault.configured &&
-              microsoftAvailable() &&
-              (billingAvailable() || stripeSkipped),
-            ),
+            complete,
           },
           requestId,
         );
@@ -2704,6 +3377,20 @@ function createSignaturePortal({
             },
             requestId,
           );
+        if (
+          status === "active" &&
+          db
+            .prepare(
+              "SELECT 1 FROM tenant_deletion_requests WHERE organization_id=? AND status IN ('pending','purging')",
+            )
+            .get(statusMatch[1])
+        )
+          throw Object.assign(
+            new Error(
+              "Cancel the pending deletion before reactivating this tenant.",
+            ),
+            { status: 409, code: "TENANT_DELETION_PENDING" },
+          );
         const changed = db
           .prepare(
             `UPDATE organizations SET status=?,updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE id=? RETURNING id,name,status`,
@@ -2999,6 +3686,39 @@ function createSignaturePortal({
             stripeSubscriptionId: updated.id,
             cancelAtPeriodEnd: Boolean(updated.cancel_at_period_end),
           },
+          requestId,
+        );
+      }
+      if (
+        url.pathname === "/api/platform/billing/reconcile" &&
+        req.method === "POST"
+      ) {
+        const body = await readJsonBody(req, { limit: 4096 }),
+          reason = limited(body.reason, 500).trim();
+        if (reason.length < 3)
+          throw Object.assign(new Error("A reason is required."), {
+            status: 400,
+            code: "REASON_REQUIRED",
+          });
+        const job = enqueueJob(
+          "billing.reconcile",
+          {},
+          { dedupeKey: "billing.reconcile" },
+        );
+        recordApplicationAudit(
+          owner,
+          "stripe.reconciliation_queued",
+          "background_job",
+          job.id,
+          null,
+          reason,
+          {},
+          requestId,
+        );
+        return json(
+          res,
+          202,
+          { job: { id: job.id, status: job.status } },
           requestId,
         );
       }
@@ -3613,6 +4333,57 @@ function createSignaturePortal({
         requestId,
       );
     }
+    if (url.pathname === "/api/signature/login/mfa" && req.method === "POST") {
+      const body = await readJsonBody(req, { limit: 8192 }),
+        challenge = db
+          .prepare(
+            `SELECT * FROM mfa_login_challenges WHERE token_hash=? AND expires_at>strftime('%Y-%m-%dT%H:%M:%fZ','now') AND attempts<5`,
+          )
+          .get(tokenHash(String(body.challenge || ""))),
+        invalid = () =>
+          json(
+            res,
+            401,
+            {
+              error: {
+                code: "MFA_INVALID",
+                message: "The verification code is invalid or expired.",
+              },
+            },
+            requestId,
+          );
+      if (!challenge) return invalid();
+      const attempts = db
+        .prepare(
+          "UPDATE mfa_login_challenges SET attempts=attempts+1 WHERE token_hash=? RETURNING attempts",
+        )
+        .get(challenge.token_hash).attempts;
+      const row = loginRowForChallenge(challenge);
+      if (!row || !verifyMfaCode(row.id, row.email, body.code)) {
+        if (attempts >= 5)
+          db.prepare("DELETE FROM mfa_login_challenges WHERE token_hash=?").run(
+            challenge.token_hash,
+          );
+        return invalid();
+      }
+      db.prepare("DELETE FROM mfa_login_challenges WHERE token_hash=?").run(
+        challenge.token_hash,
+      );
+      const session = createSession(req, row, { mfaVerified: true });
+      if (session.user.organizationId)
+        recordAudit(session.user, "session.login_mfa", "user", row.id);
+      recordApplicationAudit(
+        session.user,
+        "session.login_mfa",
+        "user",
+        row.id,
+        session.user.organizationId,
+        "Application Owner MFA login",
+        {},
+        requestId,
+      );
+      return json(res, 200, { user: session.user }, requestId, session.header);
+    }
     if (url.pathname === "/api/signature/login" && req.method === "POST") {
       const body = await readJsonBody(req, { limit: 8192 }),
         email = String(body.email || "")
@@ -3659,7 +4430,16 @@ function createSignaturePortal({
           },
           requestId,
         );
-      const session = createSession(req, row);
+      if (isApplicationOwner(row.id) && mfaRow(row.id, true))
+        return json(
+          res,
+          202,
+          { mfaRequired: true, ...issueMfaChallenge(req, row) },
+          requestId,
+        );
+      const session = createSession(req, row, {
+        mfaVerified: isApplicationOwner(row.id),
+      });
       if (session.user.organizationId)
         recordAudit(session.user, "session.login", "user", session.user.id);
       else
@@ -3699,6 +4479,62 @@ function createSignaturePortal({
     const user = requireSession(req);
     if (!["GET", "HEAD", "OPTIONS"].includes(req.method))
       enforceCsrf(req, user);
+    const gatedFeature = url.pathname.startsWith("/api/signature/campaigns")
+      ? "campaigns"
+      : url.pathname === "/api/signature/directory-sync"
+        ? "directory_sync"
+        : url.pathname === "/api/signature/analytics"
+          ? "tracking"
+          : null;
+    if (
+      gatedFeature &&
+      !platformControl.featureEnabled(user.organizationId, gatedFeature)
+    )
+      throw Object.assign(
+        new Error("This feature is disabled for the tenant."),
+        {
+          status: 403,
+          code: "FEATURE_DISABLED",
+        },
+      );
+    const jobMatch = url.pathname.match(/^\/api\/signature\/jobs\/([^/]+)$/);
+    if (jobMatch && req.method === "GET") {
+      requireAdmin(user);
+      const row = db
+        .prepare(
+          `SELECT id,type,status,attempts,max_attempts,result_json,last_error,created_at,updated_at,completed_at,dead_lettered_at
+           FROM background_jobs
+           WHERE id=? AND organization_id=? AND type IN ('directory.sync','signature.rollout')`,
+        )
+        .get(decodeURIComponent(jobMatch[1]), user.organizationId);
+      if (!row)
+        return json(
+          res,
+          404,
+          { error: { code: "JOB_NOT_FOUND", message: "Job not found." } },
+          requestId,
+        );
+      return json(
+        res,
+        200,
+        {
+          job: {
+            id: row.id,
+            type: row.type,
+            status: row.status,
+            attempts: row.attempts,
+            maxAttempts: row.max_attempts,
+            result: safeJson(row.result_json),
+            error: row.last_error,
+            createdAt: row.created_at,
+            updatedAt: row.updated_at,
+            completedAt: row.completed_at,
+            deadLetteredAt: row.dead_lettered_at,
+          },
+        },
+        requestId,
+      );
+    }
     if (
       url.pathname === "/api/signature/session/switch" &&
       req.method === "POST"
@@ -4042,14 +4878,22 @@ function createSignaturePortal({
       }
       const ext = processed.format === "jpeg" ? "jpg" : processed.format,
         name = `${slug(body.kind || "image")}-${randomUUID()}.${ext}`,
-        stored = writeTenantMedia({
-          publicRoot,
-          organizationId: user.organizationId,
-          collection: "uploads",
-          name,
-          bytes: processed.bytes,
-          limitBytes: signature.mediaLimitBytes || 250 * 1024 * 1024,
-        });
+        stored = await (mediaStorage
+          ? mediaStorage.write({
+              organizationId: user.organizationId,
+              collection: "uploads",
+              name,
+              bytes: processed.bytes,
+              limitBytes: signature.mediaLimitBytes || 250 * 1024 * 1024,
+            })
+          : writeTenantMedia({
+              publicRoot,
+              organizationId: user.organizationId,
+              collection: "uploads",
+              name,
+              bytes: processed.bytes,
+              limitBytes: signature.mediaLimitBytes || 250 * 1024 * 1024,
+            }));
       recordAudit(user, "asset.uploaded", "asset", name, {
         kind: limited(body.kind || "image", 40),
         sourceBytes: bytes.length,
@@ -4111,14 +4955,22 @@ function createSignaturePortal({
       );
       gif.finish();
       const name = `banner-${randomUUID()}.gif`,
-        stored = writeTenantMedia({
-          publicRoot,
-          organizationId: user.organizationId,
-          collection: "generated-banners",
-          name,
-          bytes: Buffer.from(gif.bytes()),
-          limitBytes: signature.mediaLimitBytes || 250 * 1024 * 1024,
-        });
+        stored = await (mediaStorage
+          ? mediaStorage.write({
+              organizationId: user.organizationId,
+              collection: "generated-banners",
+              name,
+              bytes: Buffer.from(gif.bytes()),
+              limitBytes: signature.mediaLimitBytes || 250 * 1024 * 1024,
+            })
+          : writeTenantMedia({
+              publicRoot,
+              organizationId: user.organizationId,
+              collection: "generated-banners",
+              name,
+              bytes: Buffer.from(gif.bytes()),
+              limitBytes: signature.mediaLimitBytes || 250 * 1024 * 1024,
+            }));
       recordAudit(user, "asset.generated", "asset", name, {
         kind: "animated-banner",
         frames: frames.length,
@@ -4961,22 +5813,7 @@ function createSignaturePortal({
       const body = await readJsonBody(req),
         overwrite = Boolean(body.overwrite ?? body.overwriteExisting),
         sendEmail = Boolean(body.sendEmail),
-        rows = db
-          .prepare(
-            `${memberSelect} WHERE m.organization_id=? AND m.status='active'`,
-          )
-          .all(user.organizationId),
-        defaults = new Map(
-          db
-            .prepare(
-              "SELECT * FROM department_signature_defaults WHERE organization_id=?",
-            )
-            .all(user.organizationId)
-            .map((row) => [row.department.toLowerCase(), row]),
-        ),
-        updated = [],
-        skipped = [],
-        errors = [];
+        templateId = String(body.templateId || "");
       if (sendEmail && !mailAvailable(user.organizationId))
         return json(
           res,
@@ -4989,90 +5826,30 @@ function createSignaturePortal({
           },
           requestId,
         );
-      rolloutTemplatePatch(user.organizationId, String(body.templateId || ""));
-      let emailed = 0;
-      for (const row of rows) {
-        const sig = normalizeSignature(row);
-        if (!overwrite && sig.updatedAt) {
-          skipped.push(row.id);
-          continue;
-        }
-        const dept = defaults.get(
-            String(sig.fields.department || "").toLowerCase(),
-          ),
-          selectedTemplate = String(
-            dept?.template_id || body.templateId || sig.templateId,
-          );
-        try {
-          const patch = rolloutTemplatePatch(
-              user.organizationId,
-              selectedTemplate,
-            ),
-            next = {
-              ...sig,
-              ...patch,
-              fields: sig.fields,
-              colors: { ...sig.colors, ...(patch.colors || {}) },
-              workflowStatus: "approved",
-              approvedAt: new Date().toISOString(),
-              approvedBy: user.id,
-            };
-          if (dept?.accent_color) next.colors.accent = dept.accent_color;
-          saveSignatureRow(user.organizationId, row.id, next);
-          updated.push(row.id);
-          if (sendEmail) {
-            try {
-              const target = userDto(memberById(user.organizationId, row.id)),
-                rendered = await renderSignature(req, target, target.signature);
-              await sendGraphMail(
-                user.organizationId,
-                target.email,
-                "Your email signature is ready",
-                installEmailBody(rendered.html),
-              );
-              emailed += 1;
-            } catch (error) {
-              errors.push({
-                userId: row.id,
-                email: row.email,
-                code: error.code || "EMAIL_DELIVERY_FAILED",
-                message: "Signature updated, but its email could not be sent.",
-              });
-            }
-          }
-        } catch (error) {
-          errors.push({
-            userId: row.id,
-            email: row.email,
-            code: error.code || "ROLLOUT_FAILED",
-            message: limited(error.message || "Rollout failed.", 240),
-          });
-        }
-      }
-      recordAudit(
-        user,
-        "rollout.completed",
-        "organization",
-        user.organizationId,
+      rolloutTemplatePatch(user.organizationId, templateId);
+      const job = enqueueJob(
+        "signature.rollout",
         {
-          updated: updated.length,
-          skipped: skipped.length,
-          emailed,
-          errors: errors.length,
+          organizationId: user.organizationId,
+          actorUserId: user.id,
+          templateId,
           overwrite,
           sendEmail,
+          origin: publicBase(req, user),
+        },
+        {
+          organizationId: user.organizationId,
+          dedupeKey: `signature.rollout:${user.organizationId}`,
         },
       );
+      recordAudit(user, "rollout.queued", "job", job.id, {
+        overwrite,
+        sendEmail,
+      });
       return json(
         res,
-        200,
-        {
-          updated: updated.length,
-          skipped: skipped.length,
-          emailed,
-          errors,
-          total: rows.length,
-        },
+        202,
+        { job: { id: job.id, status: job.status } },
         requestId,
       );
     }
@@ -5107,104 +5884,36 @@ function createSignaturePortal({
       req.method === "POST"
     ) {
       requireAdmin(user);
+      const active = db
+        .prepare(
+          "SELECT id,status FROM background_jobs WHERE organization_id=? AND type='directory.sync' AND status IN ('queued','running') ORDER BY created_at LIMIT 1",
+        )
+        .get(user.organizationId);
+      if (active)
+        return json(res, 202, { job: active, existing: true }, requestId);
       const runId = randomUUID();
       db.prepare(
-        `INSERT INTO directory_sync_runs(id,organization_id,status,started_by) VALUES (?,?,'running',?)`,
+        `INSERT INTO directory_sync_runs(id,organization_id,status,started_by) VALUES (?,?,'queued',?)`,
       ).run(runId, user.organizationId, user.id);
-      let transactionStarted = false;
-      try {
-        const { token } = await graphAppToken(user.organizationId),
-          people = (await graphDirectoryUsers(token)).filter(
-            (item) => item.assignedLicenses?.length,
-          );
-        db.exec("BEGIN IMMEDIATE");
-        transactionStarted = true;
-        const subscription = db
-            .prepare(
-              "SELECT seats FROM organization_subscriptions WHERE organization_id=?",
-            )
-            .get(user.organizationId),
-          activeMembers = db
-            .prepare(
-              "SELECT COUNT(*) AS count FROM organization_memberships WHERE organization_id=? AND status='active'",
-            )
-            .get(user.organizationId).count,
-          availableSeats = Math.max(
-            0,
-            (subscription?.seats || 1) - activeMembers,
-          );
-        let added = 0;
-        for (const person of people) {
-          const email = String(
-            person.mail || person.userPrincipalName || "",
-          ).toLowerCase();
-          if (!validEmail(email)) continue;
-          let account = db
-              .prepare(
-                "SELECT * FROM signature_users WHERE lower(email)=lower(?)",
-              )
-              .get(email),
-            id = account?.id || randomUUID(),
-            personSignature = normalizeSignature(
-              { display_name: person.displayName, email, signature_json: "{}" },
-              {
-                fields: {
-                  name: person.displayName,
-                  email,
-                  jobTitle: person.jobTitle || "",
-                  department: person.department || "",
-                  phone: person.businessPhones?.[0] || "",
-                  mobile: person.mobilePhone || "",
-                  company: workspaceRow(user).name,
-                },
-              },
-            );
-          const existingMembership = memberById(user.organizationId, id);
-          if (!existingMembership && added >= availableSeats) continue;
-          if (!account) {
-            db.prepare(
-              `INSERT INTO signature_users(id,email,password_hash,display_name,role,status,signature_json,email_verified_at) VALUES (?,?,?,?,'editor','active',?,strftime('%Y-%m-%dT%H:%M:%fZ','now'))`,
-            ).run(
-              id,
-              email,
-              hashPassword(randomBytes(32).toString("hex")),
-              person.displayName || email,
-              JSON.stringify(personSignature),
-            );
-          }
-          if (!existingMembership) {
-            db.prepare(
-              `INSERT INTO organization_memberships(organization_id,user_id,role,status,signature_json) VALUES (?,?,'editor','active',?)`,
-            ).run(user.organizationId, id, JSON.stringify(personSignature));
-            added += 1;
-          }
-        }
-        db.prepare(
-          `UPDATE directory_sync_runs SET status='completed',users_seen=?,users_added=?,completed_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE id=?`,
-        ).run(people.length, added, runId);
-        db.prepare(
-          `UPDATE organization_microsoft_connections SET last_sync_at=strftime('%Y-%m-%dT%H:%M:%fZ','now'),last_verified_at=strftime('%Y-%m-%dT%H:%M:%fZ','now'),last_error='',updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE organization_id=?`,
-        ).run(user.organizationId);
-        recordAudit(
-          user,
-          "directory.synced",
-          "organization",
-          user.organizationId,
-          { seen: people.length, added },
-        );
-        db.exec("COMMIT");
-        transactionStarted = false;
-        return json(res, 200, { seen: people.length, added }, requestId);
-      } catch (error) {
-        if (transactionStarted) db.exec("ROLLBACK");
-        db.prepare(
-          `UPDATE directory_sync_runs SET status='failed',error_message=?,completed_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE id=?`,
-        ).run(String(error.message).slice(0, 500), runId);
-        db.prepare(
-          `UPDATE organization_microsoft_connections SET last_error=?,updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE organization_id=?`,
-        ).run(String(error.message).slice(0, 500), user.organizationId);
-        throw error;
-      }
+      const job = enqueueJob(
+        "directory.sync",
+        {
+          organizationId: user.organizationId,
+          actorUserId: user.id,
+          runId,
+        },
+        {
+          organizationId: user.organizationId,
+          dedupeKey: `directory.sync:${user.organizationId}`,
+        },
+      );
+      recordAudit(user, "directory.sync_queued", "job", job.id, { runId });
+      return json(
+        res,
+        202,
+        { job: { id: job.id, status: job.status }, runId },
+        requestId,
+      );
     }
     if (
       url.pathname === "/api/signature/send-to-self" &&
@@ -5484,6 +6193,8 @@ function createSignaturePortal({
       requestId,
     );
   };
+  handle.jobHandlers = workflowHandlers;
+  return handle;
 }
 
 function seed(db, signature = {}) {

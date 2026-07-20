@@ -74,6 +74,27 @@
             <button id="showRegister" type="button">Create a workspace</button>
           </p>
         </form>
+        <form id="mfaForm" class="auth-form" hidden>
+          <div>
+            <span class="eyebrow">Application Owner security</span>
+            <h2>Enter your verification code</h2>
+          </div>
+          <p class="auth-copy-small">
+            Use your authenticator app or one unused recovery code.
+          </p>
+          <input name="challenge" type="hidden" />
+          <label
+            >Verification code<input
+              name="code"
+              inputmode="numeric"
+              autocomplete="one-time-code"
+              required
+          /></label>
+          <button class="button primary wide" type="submit">Verify</button>
+          <p class="auth-switch">
+            <button data-show-login type="button">Back to sign in</button>
+          </p>
+        </form>
         <form id="registerForm" class="auth-form" hidden>
           <div>
             <span class="eyebrow">New workspace</span>

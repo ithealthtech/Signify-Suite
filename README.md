@@ -6,6 +6,8 @@ campaign banners, approvals, bulk rollout, tenant-scoped Microsoft 365
 integration, Application Owner billing, analytics, audit history, uploads, QR
 codes, and vCards.
 
+![Signify Creator Application Owner fleet dashboard](docs/images/application-owner-fleet.png)
+
 ## Access Model
 
 Signify has three explicit access tiers:
@@ -21,6 +23,7 @@ are available only in the Application Owner control plane.
 
 ## Requirements
 
+- Docker Engine with Docker Compose for the recommended self-hosted deployment
 - Node.js 22.13 or newer; Node.js 24 LTS is recommended
 - npm 10 or newer
 - A persistent, writable filesystem
@@ -30,6 +33,44 @@ are available only in the Application Owner control plane.
 
 Signify uses Node's built-in HTTP server and SQLite. Express, PostgreSQL, and a
 separate web server are not required inside the application process.
+
+### PostgreSQL transition
+
+The release includes a production-typed PostgreSQL schema and migration runner,
+but the web request path remains on SQLite until its repositories are converted
+and tenant-isolation acceptance passes against PostgreSQL. `DATABASE_URL` is not
+a runtime database selector yet.
+
+Validate a dedicated, empty sandbox database with:
+
+```bash
+TEST_DATABASE_URL=postgresql://signify_test:password@host:5432/signify_test \
+DATABASE_SSL_MODE=verify-full npm run postgres:test
+```
+
+Apply migrations to an intentionally configured database with:
+
+```bash
+DATABASE_URL=postgresql://signify:password@host:5432/signify \
+DATABASE_SSL_MODE=verify-full npm run postgres:migrate
+```
+
+Production rejects `DATABASE_SSL_MODE=disable`. Supply `DATABASE_CA_CERT` for a
+private certificate authority. Migration history has SHA-256 checksums and is
+serialized with a PostgreSQL advisory lock.
+
+Import a fully migrated SQLite database only into an empty PostgreSQL target:
+
+```bash
+SOURCE_DATABASE_PATH=/persistent/signify/data/signify-creator.db \
+DATABASE_URL=postgresql://signify:password@host:5432/signify \
+DATABASE_SSL_MODE=verify-full npm run postgres:import
+```
+
+The importer opens SQLite read-only, verifies integrity and foreign keys, copies
+all application tables in dependency order inside one serializable transaction,
+and compares every target row count. Any populated target or mismatch aborts and
+rolls back the import.
 
 ## Quick Start
 
@@ -83,6 +124,49 @@ configured bootstrap account, and select **Application > First-time setup**.
 Database migrations run automatically when the server starts.
 
 ## Production Installation
+
+### Recommended: Docker Compose
+
+Docker Compose runs an immutable, non-root web container, a separately
+supervised worker, one-shot setup and migration tools, health checks, and named
+persistent volumes. The application port binds to loopback so TLS terminates at
+the host reverse proxy.
+
+```bash
+cp .env.container.example .env.container
+node -e "console.log(require('node:crypto').randomBytes(32).toString('base64'))"
+```
+
+Set the generated value as `SIGNIFY_CREDENTIAL_ENCRYPTION_KEY` and replace the
+public URL, company, and owner-email examples in `.env.container`. Then run:
+
+```bash
+docker compose build
+docker compose run --rm setup
+docker compose run --rm migrate
+docker compose up -d web worker
+docker compose exec web node scripts/doctor.cjs
+```
+
+The setup command prints the generated initial password. Sign in at the public
+HTTPS URL, enroll Application Owner MFA, and complete **First-time setup**.
+Configure nginx, Caddy, or the hosting proxy to forward HTTPS traffic to
+`127.0.0.1:4173` with the original host and `X-Forwarded-Proto` headers.
+
+Runtime data is stored only in the `signify-data`, `signify-uploads`, and
+`signify-generated-banners` volumes. The container root filesystem is read-only,
+Linux capabilities are dropped, and both services run as the unprivileged
+`node` user.
+
+This SQLite Compose topology supports one web container and one worker on a
+single host. Do not add web or worker replicas until PostgreSQL is the verified
+runtime authority.
+
+The web process holds a renewable transactional lease in SQLite. A second web
+replica using the same database fails fast instead of accepting traffic with
+ambiguous runtime ownership. One external worker remains supported. The
+PostgreSQL commands currently migrate, validate, and import data; they do not
+yet make `DATABASE_URL` the live application database.
 
 ### Install a release package
 
@@ -169,9 +253,21 @@ LOG_LEVEL=info
 
 DATABASE_PATH=/persistent/signify/data/signify-creator.db
 BACKUP_DIR=/persistent/signify/backups
+SIGNIFY_BACKUP_STORAGE=s3
+SIGNIFY_BACKUP_RETENTION_DAYS=30
+SIGNIFY_BACKUP_MINIMUM_COPIES=7
+SIGNIFY_BACKUP_INCLUDE_LOCAL_MEDIA=true
+BACKUP_S3_BUCKET=signify-production-recovery
+BACKUP_S3_REGION=us-east-1
+BACKUP_S3_PREFIX=signify-recovery
 
 SIGNATURE_SESSION_HOURS=12
 SIGNIFY_TENANT_MEDIA_LIMIT_MB=250
+SIGNIFY_TENANT_DELETION_GRACE_DAYS=7
+SIGNIFY_SERVICE_NAME=signify-creator
+SIGNIFY_ENVIRONMENT=production
+SIGNIFY_OBSERVABILITY_ENDPOINT=https://collector.example.com/events
+SIGNIFY_OBSERVABILITY_TOKEN=replace-with-collector-token
 SIGNATURE_ALLOW_DEFAULT_ADMIN=false
 SIGNIFY_BOOTSTRAP_EMAIL=owner@example.com
 SIGNIFY_BOOTSTRAP_PASSWORD=replace-with-a-long-random-password
@@ -186,9 +282,18 @@ SIGNIFY_CREDENTIAL_ENCRYPTION_KEY=replace-with-a-generated-32-byte-key
 
 Use absolute persistent paths for `DATABASE_PATH` and `BACKUP_DIR`.
 `SIGNIFY_TENANT_MEDIA_LIMIT_MB` limits the combined uploads and generated-banner
-storage for each tenant. Keep the encryption key outside database backups.
+storage for each tenant. `SIGNIFY_TENANT_DELETION_GRACE_DAYS` controls the
+reversible delay before a scheduled tenant purge and accepts 1 through 90 days.
+Keep the encryption key outside database backups.
 Losing the key makes credentials saved through the integration wizard
 unrecoverable.
+
+`SIGNIFY_OBSERVABILITY_ENDPOINT` is optional and must use HTTPS in production.
+When configured, the web and worker processes batch redacted diagnostic events
+to the collector. Store `SIGNIFY_OBSERVABILITY_TOKEN` in the hosting provider's
+secret store. Prometheus-compatible metrics remain available at
+`GET /api/metrics/prometheus`; see `docs/OBSERVABILITY.md` for alert and SLO
+operations.
 
 Set `TRUST_PROXY=true` only when the Node.js port is inaccessible directly and
 traffic arrives through a trusted reverse proxy.
@@ -198,20 +303,28 @@ traffic arrives through a trusted reverse proxy.
 Use this table when filling in `.env.local`. Microsoft 365 and Stripe can be
 configured later from **Application > First-time setup**.
 
-| Setting                             | What to enter                                            | Required                        |
-| ----------------------------------- | -------------------------------------------------------- | ------------------------------- |
-| `NODE_ENV`                          | `production`                                             | Yes                             |
-| `HOST` / `PORT`                     | Private listen address and hosting-provider port         | Yes                             |
-| `DATABASE_PATH`                     | Absolute path on persistent storage                      | Yes                             |
-| `SIGNIFY_PUBLIC_URL`                | Public HTTPS address, with no trailing slash             | Yes                             |
-| `SIGNIFY_ASSET_BASE_URL`            | Usually the same value as `SIGNIFY_PUBLIC_URL`           | Yes                             |
-| `SIGNIFY_MEDIA_BASE_URL`            | Usually the same value as `SIGNIFY_PUBLIC_URL`           | Yes                             |
-| `SIGNIFY_APPLICATION_OWNER_EMAIL`   | Email for the first Application Owner                    | Yes                             |
-| `SIGNIFY_CREDENTIAL_ENCRYPTION_KEY` | One generated 32-byte key; keep it permanently           | Yes for UI-managed integrations |
-| `SIGNATURE_ALLOW_DEFAULT_ADMIN`     | `false` after the first account exists                   | Yes                             |
-| `TRUST_PROXY`                       | `true` only behind a trusted, private reverse proxy      | No                              |
-| `MICROSOFT_*`                       | Leave blank and complete Microsoft setup in the owner UI | No                              |
-| `STRIPE_*`                          | Leave blank and complete Stripe setup in the owner UI    | No                              |
+| Setting                              | What to enter                                            | Required          |
+| ------------------------------------ | -------------------------------------------------------- | ----------------- |
+| `NODE_ENV`                           | `production`                                             | Yes               |
+| `HOST` / `PORT`                      | Private listen address and hosting-provider port         | Yes               |
+| `DATABASE_PATH`                      | Absolute path on persistent storage                      | Yes               |
+| `SIGNIFY_PUBLIC_URL`                 | Public HTTPS address, with no trailing slash             | Yes               |
+| `SIGNIFY_ASSET_BASE_URL`             | Usually the same value as `SIGNIFY_PUBLIC_URL`           | Yes               |
+| `SIGNIFY_MEDIA_BASE_URL`             | Usually the same value as `SIGNIFY_PUBLIC_URL`           | Yes               |
+| `SIGNIFY_APPLICATION_OWNER_EMAIL`    | Email for the first Application Owner                    | Yes               |
+| `SIGNIFY_CREDENTIAL_ENCRYPTION_KEY`  | One generated 32-byte key; keep it permanently           | Yes               |
+| `SIGNIFY_JOB_MODE`                   | `embedded`, or `external` with a supervised worker       | Yes               |
+| `SIGNIFY_UPDATE_GITHUB_TOKEN`        | Fine-grained read-only token for private release checks  | Private repo only |
+| `SIGNIFY_MEDIA_STORAGE`              | `local` for one host, or `s3` for private object storage | Yes               |
+| `SIGNIFY_TENANT_DELETION_GRACE_DAYS` | Reversible tenant-deletion delay from `1` through `90`   | Yes               |
+| `S3_BUCKET` / `S3_REGION`            | Tenant-media bucket and its region                       | With `s3`         |
+| `S3_ENDPOINT`                        | S3-compatible endpoint; blank for AWS                    | Provider-specific |
+| `S3_ACCESS_KEY_ID` / secret          | Static credentials, or workload identity                 | Provider-specific |
+| `SIGNATURE_ALLOW_DEFAULT_ADMIN`      | `false` after the first account exists                   | Yes               |
+| `SIGNIFY_REQUIRE_OWNER_MFA`          | `true` to require enrollment before control-plane use    | Yes               |
+| `TRUST_PROXY`                        | `true` only behind a trusted, private reverse proxy      | No                |
+| `MICROSOFT_*`                        | Leave blank and complete Microsoft setup in the owner UI | No                |
+| `STRIPE_*`                           | Leave blank and complete Stripe setup in the owner UI    | No                |
 
 Generate the encryption key once:
 
@@ -238,6 +351,40 @@ Run the process under a supervisor such as systemd, NSSM, Docker, PM2, or the
 hosting provider's Node.js process manager. The process must receive `SIGTERM`
 or `SIGINT` during shutdown so SQLite can close cleanly.
 
+The default `SIGNIFY_JOB_MODE=embedded` runs the durable queue in the web
+process and is appropriate for a single-process host. When the host can
+supervise a second Node.js process, set `SIGNIFY_JOB_MODE=external` for the web
+and run:
+
+```powershell
+npm run worker
+```
+
+Run exactly one worker for a SQLite deployment. The queue uses atomic claims,
+but additional worker processes do not improve SQLite write throughput.
+Microsoft directory synchronization and bulk signature rollout always execute
+through this queue. Their status and result survive browser refreshes and web
+process restarts; the tenant admin UI polls the authenticated, tenant-scoped job
+endpoint until work completes.
+
+For multi-instance or disposable application hosts, set
+`SIGNIFY_MEDIA_STORAGE=s3`. Signify stores private, server-side-encrypted
+objects under tenant-prefixed keys and serves stable signature URLs through the
+application. Configure bucket versioning and lifecycle retention at the storage
+provider. Do not make the bucket public. Static access keys are optional when
+the host supplies an IAM workload identity.
+
+Copy existing local media after configuring and testing the private bucket:
+
+```powershell
+npm run media:migrate
+```
+
+The command uploads every tenant object and verifies its SHA-256 content while
+leaving local files intact. After backups and application reads have been
+verified against S3, rerun with `-- --delete-source` to remove each local source
+only after its remote content passes verification.
+
 ### 5. Configure the reverse proxy
 
 Terminate TLS at nginx, Caddy, IIS, Apache, or the hosting platform. Proxy to
@@ -255,8 +402,8 @@ port directly to the internet.
 These locations must survive deployments and restarts:
 
 - the SQLite database plus its `-wal` and `-shm` files
-- `public/uploads/`
-- `public/generated-banners/`
+- `public/uploads/` and `public/generated-banners/` when using local media
+- the private object-storage bucket and version history when using S3 media
 - the configured backup directory
 
 Do not deploy Signify to an ephemeral serverless filesystem.
@@ -370,6 +517,11 @@ backup, restore, rollback, and capacity runbook is in `docs/OPERATIONS.md`. A
 CycloneDX production dependency inventory is generated with `npm run sbom` and
 included as `docs/sbom.cdx.json` in release artifacts.
 
+Security reporting, ASVS evidence, privacy/retention baselines, subprocessors,
+incident response, and service-term requirements are shipped in `SECURITY.md`
+and the corresponding `docs/` records. Operators must complete legal entity,
+jurisdiction, provider, and contact details before commercial launch.
+
 ## Backups and Recovery
 
 Application Owners can manage on-demand snapshots from **Application > Updates
@@ -384,8 +536,21 @@ Create a consistent SQLite backup:
 npm run backup
 ```
 
-Schedule this command at least daily and copy backups to separate durable
-storage. Test restoration regularly.
+With `SIGNIFY_BACKUP_STORAGE=s3`, this validates the snapshot, requires bucket
+versioning, uploads it with SHA-256 metadata and server-side encryption,
+replicates local tenant media into versioned keys, and applies local/off-site
+retention while preserving `SIGNIFY_BACKUP_MINIMUM_COPIES`. Static backup keys
+are optional when the host supplies an IAM workload identity.
+
+Run a non-destructive recovery drill against the newest configured recovery
+point:
+
+```powershell
+npm run recovery:drill
+```
+
+Schedule backup at least daily and the drill at least quarterly. For local-only
+mode, copy backups and media to a separate durable system.
 
 Reset an existing Tenant Admin account:
 
@@ -403,7 +568,18 @@ $env:SIGNIFY_OWNER_EMAIL="owner@example.com"
 npm run application:grant-owner
 ```
 
-Rotate the integration credential-encryption key while the app is stopped:
+Production defaults to `SIGNIFY_REQUIRE_OWNER_MFA=true`. On first sign-in, an
+Application Owner can access only MFA setup until enrollment is complete.
+Enrollment requires the current password and a TOTP authenticator; ten one-time
+recovery codes are shown once. Owner sessions are limited to four hours, and
+enabling or disabling MFA revokes the owner's other sessions.
+The same security panel lists active devices, last activity, expiry, MFA
+evidence, and supports audited individual or bulk session revocation.
+High-impact owner changes require step-up authentication when the current
+password and MFA proof are more than ten minutes old.
+
+Rotate the integration and MFA credential-encryption key while the app is
+stopped:
 
 ```powershell
 $env:SIGNIFY_OLD_CREDENTIAL_ENCRYPTION_KEY="current-key"
@@ -411,7 +587,8 @@ $env:SIGNIFY_CREDENTIAL_ENCRYPTION_KEY="new-key"
 npm run credentials:rotate
 ```
 
-Update the hosted environment to the new key before restarting.
+The rotation is atomic across provider and MFA secrets. Update the hosted
+environment to the new key before restarting.
 
 ## Updating
 

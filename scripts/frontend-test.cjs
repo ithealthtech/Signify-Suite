@@ -64,10 +64,51 @@ async function main() {
     api("/slow", { timeoutMs: 10 }),
     (error) => error.code === "REQUEST_TIMEOUT",
   );
-  const platformSource = fs.readFileSync(
-    path.join(__dirname, "..", "platform.js"),
-    "utf8",
+  const { busy, createToast, dateLabel } = context.window.Signify,
+    button = {
+      dataset: {},
+      disabled: false,
+      textContent: "Save",
+    };
+  busy(button, true, "Saving...");
+  assert.deepEqual(
+    { disabled: button.disabled, label: button.textContent },
+    { disabled: true, label: "Saving..." },
   );
+  busy(button, false);
+  assert.deepEqual(
+    { disabled: button.disabled, label: button.textContent },
+    { disabled: false, label: "Save" },
+  );
+  const classes = new Set(),
+    toastElement = {
+      classList: {
+        add: (value) => classes.add(value),
+        remove: (value) => classes.delete(value),
+      },
+      textContent: "",
+    },
+    showToast = createToast(toastElement, 10);
+  showToast("Saved");
+  assert.equal(toastElement.textContent, "Saved");
+  assert.equal(classes.has("show"), true);
+  await new Promise((resolve) => setTimeout(resolve, 20));
+  assert.equal(classes.has("show"), false);
+  assert.equal(dateLabel(""), "Never");
+  assert.equal(dateLabel("invalid"), "Unknown");
+  assert.equal(dateLabel("invalid", { year: "numeric" }), "invalid");
+  const platformSource = fs.readFileSync(
+      path.join(__dirname, "..", "platform.js"),
+      "utf8",
+    ),
+    signatureSource = fs.readFileSync(
+      path.join(__dirname, "..", "signature.js"),
+      "utf8",
+    ),
+    platformHtml = fs.readFileSync(
+      path.join(__dirname, "..", "platform.html"),
+      "utf8",
+    );
   for (const unsafeAccess of [
     "busy(event.currentTarget, false)",
     "event.currentTarget.reset()",
@@ -77,8 +118,41 @@ async function main() {
       !platformSource.includes(unsafeAccess),
       `Platform async handlers must capture currentTarget: ${unsafeAccess}`,
     );
+  assert.match(
+    signatureSource,
+    /state\.me\.applicationOwner &&\s+\(state\.me\.onboardingRequired \|\| !state\.me\.organizationId\)/,
+    "Existing Application Owner sessions must resume onboarding",
+  );
+  assert.equal(
+    (signatureSource.match(/state\.me\.onboardingRequired \|\|/g) || []).length,
+    3,
+    "Existing sessions, password logins, and MFA logins must route owners to the control plane",
+  );
+  assert.match(
+    platformSource,
+    /loadSetup\(\{ navigate: true \}\)/,
+    "MFA completion must resume first-time setup discovery",
+  );
+  for (const formId of ["microsoftSetupForm", "stripeConnectForm"])
+    assert.match(
+      platformHtml,
+      new RegExp(
+        `<form[^>]+id="${formId}"[^>]+autocomplete="off"[^>]+data-form-type="other"`,
+      ),
+      `${formId} must opt out of login autofill`,
+    );
+  assert.equal(
+    (platformHtml.match(/autocomplete="new-password"/g) || []).length,
+    2,
+    "Provider secrets must be marked as new credentials",
+  );
+  assert.equal(
+    (platformHtml.match(/data-1p-ignore/g) || []).length,
+    4,
+    "Provider identifiers and secrets must opt out of password-manager autofill",
+  );
   console.log(
-    "Frontend tests passed: GET deduplication, write isolation, structured errors, and timeouts",
+    "Frontend tests passed: GET deduplication, write isolation, structured errors, timeouts, and provider credential autofill isolation",
   );
 }
 

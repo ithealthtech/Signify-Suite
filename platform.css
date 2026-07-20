@@ -76,12 +76,29 @@
   background: #9ca3af;
 }
 .status-dot.active::before,
-.status-dot.connected::before {
+.status-dot.connected::before,
+.status-dot.running::before {
   background: #20815a;
 }
 .status-dot.suspended::before,
-.status-dot.error::before {
+.status-dot.error::before,
+.status-dot.failed::before,
+.status-dot.dead_lettered::before {
   background: #c2413b;
+}
+#ownerMfaQr {
+  display: block;
+  width: min(240px, 100%);
+  aspect-ratio: 1;
+  margin: 0 auto 16px;
+}
+#ownerMfaCodes {
+  width: 100%;
+  resize: vertical;
+  font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+}
+.status-dot.queued::before {
+  background: #c58a10;
 }
 .pagination {
   justify-content: flex-end;
@@ -135,6 +152,25 @@
 .control-form .button {
   justify-self: start;
 }
+.feature-toggle-list {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+}
+.feature-toggle-list label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 42px;
+  padding: 10px 12px;
+  border: 1px solid #d7dce5;
+  border-radius: 6px;
+  background: #fff;
+}
+.feature-toggle-list input {
+  min-height: auto;
+  margin: 0;
+}
 .form-grid > label {
   flex: 1;
 }
@@ -176,6 +212,9 @@ hr {
     flex-direction: column;
   }
   .detail-summary {
+    grid-template-columns: 1fr;
+  }
+  .feature-toggle-list {
     grid-template-columns: 1fr;
   }
   .platform-shell {
@@ -288,6 +327,12 @@ hr {
 .operations-note {
   margin: 12px 0 0;
   font-size: 13px;
+}
+
+.job-error {
+  display: block;
+  max-width: 34rem;
+  overflow-wrap: anywhere;
 }
 .setup-progress span {
   margin-top: 4px;

@@ -1,0 +1,92 @@
+name: signify-creator
+
+x-signify-service: &signify-service
+  image: ${SIGNIFY_IMAGE:-ghcr.io/ithealthtech/signify-suite}:${SIGNIFY_VERSION:-0.4.0}
+  build:
+    context: .
+    args:
+      VERSION: ${SIGNIFY_VERSION:-0.4.0}
+      REVISION: ${SIGNIFY_REVISION:-local}
+  env_file:
+    - .env.container
+  environment: &signify-environment
+    NODE_ENV: production
+    HOST: 0.0.0.0
+    PORT: 4173
+    TRUST_PROXY: "true"
+    DATABASE_PATH: /var/lib/signify/data/signify-creator.db
+    BACKUP_DIR: /var/lib/signify/backups
+    SIGNATURE_ALLOW_DEFAULT_ADMIN: "false"
+  read_only: true
+  tmpfs:
+    - /tmp:rw,noexec,nosuid,size=128m
+  volumes: &signify-volumes
+    - signify-data:/var/lib/signify
+    - signify-uploads:/app/public/uploads
+    - signify-generated-banners:/app/public/generated-banners
+  security_opt:
+    - no-new-privileges:true
+  cap_drop:
+    - ALL
+  init: true
+  restart: unless-stopped
+  stop_grace_period: 30s
+
+services:
+  setup:
+    <<: *signify-service
+    profiles: [tools]
+    command:
+      ["node", "scripts/setup.cjs", "--non-interactive", "--no-write-env"]
+    environment:
+      <<: *signify-environment
+      SIGNATURE_ALLOW_DEFAULT_ADMIN: "true"
+    restart: "no"
+
+  migrate:
+    <<: *signify-service
+    profiles: [tools]
+    command: ["node", "scripts/migrate.cjs"]
+    restart: "no"
+
+  web:
+    <<: *signify-service
+    environment:
+      <<: *signify-environment
+      SIGNIFY_JOB_MODE: external
+    ports:
+      - "127.0.0.1:${SIGNIFY_PORT:-4173}:4173"
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "node",
+          "-e",
+          "fetch('http://127.0.0.1:4173/api/ready').then(r=>{if(!r.ok)throw new Error(String(r.status))}).catch(()=>process.exit(1))",
+        ]
+      interval: 30s
+      timeout: 5s
+      start_period: 20s
+      retries: 3
+
+  worker:
+    <<: *signify-service
+    command: ["node", "worker.cjs"]
+    environment:
+      <<: *signify-environment
+      SIGNIFY_JOB_MODE: external
+      SIGNIFY_WORKER_HEALTH_PATH: /tmp/signify-worker-health.json
+    healthcheck:
+      test: ["CMD", "node", "scripts/worker-health.cjs"]
+      interval: 20s
+      timeout: 5s
+      start_period: 20s
+      retries: 3
+    depends_on:
+      web:
+        condition: service_healthy
+
+volumes:
+  signify-data:
+  signify-uploads:
+  signify-generated-banners:

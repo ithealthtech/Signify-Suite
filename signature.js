@@ -1,9 +1,18 @@
 "use strict";
-const { $, $$, api, escapeHtml, initials } = window.Signify;
+const {
+  $,
+  $$,
+  api,
+  busy: sharedBusy,
+  createToast,
+  escapeHtml,
+  initials,
+} = window.Signify;
 const els = {
   authView: $("#authView"),
   appView: $("#appView"),
   loginForm: $("#loginForm"),
+  mfaForm: $("#mfaForm"),
   registerForm: $("#registerForm"),
   inviteForm: $("#inviteForm"),
   authStatus: $("#authStatus"),
@@ -37,12 +46,7 @@ let state = {
   previewController: null,
 };
 
-function toast(message) {
-  els.toast.textContent = message;
-  els.toast.classList.add("show");
-  clearTimeout(toast.timer);
-  toast.timer = setTimeout(() => els.toast.classList.remove("show"), 2600);
-}
+const toast = createToast(els.toast, 2600);
 function activeUser() {
   return (
     state.users.find((user) => user.id === state.selectedUserId) ||
@@ -51,15 +55,7 @@ function activeUser() {
   );
 }
 function setBusy(button, busy, label = "Working…") {
-  if (!button) return;
-  if (busy) {
-    button.dataset.label = button.textContent;
-    button.textContent = label;
-    button.disabled = true;
-  } else {
-    button.textContent = button.dataset.label || button.textContent;
-    button.disabled = false;
-  }
+  sharedBusy(button, busy, label);
 }
 function markDirty() {
   state.dirty = true;
@@ -75,9 +71,17 @@ function markSaved() {
 
 async function boot() {
   const query = new URLSearchParams(location.search),
+    fragment = new URLSearchParams(location.hash.slice(1)),
     verification = query.get("verify"),
     reset = query.get("reset"),
-    invitation = query.get("invite");
+    invitation = query.get("invite"),
+    mfaChallenge = fragment.get("mfa");
+  if (mfaChallenge) {
+    history.replaceState(null, "", `${location.pathname}${location.search}`);
+    els.mfaForm.elements.challenge.value = mfaChallenge;
+    showAuthForm(els.mfaForm);
+    els.mfaForm.elements.code.focus();
+  }
   if (verification) {
     try {
       await api("/api/signature/email/verify", {
@@ -117,6 +121,13 @@ async function boot() {
   if (session.user) {
     state.me = session.user;
     state.workspaces = session.workspaces || [];
+    if (
+      state.me.applicationOwner &&
+      (state.me.onboardingRequired || !state.me.organizationId)
+    ) {
+      location.href = "/platform.html";
+      return;
+    }
     await loadApp();
   } else {
     els.authView.hidden = false;
@@ -348,8 +359,44 @@ els.loginForm.addEventListener("submit", async (event) => {
         Object.fromEntries(new FormData(event.currentTarget)),
       ),
     });
+    if (result.mfaRequired) {
+      els.mfaForm.elements.challenge.value = result.challenge;
+      showAuthForm(els.mfaForm);
+      els.mfaForm.elements.code.focus();
+      return;
+    }
     state.me = result.user;
-    if (state.me.applicationOwner && !state.me.organizationId) {
+    if (
+      state.me.applicationOwner &&
+      (state.me.onboardingRequired || !state.me.organizationId)
+    ) {
+      location.href = "/platform.html";
+      return;
+    }
+    await loadApp();
+  } catch (error) {
+    els.authStatus.textContent = error.message;
+  } finally {
+    setBusy(button, false);
+  }
+});
+els.mfaForm.addEventListener("submit", async (event) => {
+  event.preventDefault();
+  const button = event.currentTarget.querySelector("[type=submit]");
+  setBusy(button, true, "Verifying...");
+  els.authStatus.textContent = "";
+  try {
+    const result = await api("/api/signature/login/mfa", {
+      method: "POST",
+      body: JSON.stringify(
+        Object.fromEntries(new FormData(event.currentTarget)),
+      ),
+    });
+    state.me = result.user;
+    if (
+      state.me.applicationOwner &&
+      (state.me.onboardingRequired || !state.me.organizationId)
+    ) {
       location.href = "/platform.html";
       return;
     }
@@ -390,6 +437,7 @@ els.registerForm.addEventListener("submit", async (event) => {
 function showAuthForm(form) {
   [
     els.loginForm,
+    els.mfaForm,
     els.registerForm,
     $("#forgotForm"),
     $("#resetForm"),

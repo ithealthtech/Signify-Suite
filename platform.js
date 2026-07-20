@@ -1,18 +1,36 @@
 "use strict";
-const { $, $$, api, escapeHtml } = window.Signify;
+const {
+  $,
+  $$,
+  api: rawApi,
+  busy,
+  createToast,
+  dateLabel,
+  escapeHtml,
+} = window.Signify;
 const state = {
   page: 1,
   pagination: null,
   organizations: [],
   detail: null,
   stripePrices: [],
+  mfa: null,
+  sessions: [],
+  flags: {},
+  fleet: null,
 };
+let pendingReauthentication = null;
 
-function dateLabel(value) {
-  if (!value) return "Never";
-  const date = new Date(value);
-  return Number.isNaN(date.valueOf()) ? "Unknown" : date.toLocaleString();
+async function api(path, options = {}) {
+  try {
+    return await rawApi(path, options);
+  } catch (error) {
+    if (error.code !== "PRIVILEGED_REAUTH_REQUIRED") throw error;
+    await requestOwnerReauthentication();
+    return rawApi(path, options);
+  }
 }
+
 function fileSize(value) {
   const bytes = Number(value || 0);
   if (bytes < 1024) return `${bytes} B`;
@@ -20,21 +38,48 @@ function fileSize(value) {
     exponent = Math.min(Math.floor(Math.log(bytes) / Math.log(1024)), 3);
   return `${(bytes / 1024 ** exponent).toFixed(exponent > 1 ? 1 : 0)} ${units[exponent - 1]}`;
 }
-function toast(message) {
-  const element = $("#toast");
-  element.textContent = message;
-  element.classList.add("show");
-  clearTimeout(toast.timer);
-  toast.timer = setTimeout(() => element.classList.remove("show"), 3000);
+const toast = createToast($("#toast"));
+function requestOwnerReauthentication() {
+  if (pendingReauthentication) return pendingReauthentication.promise;
+  const form = $("#ownerReauthForm"),
+    dialog = $("#ownerReauthDialog"),
+    codeRequired = Boolean(state.mfa?.enabled);
+  form.reset();
+  $("#ownerReauthCodeField").hidden = !codeRequired;
+  form.elements.code.required = codeRequired;
+  dialog.showModal();
+  pendingReauthentication = {};
+  pendingReauthentication.promise = new Promise((resolve, reject) => {
+    pendingReauthentication.resolve = resolve;
+    pendingReauthentication.reject = reject;
+  });
+  form.elements.password.focus();
+  return pendingReauthentication.promise;
 }
-function busy(button, active, label = "Working...") {
-  if (active) {
-    button.dataset.label = button.textContent;
-    button.textContent = label;
-    button.disabled = true;
-  } else {
-    button.textContent = button.dataset.label || button.textContent;
-    button.disabled = false;
+function cancelOwnerReauthentication() {
+  if (!pendingReauthentication) return;
+  pendingReauthentication.reject(new Error("Sensitive operation canceled."));
+  pendingReauthentication = null;
+  $("#ownerReauthDialog").close();
+}
+async function submitOwnerReauthentication(event) {
+  event.preventDefault();
+  const form = event.currentTarget,
+    button = event.submitter;
+  busy(button, true, "Confirming...");
+  try {
+    await rawApi("/api/platform/reauth", {
+      method: "POST",
+      body: JSON.stringify(Object.fromEntries(new FormData(form))),
+    });
+    const pending = pendingReauthentication;
+    pendingReauthentication = null;
+    $("#ownerReauthDialog").close();
+    pending?.resolve();
+  } catch (error) {
+    toast(error.message);
+  } finally {
+    busy(button, false);
   }
 }
 function showSection(name) {
@@ -44,9 +89,11 @@ function showSection(name) {
   $$("[data-admin-section]").forEach((section) =>
     section.classList.toggle("active", section.dataset.adminSection === name),
   );
+  window.scrollTo({ top: 0, behavior: "instant" });
 }
 async function loadSession() {
   const result = await api("/api/platform/session");
+  state.mfa = result.mfa;
   $("#statOrganizations").textContent = result.stats.organizations;
   $("#statActive").textContent = result.stats.active;
   $("#statSuspended").textContent = result.stats.suspended;
@@ -55,6 +102,136 @@ async function loadSession() {
     ? "Stripe is configured for Application Owner checkout."
     : "Stripe is not configured in this environment.";
   $("#createCheckout").disabled = !result.stripe.configured;
+  $("#ownerMfaStatus").textContent = result.mfa.enabled
+    ? `Enabled. ${result.mfa.recoveryCodesRemaining} recovery codes remain.`
+    : "Not enabled for this Application Owner account.";
+  $("#setupOwnerMfa").textContent = result.mfa.enabled
+    ? "Replace authenticator"
+    : "Set up MFA";
+  $("#disableOwnerMfa").hidden = !result.mfa.enabled;
+  const enrollmentRequired = result.mfa.required && !result.mfa.enabled;
+  $$("[data-section]").forEach((button) => {
+    button.disabled = enrollmentRequired && button.dataset.section !== "owners";
+  });
+  $("#ownerForm").hidden = enrollmentRequired;
+  $("#ownerManagementTable").hidden = enrollmentRequired;
+  $("#ownerSessionsPanel").hidden = enrollmentRequired;
+}
+function resetMfaDialog(mode = "enroll") {
+  const enroll = mode === "enroll";
+  $("#ownerMfaTitle").textContent = enroll ? "Set up MFA" : "Disable MFA";
+  $("#ownerMfaStartForm").hidden = !enroll;
+  $("#ownerMfaConfirmForm").hidden = true;
+  $("#ownerMfaRecovery").hidden = true;
+  $("#ownerMfaDisableForm").hidden = enroll;
+  $("#ownerMfaCurrentCodeField").hidden = !state.mfa?.enabled;
+  $("#ownerMfaStartForm").elements.currentCode.required = Boolean(
+    state.mfa?.enabled,
+  );
+  $("#ownerMfaStartForm").reset();
+  $("#ownerMfaConfirmForm").reset();
+  $("#ownerMfaDisableForm").reset();
+}
+function deviceLabel(userAgent) {
+  const value = String(userAgent || "");
+  const browser = value.includes("Edg/")
+      ? "Edge"
+      : value.includes("Chrome/")
+        ? "Chrome"
+        : value.includes("Firefox/")
+          ? "Firefox"
+          : value.includes("Safari/")
+            ? "Safari"
+            : "Browser",
+    system = value.includes("Windows")
+      ? "Windows"
+      : value.includes("Macintosh")
+        ? "macOS"
+        : value.includes("Android")
+          ? "Android"
+          : /iPhone|iPad/.test(value)
+            ? "iOS"
+            : "Unknown device";
+  return `${browser} on ${system}`;
+}
+async function loadOwnerSessions() {
+  const result = await api("/api/platform/sessions");
+  state.sessions = result.sessions;
+  $("#ownerSessionRows").innerHTML = result.sessions
+    .map(
+      (session) =>
+        `<tr><td><strong>${escapeHtml(deviceLabel(session.userAgent))}</strong><small>${escapeHtml(session.ipAddress || "Unknown address")}${session.current ? " · Current" : ""}</small></td><td>${escapeHtml(dateLabel(session.lastSeenAt))}</td><td>${escapeHtml(dateLabel(session.expiresAt))}</td><td>${session.mfaVerifiedAt ? '<span class="status-dot active">MFA</span>' : '<span class="status-dot pending">Password</span>'}</td><td><button class="button" type="button" data-session-id="${escapeHtml(session.id)}" ${session.current ? "disabled" : ""}>Revoke</button></td></tr>`,
+    )
+    .join("");
+  $("#revokeOtherSessions").disabled = !result.sessions.some(
+    (session) => !session.current,
+  );
+}
+async function startMfaEnrollment(event) {
+  event.preventDefault();
+  const form = event.currentTarget,
+    button = event.submitter;
+  busy(button, true, "Creating key...");
+  try {
+    const result = await api("/api/platform/mfa/enroll", {
+      method: "POST",
+      body: JSON.stringify(Object.fromEntries(new FormData(form))),
+    });
+    $("#ownerMfaQr").src = result.qrCode;
+    $("#ownerMfaSecret").value = result.secret;
+    form.hidden = true;
+    $("#ownerMfaConfirmForm").hidden = false;
+    $("#ownerMfaConfirmForm").elements.code.focus();
+  } catch (error) {
+    toast(error.message);
+  } finally {
+    busy(button, false);
+  }
+}
+async function confirmMfaEnrollment(event) {
+  event.preventDefault();
+  const form = event.currentTarget,
+    button = event.submitter;
+  busy(button, true, "Verifying...");
+  try {
+    const result = await api("/api/platform/mfa/confirm", {
+      method: "POST",
+      body: JSON.stringify(Object.fromEntries(new FormData(form))),
+    });
+    $("#ownerMfaCodes").value = result.recoveryCodes.join("\n");
+    form.hidden = true;
+    $("#ownerMfaRecovery").hidden = false;
+    await loadSession();
+    await Promise.all([
+      loadOwnerSessions(),
+      loadTenants(),
+      loadSetup({ navigate: true }),
+    ]);
+    toast("Multi-factor authentication enabled");
+  } catch (error) {
+    toast(error.message);
+  } finally {
+    busy(button, false);
+  }
+}
+async function disableMfa(event) {
+  event.preventDefault();
+  const form = event.currentTarget,
+    button = event.submitter;
+  busy(button, true, "Disabling...");
+  try {
+    await api("/api/platform/mfa", {
+      method: "DELETE",
+      body: JSON.stringify(Object.fromEntries(new FormData(form))),
+    });
+    $("#ownerMfaDialog").close();
+    await loadSession();
+    toast("Multi-factor authentication disabled");
+  } catch (error) {
+    toast(error.message);
+  } finally {
+    busy(button, false);
+  }
 }
 function stripePriceLabel(price) {
   const amount = Number.isInteger(price.unitAmount)
@@ -332,6 +509,23 @@ async function testStripeCheckout(event) {
     busy(button, false);
   }
 }
+async function reconcileStripe() {
+  const button = $("#reconcileStripe"),
+    reason = prompt("Reason for reconciling Stripe subscriptions:");
+  if (!reason) return;
+  busy(button, true, "Queueing...");
+  try {
+    await api("/api/platform/billing/reconcile", {
+      method: "POST",
+      body: JSON.stringify({ reason }),
+    });
+    toast("Stripe reconciliation queued");
+  } catch (error) {
+    toast(error.message);
+  } finally {
+    busy(button, false);
+  }
+}
 async function loadTenants() {
   const params = new URLSearchParams({
     page: String(state.page),
@@ -377,11 +571,170 @@ async function loadAudit() {
         .join("")
     : '<tr><td colspan="5"><div class="empty">No application activity recorded.</div></td></tr>';
 }
+async function loadJobs() {
+  const status = $("#jobStatus").value,
+    result = await api(
+      `/api/platform/jobs?status=${encodeURIComponent(status)}&limit=50`,
+    );
+  $("#jobRows").innerHTML = result.jobs.length
+    ? result.jobs
+        .map(
+          (job) =>
+            `<tr><td><strong>${escapeHtml(job.type)}</strong>${job.lastError ? `<small class="job-error">${escapeHtml(job.lastError)}</small>` : ""}</td><td>${escapeHtml(job.organizationName)}</td><td><span class="status-dot ${escapeHtml(job.status)}">${escapeHtml(job.status.replaceAll("_", " "))}</span></td><td>${job.attempts} / ${job.maxAttempts}</td><td>${escapeHtml(dateLabel(job.updatedAt))}</td><td><button class="button" type="button" data-retry-job="${escapeHtml(job.id)}" data-job-type="${escapeHtml(job.type)}" ${job.status !== "dead_lettered" ? "disabled" : ""}>Retry</button></td></tr>`,
+        )
+        .join("")
+    : '<tr><td colspan="6"><div class="empty">No jobs match this view.</div></td></tr>';
+}
+async function loadFleet() {
+  const result = await api("/api/platform/control/overview");
+  state.fleet = result;
+  const stats = [
+    ["Release", result.fleet.version],
+    ["Database", result.fleet.database],
+    ["Schema migrations", result.fleet.migrations],
+    ["Media storage", result.fleet.mediaStorage],
+    ["Queued jobs", result.usage.queued_jobs],
+    ["Dead letters", result.usage.dead_lettered_jobs],
+  ];
+  $("#fleetStats").innerHTML = stats
+    .map(
+      ([label, value]) =>
+        `<div class="stat-card"><span>${escapeHtml(label)}</span><strong>${escapeHtml(String(value ?? "-"))}</strong></div>`,
+    )
+    .join("");
+  $("#fleetRows").innerHTML = result.tenants.length
+    ? result.tenants
+        .map(
+          (tenant) =>
+            `<tr><td><strong>${escapeHtml(tenant.name)}</strong></td><td><span class="status-dot ${escapeHtml(tenant.status)}">${escapeHtml(tenant.status)}</span></td><td>${tenant.users}</td><td>${tenant.templates}</td><td>${tenant.campaigns}</td><td>${tenant.tracked_clicks}</td></tr>`,
+        )
+        .join("")
+    : '<tr><td colspan="6"><div class="empty">No tenants are configured.</div></td></tr>';
+  $("#activeSupportAccess").hidden = !result.supportAccess;
+  if (result.supportAccess)
+    $("#activeSupportSummary").textContent =
+      `${result.supportAccess.organizationName} until ${dateLabel(result.supportAccess.expiresAt)}.`;
+}
+
+async function saveTenantFeatures(event) {
+  event.preventDefault();
+  const form = event.currentTarget,
+    button = event.submitter,
+    reason = form.elements.reason.value,
+    organizationId = encodeURIComponent(state.detail.organization.id),
+    keys = ["campaigns", "directory_sync", "tracking"];
+  busy(button, true, "Saving...");
+  try {
+    const changed = keys.filter(
+      (key) =>
+        form.elements[key].checked !== Boolean(state.flags[key]?.enabled),
+    );
+    if (!changed.length) throw new Error("No feature access changes to save.");
+    for (const key of changed) {
+      const result = await api(
+        `/api/platform/organizations/${organizationId}/feature-flags/${key}`,
+        {
+          method: "PUT",
+          body: JSON.stringify({ enabled: form.elements[key].checked, reason }),
+        },
+      );
+      state.flags = result.flags;
+    }
+    form.elements.reason.value = "";
+    toast("Feature access updated");
+  } catch (error) {
+    toast(error.message);
+  } finally {
+    busy(button, false);
+  }
+}
+
+async function startSupportAccess(event) {
+  event.preventDefault();
+  const form = event.currentTarget,
+    button = event.submitter,
+    body = Object.fromEntries(new FormData(form)),
+    organizationId = encodeURIComponent(state.detail.organization.id);
+  busy(button, true, "Opening...");
+  try {
+    const result = await api(
+      `/api/platform/organizations/${organizationId}/support-access`,
+      {
+        method: "POST",
+        body: JSON.stringify(body),
+      },
+    );
+    form.reset();
+    $("#tenantDialog").close();
+    await loadFleet();
+    window.open(result.workspaceUrl, "_blank", "noopener");
+    toast("Audited support access started");
+  } catch (error) {
+    toast(error.message);
+  } finally {
+    busy(button, false);
+  }
+}
+
+async function endSupportAccess(event) {
+  event.preventDefault();
+  const form = event.currentTarget,
+    button = event.submitter;
+  busy(button, true, "Ending...");
+  try {
+    await api("/api/platform/support-access", {
+      method: "DELETE",
+      body: JSON.stringify({ reason: form.elements.reason.value }),
+    });
+    form.reset();
+    $("#supportAccessEndDialog").close();
+    await loadFleet();
+    toast("Support access ended");
+  } catch (error) {
+    toast(error.message);
+  } finally {
+    busy(button, false);
+  }
+}
+function openJobRetry(button) {
+  const form = $("#retryJobForm");
+  form.reset();
+  form.elements.jobId.value = button.dataset.retryJob;
+  $("#retryJobMessage").textContent =
+    `Retry ${button.dataset.jobType} after correcting its failure.`;
+  $("#retryJobDialog").showModal();
+}
+async function retryJob(event) {
+  event.preventDefault();
+  const form = event.currentTarget,
+    button = event.submitter,
+    body = Object.fromEntries(new FormData(form)),
+    id = encodeURIComponent(body.jobId);
+  busy(button, true, "Retrying...");
+  try {
+    await api(`/api/platform/jobs/${id}/retry`, {
+      method: "POST",
+      body: JSON.stringify({ reason: body.reason }),
+    });
+    $("#retryJobDialog").close();
+    await loadJobs();
+    toast("Job queued for retry");
+  } catch (error) {
+    toast(error.message);
+  } finally {
+    busy(button, false);
+  }
+}
 async function openTenant(id) {
-  const result = await api(
-    `/api/platform/organizations/${encodeURIComponent(id)}`,
-  );
+  const encodedId = encodeURIComponent(id),
+    [result, lifecycle, featureResult] = await Promise.all([
+      api(`/api/platform/organizations/${encodedId}`),
+      api(`/api/platform/organizations/${encodedId}/lifecycle`),
+      api(`/api/platform/organizations/${encodedId}/feature-flags`),
+    ]);
   state.detail = result;
+  state.lifecycle = lifecycle;
+  state.flags = featureResult.flags;
   $("#detailName").textContent = result.organization.name;
   $("#detailSlug").textContent = result.organization.slug;
   $("#detailSummary").innerHTML =
@@ -402,6 +755,13 @@ async function openTenant(id) {
   checkoutForm.plan.value = result.subscription.plan;
   checkoutForm.customerEmail.value =
     result.members.find((member) => member.role === "admin")?.email || "";
+  const featureForm = $("#tenantFeatureForm");
+  for (const key of ["campaigns", "directory_sync", "tracking"])
+    featureForm.elements[key].checked = Boolean(
+      featureResult.flags[key]?.enabled,
+    );
+  featureForm.elements.reason.value = "";
+  $("#supportAccessForm").reset();
   $("#stripeSubscriptionForm").elements.plan.value = result.subscription.plan;
   $("#detailMembers").innerHTML = result.members.length
     ? result.members
@@ -411,7 +771,111 @@ async function openTenant(id) {
         )
         .join("")
     : "<div><span>No accepted tenant members yet.</span></div>";
+  const deletion = lifecycle.deletion,
+    pending = ["pending", "purging"].includes(deletion?.status);
+  $("#tenantDeletionStatus").textContent = pending
+    ? deletion.status === "purging"
+      ? "Tenant deletion is running."
+      : `Deletion scheduled for ${dateLabel(deletion.executeAfter)}.`
+    : deletion?.status === "canceled"
+      ? `Deletion canceled ${dateLabel(deletion.canceledAt)}.`
+      : "No deletion is scheduled.";
+  $("#scheduleTenantDeletion").hidden = pending;
+  $("#cancelTenantDeletion").hidden = !pending || deletion.status !== "pending";
+  $("#tenantStatusForm").elements.status.disabled = pending;
+  $("#tenantStatusForm").querySelector('button[type="submit"]').disabled =
+    pending;
   if (!$("#tenantDialog").open) $("#tenantDialog").showModal();
+}
+
+function openTenantLifecycleAction(action) {
+  const organization = state.detail.organization,
+    form = $("#tenantLifecycleForm"),
+    confirmation = $("#tenantDeletionConfirmation"),
+    definition = {
+      export: {
+        title: "Export tenant data",
+        message: `Create a redacted data export for ${organization.name}.`,
+        button: "Create export",
+      },
+      schedule: {
+        title: "Schedule tenant deletion",
+        message: `Type DELETE ${organization.slug} after entering the deletion reason.`,
+        button: "Schedule deletion",
+      },
+      cancel: {
+        title: "Cancel tenant deletion",
+        message: `Keep ${organization.name} and cancel its pending purge.`,
+        button: "Cancel deletion",
+      },
+    }[action];
+  form.reset();
+  form.elements.action.value = action;
+  confirmation.hidden = action !== "schedule";
+  form.elements.confirmation.required = action === "schedule";
+  $("#tenantLifecycleTitle").textContent = definition.title;
+  $("#tenantLifecycleMessage").textContent = definition.message;
+  $("#confirmTenantLifecycle").textContent = definition.button;
+  $("#confirmTenantLifecycle").classList.toggle(
+    "danger",
+    action === "schedule",
+  );
+  $("#tenantDialog").close();
+  $("#tenantLifecycleDialog").showModal();
+}
+
+function closeTenantLifecycleDialog(reopenTenant = true) {
+  $("#tenantLifecycleDialog").close();
+  if (reopenTenant && state.detail && !$("#tenantDialog").open)
+    $("#tenantDialog").showModal();
+}
+
+async function submitTenantLifecycle(event) {
+  event.preventDefault();
+  const form = event.currentTarget;
+  if (!form.reportValidity()) return;
+  const organization = state.detail.organization,
+    button = event.submitter,
+    body = Object.fromEntries(new FormData(form)),
+    action = body.action;
+  busy(button, true, action === "export" ? "Exporting..." : "Saving...");
+  try {
+    if (action === "export") {
+      const result = await api(
+          `/api/platform/organizations/${organization.id}/export`,
+          { method: "POST", body: JSON.stringify({ reason: body.reason }) },
+        ),
+        blob = new Blob([JSON.stringify(result.export, null, 2)], {
+          type: "application/json",
+        }),
+        link = document.createElement("a");
+      link.href = URL.createObjectURL(blob);
+      link.download = `${organization.slug}-export-${new Date().toISOString().slice(0, 10)}.json`;
+      link.click();
+      URL.revokeObjectURL(link.href);
+      toast("Tenant export created");
+      closeTenantLifecycleDialog();
+    } else {
+      await api(`/api/platform/organizations/${organization.id}/deletion`, {
+        method: action === "schedule" ? "POST" : "DELETE",
+        body: JSON.stringify({
+          reason: body.reason,
+          ...(action === "schedule" ? { confirmation: body.confirmation } : {}),
+        }),
+      });
+      closeTenantLifecycleDialog(false);
+      await Promise.all([loadTenants(), openTenant(organization.id)]);
+      toast(
+        action === "schedule"
+          ? "Tenant deletion scheduled"
+          : "Tenant deletion canceled",
+      );
+    }
+  } catch (error) {
+    toast(error.message);
+  } finally {
+    busy(button, false);
+  }
 }
 async function createTenant(event) {
   event.preventDefault();
@@ -544,13 +1008,24 @@ async function openStripePortal() {
   }
 }
 function bindEvents() {
+  $("#ownerReauthForm").addEventListener("submit", submitOwnerReauthentication);
+  $$("[data-close-reauth]").forEach((button) =>
+    button.addEventListener("click", cancelOwnerReauthentication),
+  );
+  $("#ownerReauthDialog").addEventListener("cancel", (event) => {
+    event.preventDefault();
+    cancelOwnerReauthentication();
+  });
   $$("[data-section]").forEach((button) =>
     button.addEventListener("click", async () => {
       showSection(button.dataset.section);
       if (button.dataset.section === "integrations") await loadIntegrations();
-      if (button.dataset.section === "owners") await loadOwners();
+      if (button.dataset.section === "owners")
+        await Promise.all([loadOwners(), loadOwnerSessions()]);
       if (button.dataset.section === "audit") await loadAudit();
       if (button.dataset.section === "operations") await loadOperations();
+      if (button.dataset.section === "jobs") await loadJobs();
+      if (button.dataset.section === "fleet") await loadFleet();
     }),
   );
   $("#openCreateTenant").addEventListener("click", () => {
@@ -558,6 +1033,20 @@ function bindEvents() {
     $("#invitationResult").hidden = true;
     $("#createTenantDialog").showModal();
   });
+  $("#setupOwnerMfa").addEventListener("click", () => {
+    resetMfaDialog("enroll");
+    $("#ownerMfaDialog").showModal();
+  });
+  $("#disableOwnerMfa").addEventListener("click", () => {
+    resetMfaDialog("disable");
+    $("#ownerMfaDialog").showModal();
+  });
+  $$("[data-close-mfa]").forEach((button) =>
+    button.addEventListener("click", () => $("#ownerMfaDialog").close()),
+  );
+  $("#ownerMfaStartForm").addEventListener("submit", startMfaEnrollment);
+  $("#ownerMfaConfirmForm").addEventListener("submit", confirmMfaEnrollment);
+  $("#ownerMfaDisableForm").addEventListener("submit", disableMfa);
   $$("[data-close-create]").forEach((button) =>
     button.addEventListener("click", () => $("#createTenantDialog").close()),
   );
@@ -566,6 +1055,8 @@ function bindEvents() {
   );
   $("#createTenantForm").addEventListener("submit", createTenant);
   $("#tenantStatusForm").addEventListener("submit", updateTenantStatus);
+  $("#tenantFeatureForm").addEventListener("submit", saveTenantFeatures);
+  $("#supportAccessForm").addEventListener("submit", startSupportAccess);
   $("#subscriptionForm").addEventListener("submit", updateSubscription);
   $("#checkoutForm").addEventListener("submit", createCheckout);
   $("#stripeSubscriptionForm").addEventListener(
@@ -573,6 +1064,23 @@ function bindEvents() {
     stripeSubscriptionAction,
   );
   $("#openStripePortal").addEventListener("click", openStripePortal);
+  $("#exportTenant").addEventListener("click", () =>
+    openTenantLifecycleAction("export"),
+  );
+  $("#scheduleTenantDeletion").addEventListener("click", () =>
+    openTenantLifecycleAction("schedule"),
+  );
+  $("#cancelTenantDeletion").addEventListener("click", () =>
+    openTenantLifecycleAction("cancel"),
+  );
+  $("#tenantLifecycleForm").addEventListener("submit", submitTenantLifecycle);
+  $$("[data-close-tenant-lifecycle]").forEach((button) =>
+    button.addEventListener("click", () => closeTenantLifecycleDialog()),
+  );
+  $("#tenantLifecycleDialog").addEventListener("cancel", (event) => {
+    event.preventDefault();
+    closeTenantLifecycleDialog();
+  });
   $("#tenantRows").addEventListener("click", (event) => {
     const button = event.target.closest("[data-tenant-id]");
     if (button)
@@ -638,9 +1146,68 @@ function bindEvents() {
       toast(error.message);
     }
   });
+  $("#ownerSessionRows").addEventListener("click", async (event) => {
+    const button = event.target.closest("[data-session-id]");
+    if (!button || button.disabled) return;
+    const reason = prompt("Reason for revoking this session:");
+    if (!reason) return;
+    try {
+      await api(`/api/platform/sessions/${button.dataset.sessionId}`, {
+        method: "DELETE",
+        body: JSON.stringify({ reason }),
+      });
+      await loadOwnerSessions();
+      toast("Session revoked");
+    } catch (error) {
+      toast(error.message);
+    }
+  });
+  $("#revokeOtherSessions").addEventListener("click", async () => {
+    const reason = prompt("Reason for revoking all other sessions:");
+    if (!reason) return;
+    try {
+      const result = await api("/api/platform/sessions", {
+        method: "DELETE",
+        body: JSON.stringify({ reason }),
+      });
+      await loadOwnerSessions();
+      toast(
+        `${result.revoked} session${result.revoked === 1 ? "" : "s"} revoked`,
+      );
+    } catch (error) {
+      toast(error.message);
+    }
+  });
   $("#refreshAudit").addEventListener("click", () =>
     loadAudit().catch((error) => toast(error.message)),
   );
+  $("#refreshJobs").addEventListener("click", () =>
+    loadJobs().catch((error) => toast(error.message)),
+  );
+  $("#refreshFleet").addEventListener("click", () =>
+    loadFleet().catch((error) => toast(error.message)),
+  );
+  $("#endSupportAccess").addEventListener("click", () => {
+    $("#supportAccessEndForm").reset();
+    $("#supportAccessEndDialog").showModal();
+  });
+  $("#supportAccessEndForm").addEventListener("submit", endSupportAccess);
+  $$("[data-close-support-access]").forEach((button) =>
+    button.addEventListener("click", () =>
+      $("#supportAccessEndDialog").close(),
+    ),
+  );
+  $("#jobStatus").addEventListener("change", () =>
+    loadJobs().catch((error) => toast(error.message)),
+  );
+  $("#jobRows").addEventListener("click", (event) => {
+    const button = event.target.closest("[data-retry-job]");
+    if (button && !button.disabled) openJobRetry(button);
+  });
+  $$("[data-close-job]").forEach((button) =>
+    button.addEventListener("click", () => $("#retryJobDialog").close()),
+  );
+  $("#retryJobForm").addEventListener("submit", retryJob);
   $("#refreshOperations").addEventListener("click", () =>
     loadOperations().catch((error) => toast(error.message)),
   );
@@ -704,6 +1271,7 @@ function bindEvents() {
   $("#stripeConnectForm").addEventListener("submit", connectStripe);
   $("#stripePlanForm").addEventListener("submit", configureStripe);
   $("#stripeTestForm").addEventListener("submit", testStripeCheckout);
+  $("#reconcileStripe").addEventListener("click", reconcileStripe);
   $("#disconnectStripe").addEventListener("click", async () => {
     const reason = prompt("Reason for disconnecting Stripe:");
     if (!reason) return;
@@ -728,6 +1296,10 @@ function bindEvents() {
 async function boot() {
   await loadSession();
   bindEvents();
+  if (state.mfa.required && !state.mfa.enabled) {
+    showSection("owners");
+    return;
+  }
   await Promise.all([loadTenants(), loadSetup({ navigate: true })]);
   const billing = new URLSearchParams(location.search).get("billing");
   if (billing)

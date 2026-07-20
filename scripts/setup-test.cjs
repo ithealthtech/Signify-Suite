@@ -19,6 +19,8 @@ const root = path.join(__dirname, ".."),
     NODE_ENV: "production",
     HOST: "127.0.0.1",
     PORT: "4199",
+    SIGNIFY_JOB_MODE: "external",
+    SIGNIFY_MEDIA_STORAGE: "local",
     DATABASE_PATH: databasePath,
     BACKUP_DIR: backupDirectory,
     SIGNIFY_PUBLIC_URL: "https://setup.example.com",
@@ -113,6 +115,10 @@ try {
 
   const configured = parseEnv(fs.readFileSync(environmentFile, "utf8"));
   assert.equal(configured.SIGNATURE_ALLOW_DEFAULT_ADMIN, "false");
+  assert.equal(configured.SIGNIFY_REQUIRE_OWNER_MFA, "true");
+  assert.equal(configured.SIGNIFY_JOB_MODE, "external");
+  assert.equal(configured.SIGNIFY_MEDIA_STORAGE, "local");
+  assert.equal(configured.SIGNIFY_TENANT_DELETION_GRACE_DAYS, "7");
   assert.equal(configured.SIGNIFY_BOOTSTRAP_PASSWORD || "", "");
   assert.equal(
     configured.SIGNIFY_APPLICATION_OWNER_EMAIL,
@@ -163,6 +169,25 @@ try {
   assert.notEqual(result.status, 0);
   assert.match(result.stderr, /HTTPS URL/);
   assert.equal(fs.existsSync(path.join(invalidDirectory, "invalid.db")), false);
+
+  result = run({ SIGNIFY_TENANT_DELETION_GRACE_DAYS: "0" }, ["--no-write-env"]);
+  assert.notEqual(result.status, 0);
+  assert.match(result.stderr, /DELETION_GRACE_DAYS/);
+
+  result = run(
+    { SIGNIFY_OBSERVABILITY_ENDPOINT: "http://collector.example.com/events" },
+    ["--no-write-env"],
+  );
+  assert.notEqual(result.status, 0);
+  assert.match(result.stderr, /OBSERVABILITY_ENDPOINT must use HTTPS/);
+
+  result = run({ SIGNIFY_OBSERVABILITY_BATCH_SIZE: "1.5" }, ["--no-write-env"]);
+  assert.notEqual(result.status, 0);
+  assert.match(result.stderr, /OBSERVABILITY_BATCH_SIZE/);
+
+  result = run({ SIGNIFY_BACKUP_RETENTION_DAYS: "0" }, ["--no-write-env"]);
+  assert.notEqual(result.status, 0);
+  assert.match(result.stderr, /BACKUP_RETENTION_DAYS/);
 
   console.log(
     "Setup test passed: configuration generation, credential generation, migrations, owner bootstrap, rerun safety, backups, and production validation",

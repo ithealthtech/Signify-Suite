@@ -6,6 +6,7 @@ const fs = require("node:fs");
 const { spawnSync } = require("node:child_process");
 const { generateKeyPairSync, sign } = require("node:crypto");
 const Stripe = require("stripe");
+const OTPAuth = require("otpauth");
 const sharp = require("sharp");
 const { createApplication } = require("../server.cjs");
 const { loadConfig } = require("../server/config.cjs");
@@ -223,6 +224,7 @@ async function main() {
       });
     throw new Error(`Unexpected external request in smoke test: ${url}`);
   };
+  let stripeRetrievedSubscription = null;
   const stripeSandboxPrices = [
       {
         id: "price_setup_starter",
@@ -268,11 +270,23 @@ async function main() {
               },
             },
             subscriptions: {
-              retrieve: async (id) => ({
-                id,
-                metadata: {},
-                items: { data: [{ id: "si_setup" }] },
-              }),
+              retrieve: async (id) =>
+                stripeRetrievedSubscription || {
+                  id,
+                  status: "active",
+                  customer: "cus_platform_smoke",
+                  metadata: {},
+                  current_period_end: 1893456000,
+                  items: {
+                    data: [
+                      {
+                        id: "si_setup",
+                        price: { id: "price_setup_team" },
+                        current_period_end: 1893456000,
+                      },
+                    ],
+                  },
+                },
               update: async (id, input) => ({
                 id,
                 cancel_at_period_end: Boolean(input.cancel_at_period_end),
@@ -321,6 +335,19 @@ async function main() {
         Number.isFinite(result.body?.averageDurationMs),
       "runtime metrics check failed",
     );
+    const prometheus = await fetch(`${baseUrl}/api/metrics/prometheus`, {
+      headers: {
+        traceparent: "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01",
+      },
+    });
+    assert(
+      prometheus.status === 200 &&
+        (await prometheus.text()).includes("signify_http_requests_total") &&
+        prometheus.headers
+          .get("traceparent")
+          ?.startsWith("00-4bf92f3577b34da6a3ce929d0e0e4736-"),
+      "Prometheus metrics or W3C trace propagation failed",
+    );
     assert(
       result.response.headers.get("content-security-policy") &&
         !result.response.headers.has("strict-transport-security"),
@@ -356,11 +383,31 @@ async function main() {
       productionConfigRejected,
       "production started without an HTTPS public URL",
     );
-    assert(
+    let missingEncryptionRejected = false;
+    try {
       loadConfig({
         NODE_ENV: "production",
         SIGNIFY_PUBLIC_URL: "https://signatures.example.com",
-      }).signature.publicUrl === "https://signatures.example.com",
+        SIGNIFY_APPLICATION_OWNER_EMAIL: "owner@example.com",
+      });
+    } catch (error) {
+      missingEncryptionRejected = error.message.includes(
+        "SIGNIFY_CREDENTIAL_ENCRYPTION_KEY is required",
+      );
+    }
+    assert(
+      missingEncryptionRejected,
+      "production started without credential encryption",
+    );
+    const validProductionConfig = loadConfig({
+      NODE_ENV: "production",
+      SIGNIFY_PUBLIC_URL: "https://signatures.example.com",
+      SIGNIFY_CREDENTIAL_ENCRYPTION_KEY: Buffer.alloc(32, 9).toString("base64"),
+    });
+    assert(
+      validProductionConfig.signature.publicUrl ===
+        "https://signatures.example.com" &&
+        validProductionConfig.signature.requireOwnerMfa === true,
       "valid production configuration was rejected",
     );
     const escapedMedia = buildSignatureHtml("executive", {
@@ -451,6 +498,17 @@ async function main() {
         adminJar.has("sig_csrf"),
       "admin login or secure cookies failed",
     );
+    const ownerSessionHours = application.db
+      .prepare(
+        `SELECT (julianday(s.expires_at)-julianday(s.created_at))*24 hours
+         FROM signature_sessions s JOIN signature_users u ON u.id=s.user_id
+         WHERE u.email='admin@signify.local' ORDER BY s.created_at DESC LIMIT 1`,
+      )
+      .get().hours;
+    assert(
+      ownerSessionHours > 3.9 && ownerSessionHours <= 4.01,
+      "Application Owner session was not capped at four hours",
+    );
     application.db
       .prepare("UPDATE organization_subscriptions SET seats=100")
       .run();
@@ -460,9 +518,30 @@ async function main() {
       jar: adminJar,
     });
     assert(
+      result.response.status === 202 && result.body.job?.id,
+      "Microsoft directory sync was not queued",
+    );
+    const directoryJobId = result.body.job.id;
+    result = await request(baseUrl, "/api/signature/directory-sync", {
+      method: "POST",
+      body: {},
+      jar: adminJar,
+    });
+    assert(
+      result.response.status === 202 &&
+        result.body.existing === true &&
+        result.body.job.id === directoryJobId,
+      "duplicate directory sync created parallel work",
+    );
+    await application.jobQueue.runOnce();
+    result = await request(baseUrl, `/api/signature/jobs/${directoryJobId}`, {
+      jar: adminJar,
+    });
+    assert(
       result.response.status === 200 &&
-        result.body?.seen === 2 &&
-        result.body?.added === 2 &&
+        result.body.job?.status === "completed" &&
+        result.body.job.result?.seen === 2 &&
+        result.body.job.result?.added === 2 &&
         graphRequests.some((url) => url.includes("$skiptoken=second-page")) &&
         application.db
           .prepare(
@@ -476,7 +555,8 @@ async function main() {
     });
     assert(
       result.body?.user?.role === "admin" &&
-        result.body.user.applicationOwner === true,
+        result.body.user.applicationOwner === true &&
+        result.body.user.onboardingRequired === true,
       "admin session or Application Owner bootstrap failed",
     );
     const primaryOrganizationId = result.body.user.organizationId;
@@ -1200,12 +1280,29 @@ async function main() {
       jar: adminJar,
     });
     assert(
+      result.response.status === 202 && result.body.job?.id,
+      "rollout was not queued",
+    );
+    const rolloutJobId = result.body.job.id;
+    await application.jobQueue.runOnce();
+    result = await request(baseUrl, `/api/signature/jobs/${rolloutJobId}`, {
+      jar: adminJar,
+    });
+    assert(
       result.response.status === 200 &&
-        result.body.emailed === result.body.updated &&
+        result.body.job.status === "completed" &&
+        result.body.job.result.emailed === result.body.job.result.updated &&
         graphRequests.some((url) =>
           url.includes("users/signatures%40example.com/sendMail"),
         ),
       "rollout email did not use the tenant Microsoft connection",
+    );
+    result = await request(baseUrl, `/api/signature/jobs/${rolloutJobId}`, {
+      jar: editorJar,
+    });
+    assert(
+      result.response.status === 403,
+      "non-admin could read tenant workflow results",
     );
     result = await request(baseUrl, "/api/signature/bulk-rollout", {
       method: "POST",
@@ -1213,10 +1310,21 @@ async function main() {
       jar: adminJar,
     });
     assert(
+      result.response.status === 202,
+      "saved-template rollout was not queued",
+    );
+    await application.jobQueue.runOnce();
+    result = await request(
+      baseUrl,
+      `/api/signature/jobs/${result.body.job.id}`,
+      { jar: adminJar },
+    );
+    assert(
       result.response.status === 200 &&
-        result.body.updated === 4 &&
-        result.body.skipped === 0 &&
-        result.body.errors.length === 0,
+        result.body.job.status === "completed" &&
+        result.body.job.result.updated === 4 &&
+        result.body.job.result.skipped === 0 &&
+        result.body.job.result.errors.length === 0,
       "saved-template rollout failed",
     );
     result = await request(baseUrl, "/api/signature/users", { jar: adminJar });
@@ -1407,6 +1515,49 @@ async function main() {
         result.body.error.code === "RESTORE_CONFIRMATION_REQUIRED",
       "Restore was accepted without explicit confirmation",
     );
+    application.db
+      .prepare(
+        `INSERT INTO background_jobs(id,type,payload_json,status,attempts,max_attempts,last_error)
+         VALUES ('smoke-failed-job','provider.sync','{"secret":"must-not-leak"}','dead_lettered',5,5,'Provider timeout')`,
+      )
+      .run();
+    result = await request(baseUrl, "/api/platform/jobs?status=dead_lettered", {
+      jar: adminJar,
+    });
+    assert(
+      result.response.status === 200 &&
+        result.body.jobs.some(
+          (job) =>
+            job.id === "smoke-failed-job" &&
+            job.lastError === "Provider timeout",
+        ) &&
+        !JSON.stringify(result.body).includes("must-not-leak"),
+      "Application Owner job inspection failed or exposed payload data",
+    );
+    result = await request(
+      baseUrl,
+      "/api/platform/jobs/smoke-failed-job/retry",
+      {
+        method: "POST",
+        body: { reason: "Retry provider sync" },
+        jar: adminJar,
+      },
+    );
+    assert(
+      result.response.status === 202 &&
+        result.body.job.status === "queued" &&
+        application.db
+          .prepare(
+            "SELECT status,attempts,last_error FROM background_jobs WHERE id='smoke-failed-job'",
+          )
+          .get().attempts === 0 &&
+        application.db
+          .prepare(
+            "SELECT COUNT(*) count FROM application_audit_logs WHERE action='application.job_retried' AND target_id='smoke-failed-job'",
+          )
+          .get().count === 1,
+      "Failed job retry was not durable and audited",
+    );
     result = await request(baseUrl, "/api/platform/organizations", {
       method: "POST",
       body: {
@@ -1442,6 +1593,7 @@ async function main() {
       "Application Owner could not create a tenant",
     );
     const controlPlaneOrganizationId = result.body.organization.id,
+      controlPlaneSlug = result.body.organization.slug,
       controlPlaneInvitationToken = new URL(
         result.body.invitationUrl,
       ).searchParams.get("invite");
@@ -1762,6 +1914,57 @@ async function main() {
       result.response.status === 202 && result.body.cancelAtPeriodEnd === true,
       "provider-backed Stripe cancellation failed",
     );
+    application.db
+      .prepare(
+        `UPDATE organization_subscriptions SET plan='starter',status='past_due',seats=10,stripe_price_id=NULL,current_period_end=NULL,billing_synced_at=NULL,billing_error='stale projection' WHERE organization_id=?`,
+      )
+      .run(controlPlaneOrganizationId);
+    stripeRetrievedSubscription = {
+      id: "sub_platform_smoke",
+      status: "active",
+      customer: "cus_platform_smoke",
+      current_period_end: 1893456000,
+      items: {
+        data: [
+          {
+            id: "si_setup",
+            price: { id: "price_setup_team" },
+            current_period_end: 1893456000,
+          },
+        ],
+      },
+    };
+    result = await request(baseUrl, "/api/platform/billing/reconcile", {
+      method: "POST",
+      body: { reason: "Verify scheduled billing projection" },
+      jar: adminJar,
+    });
+    assert(
+      result.response.status === 202 && result.body.job.id,
+      "Application Owner could not queue Stripe reconciliation",
+    );
+    while (await application.jobQueue.runOnce()) {}
+    const reconciledSubscription = application.db
+      .prepare(
+        "SELECT * FROM organization_subscriptions WHERE organization_id=?",
+      )
+      .get(controlPlaneOrganizationId);
+    assert(
+      reconciledSubscription.plan === "team" &&
+        reconciledSubscription.status === "active" &&
+        reconciledSubscription.seats === 50 &&
+        reconciledSubscription.stripe_price_id === "price_setup_team" &&
+        reconciledSubscription.current_period_end ===
+          "2030-01-01T00:00:00.000Z" &&
+        reconciledSubscription.billing_synced_at &&
+        reconciledSubscription.billing_error === "" &&
+        application.db
+          .prepare(
+            "SELECT COUNT(*) count FROM application_audit_logs WHERE action='stripe.subscription_reconciled' AND organization_id=?",
+          )
+          .get(controlPlaneOrganizationId).count === 1,
+      "Stripe reconciliation did not repair and audit local billing drift",
+    );
     result = await request(baseUrl, "/api/platform/integrations/stripe", {
       method: "DELETE",
       body: { reason: "Sandbox onboarding complete" },
@@ -1834,6 +2037,240 @@ async function main() {
         !JSON.stringify(result.body).includes("microsoft-setup-secret"),
       "first-run readiness did not complete safely",
     );
+    result = await request(baseUrl, "/api/platform/control/overview", {
+      jar: adminJar,
+    });
+    assert(
+      result.response.status === 200 &&
+        result.body.fleet.version === "0.4.0" &&
+        result.body.fleet.migrations >= 22 &&
+        result.body.tenants.some(
+          (tenant) => tenant.id === controlPlaneOrganizationId,
+        ),
+      "consolidated usage or fleet status was incomplete",
+    );
+    result = await request(
+      baseUrl,
+      `/api/platform/organizations/${controlPlaneOrganizationId}/feature-flags/campaigns`,
+      {
+        method: "PUT",
+        body: { enabled: false, reason: "Campaign maintenance regression" },
+        jar: adminJar,
+      },
+    );
+    assert(
+      result.response.status === 200 &&
+        result.body.flags.campaigns.enabled === false,
+      "tenant feature flag was not persisted",
+    );
+    result = await request(baseUrl, "/api/signature/campaigns", {
+      jar: controlPlaneTenantJar,
+    });
+    assert(
+      result.response.status === 403 &&
+        result.body.error.code === "FEATURE_DISABLED",
+      "disabled tenant feature remained reachable",
+    );
+    await request(
+      baseUrl,
+      `/api/platform/organizations/${controlPlaneOrganizationId}/feature-flags/campaigns`,
+      {
+        method: "PUT",
+        body: { enabled: true, reason: "Campaign maintenance complete" },
+        jar: adminJar,
+      },
+    );
+    result = await request(
+      baseUrl,
+      `/api/platform/organizations/${controlPlaneOrganizationId}/support-access`,
+      {
+        method: "POST",
+        body: { minutes: 15, reason: "Customer support regression" },
+        jar: adminJar,
+      },
+    );
+    assert(
+      result.response.status === 201 &&
+        result.body.grant.organizationId === controlPlaneOrganizationId,
+      "time-bounded support access was not created",
+    );
+    result = await request(baseUrl, "/api/signature/session", {
+      jar: adminJar,
+    });
+    assert(
+      result.response.status === 200 &&
+        result.body.user.organizationId === controlPlaneOrganizationId &&
+        result.body.user.applicationOwner === true,
+      "support access did not establish a scoped workspace session",
+    );
+    result = await request(baseUrl, "/api/platform/support-access", {
+      method: "DELETE",
+      body: { reason: "Support work complete" },
+      jar: adminJar,
+    });
+    assert(
+      result.response.status === 200 && result.body.revoked === true,
+      "support access could not be revoked",
+    );
+    result = await request(baseUrl, "/api/signature/session", {
+      jar: adminJar,
+    });
+    assert(
+      result.response.status === 200 && result.body.user === null,
+      "revoked support access remained usable",
+    );
+    result = await request(
+      baseUrl,
+      `/api/platform/organizations/${controlPlaneOrganizationId}/export`,
+      {
+        method: "POST",
+        body: { reason: "Tenant portability regression" },
+        jar: adminJar,
+      },
+    );
+    const exportedTenant = JSON.stringify(result.body?.export || {});
+    assert(
+      result.response.status === 200 &&
+        result.body.export.organization.id === controlPlaneOrganizationId &&
+        result.body.export.members.some(
+          (member) => member.email === "tenant.owner@example.com",
+        ) &&
+        !exportedTenant.includes("password_hash") &&
+        !exportedTenant.includes("token_hash") &&
+        !exportedTenant.includes("encrypted_credentials"),
+      "tenant export was incomplete or exposed authentication secrets",
+    );
+    await application.mediaStorage.write({
+      organizationId: controlPlaneOrganizationId,
+      collection: "uploads",
+      name: "purge-proof.png",
+      bytes: Buffer.from("tenant-media"),
+      limitBytes: 1024,
+    });
+    result = await request(
+      baseUrl,
+      `/api/platform/organizations/${controlPlaneOrganizationId}/deletion`,
+      {
+        method: "POST",
+        body: {
+          reason: "Reject unsafe tenant deletion",
+          confirmation: "DELETE wrong-tenant",
+        },
+        jar: adminJar,
+      },
+    );
+    assert(
+      result.response.status === 400 &&
+        result.body.error.code === "TENANT_DELETION_CONFIRMATION_REQUIRED",
+      "tenant deletion accepted an incorrect confirmation",
+    );
+    const scheduleTenantDeletion = () =>
+      request(
+        baseUrl,
+        `/api/platform/organizations/${controlPlaneOrganizationId}/deletion`,
+        {
+          method: "POST",
+          body: {
+            reason: "End-of-contract lifecycle regression",
+            confirmation: `DELETE ${controlPlaneSlug}`,
+          },
+          jar: adminJar,
+        },
+      );
+    result = await scheduleTenantDeletion();
+    assert(
+      result.response.status === 202 &&
+        result.body.deletion.status === "pending" &&
+        Date.parse(result.body.deletion.executeAfter) > Date.now() &&
+        application.db
+          .prepare("SELECT status FROM organizations WHERE id=?")
+          .get(controlPlaneOrganizationId).status === "suspended",
+      "tenant deletion was not delayed and suspended atomically",
+    );
+    result = await request(
+      baseUrl,
+      `/api/platform/organizations/${controlPlaneOrganizationId}/status`,
+      {
+        method: "PUT",
+        body: { status: "active", reason: "Unsafe reactivation attempt" },
+        jar: adminJar,
+      },
+    );
+    assert(
+      result.response.status === 409 &&
+        result.body.error.code === "TENANT_DELETION_PENDING",
+      "pending deletion allowed the tenant to be reactivated",
+    );
+    result = await request(
+      baseUrl,
+      `/api/platform/organizations/${controlPlaneOrganizationId}/deletion`,
+      {
+        method: "DELETE",
+        body: { reason: "Customer retention regression" },
+        jar: adminJar,
+      },
+    );
+    assert(
+      result.response.status === 200 &&
+        result.body.deletion.status === "canceled" &&
+        application.db
+          .prepare("SELECT status FROM background_jobs WHERE dedupe_key=?")
+          .get(`tenant.delete:${controlPlaneOrganizationId}`).status ===
+          "completed",
+      "tenant deletion cancellation did not cancel its durable job",
+    );
+    result = await scheduleTenantDeletion();
+    const deletionRequestId = result.body.deletion.id;
+    application.db
+      .prepare(
+        "UPDATE tenant_deletion_requests SET execute_after=strftime('%Y-%m-%dT%H:%M:%fZ','now','-1 second') WHERE id=?",
+      )
+      .run(deletionRequestId);
+    application.db
+      .prepare(
+        "UPDATE background_jobs SET available_at=strftime('%Y-%m-%dT%H:%M:%fZ','now','-1 second') WHERE dedupe_key=?",
+      )
+      .run(`tenant.delete:${controlPlaneOrganizationId}`);
+    for (let attempt = 0; attempt < 20; attempt += 1) {
+      const deletion = application.db
+        .prepare("SELECT status FROM tenant_deletion_requests WHERE id=?")
+        .get(deletionRequestId);
+      if (deletion.status === "completed") break;
+      if (!(await application.jobQueue.runOnce())) break;
+    }
+    assert(
+      !application.db
+        .prepare("SELECT 1 FROM organizations WHERE id=?")
+        .get(controlPlaneOrganizationId) &&
+        !application.db
+          .prepare("SELECT 1 FROM signature_users WHERE email=?")
+          .get("tenant.owner@example.com") &&
+        application.db
+          .prepare("SELECT status FROM tenant_deletion_requests WHERE id=?")
+          .get(deletionRequestId).status === "completed" &&
+        !fs.existsSync(
+          path.join(
+            application.config.publicRoot,
+            "uploads",
+            controlPlaneOrganizationId,
+          ),
+        ) &&
+        application.db
+          .prepare(
+            "SELECT COUNT(*) count FROM application_audit_logs WHERE action IN ('tenant.exported','tenant.deletion_scheduled','tenant.deletion_canceled') AND target_id IS NOT NULL",
+          )
+          .get().count >= 4,
+      "durable tenant purge did not remove tenant data/media while retaining lifecycle evidence",
+    );
+    result = await request(
+      baseUrl,
+      `/api/platform/organizations/${controlPlaneOrganizationId}`,
+      { jar: adminJar },
+    );
+    assert(
+      result.response.status === 404,
+      "deleted tenant remained directly accessible",
+    );
     application.db
       .prepare(
         `INSERT INTO application_owners(user_id,status,granted_by) VALUES (?,'active',?) ON CONFLICT(user_id) DO UPDATE SET status='active'`,
@@ -1851,7 +2288,8 @@ async function main() {
     assert(
       result.response.status === 200 &&
         result.body.user.applicationOwner === true &&
-        result.body.user.organizationId === null,
+        result.body.user.organizationId === null &&
+        result.body.user.onboardingRequired === false,
       `Application Owner without a tenant membership could not sign in: ${result.response.status} ${JSON.stringify(result.body)}`,
     );
     result = await request(baseUrl, "/api/platform/session", {
@@ -1861,11 +2299,253 @@ async function main() {
       result.response.status === 200,
       "tenant-independent Application Owner session failed",
     );
-    for (let attempt = 0; attempt < 7; attempt += 1)
+    application.config.signature.requireOwnerMfa = true;
+    result = await request(baseUrl, "/api/platform/owners", { jar: adminJar });
+    assert(
+      result.response.status === 403 &&
+        result.body.error.code === "OWNER_MFA_REQUIRED",
+      "required MFA policy did not block an unenrolled owner",
+    );
+    result = await request(baseUrl, "/api/platform/session", { jar: adminJar });
+    assert(
+      result.response.status === 200 && result.body.mfa.required === true,
+      "required MFA policy was not reported to the control plane",
+    );
+    result = await request(baseUrl, "/api/platform/mfa/enroll", {
+      method: "POST",
+      body: { password: "wrong" },
+      jar: adminJar,
+    });
+    assert(
+      result.response.status === 403 &&
+        result.body.error.code === "PASSWORD_INVALID",
+      "MFA enrollment accepted an invalid current password",
+    );
+    result = await request(baseUrl, "/api/platform/mfa/enroll", {
+      method: "POST",
+      body: { password: "SignifyDemo123!" },
+      jar: adminJar,
+    });
+    assert(
+      result.response.status === 200 &&
+        result.body.secret &&
+        result.body.qrCode.startsWith("data:image/png"),
+      "MFA enrollment did not return a scannable authenticator secret",
+    );
+    const ownerTotp = new OTPAuth.TOTP({
+      issuer: "Signify Creator",
+      label: "admin@signify.local",
+      secret: OTPAuth.Secret.fromBase32(result.body.secret),
+    });
+    result = await request(baseUrl, "/api/platform/mfa/confirm", {
+      method: "POST",
+      body: { code: ownerTotp.generate() },
+      jar: adminJar,
+    });
+    assert(
+      result.response.status === 200 && result.body.recoveryCodes.length === 10,
+      "MFA confirmation or recovery-code generation failed",
+    );
+    const [
+      firstRecoveryCode,
+      secondRecoveryCode,
+      disableRecoveryCode,
+      reauthRecoveryCode,
+    ] = result.body.recoveryCodes;
+    result = await request(baseUrl, "/api/platform/session", { jar: adminJar });
+    assert(
+      result.body.mfa.enabled === true &&
+        result.body.mfa.recoveryCodesRemaining === 10,
+      "MFA status did not reflect enrollment",
+    );
+    result = await request(baseUrl, "/api/platform/mfa/enroll", {
+      method: "POST",
+      body: { password: "SignifyDemo123!" },
+      jar: adminJar,
+    });
+    assert(
+      result.response.status === 403 &&
+        result.body.error.code === "MFA_REPLACEMENT_DENIED",
+      "existing MFA could be replaced without current second-factor proof",
+    );
+    adminJar.clear();
+    result = await request(baseUrl, "/api/signature/login", {
+      method: "POST",
+      body: {
+        email: "admin@signify.local",
+        password: "SignifyDemo123!",
+      },
+      jar: adminJar,
+    });
+    assert(
+      result.response.status === 202 && result.body.mfaRequired,
+      "Application Owner login bypassed enabled MFA",
+    );
+    let mfaChallenge = result.body.challenge;
+    result = await request(baseUrl, "/api/signature/login/mfa", {
+      method: "POST",
+      body: { challenge: mfaChallenge, code: firstRecoveryCode },
+      jar: adminJar,
+    });
+    assert(
+      result.response.status === 200 && adminJar.has("sig_session"),
+      "one-time MFA recovery login failed",
+    );
+    adminJar.clear();
+    result = await request(baseUrl, "/api/signature/login", {
+      method: "POST",
+      body: {
+        email: "admin@signify.local",
+        password: "SignifyDemo123!",
+      },
+      jar: adminJar,
+    });
+    mfaChallenge = result.body.challenge;
+    result = await request(baseUrl, "/api/signature/login/mfa", {
+      method: "POST",
+      body: { challenge: mfaChallenge, code: firstRecoveryCode },
+      jar: adminJar,
+    });
+    assert(
+      result.response.status === 401 &&
+        result.body.error.code === "MFA_INVALID",
+      "used MFA recovery code was accepted again",
+    );
+    result = await request(baseUrl, "/api/signature/login/mfa", {
+      method: "POST",
+      body: { challenge: mfaChallenge, code: secondRecoveryCode },
+      jar: adminJar,
+    });
+    assert(result.response.status === 200, "second MFA recovery login failed");
+    application.db
+      .prepare(
+        `UPDATE signature_sessions SET mfa_verified_at=strftime('%Y-%m-%dT%H:%M:%fZ','now','-20 minutes')
+         WHERE user_id=?`,
+      )
+      .run(adminId);
+    result = await request(
+      baseUrl,
+      `/api/platform/organizations/${primaryOrganizationId}/status`,
+      {
+        method: "PUT",
+        body: { status: "active", reason: "Verify step-up policy" },
+        jar: adminJar,
+      },
+    );
+    assert(
+      result.response.status === 403 &&
+        result.body.error.code === "PRIVILEGED_REAUTH_REQUIRED",
+      "sensitive owner action did not require recent authentication",
+    );
+    result = await request(baseUrl, "/api/platform/reauth", {
+      method: "POST",
+      body: { password: "wrong", code: reauthRecoveryCode },
+      jar: adminJar,
+    });
+    assert(
+      result.response.status === 403 &&
+        result.body.error.code === "PRIVILEGED_REAUTH_FAILED",
+      "step-up authentication accepted an invalid password",
+    );
+    result = await request(baseUrl, "/api/platform/reauth", {
+      method: "POST",
+      body: {
+        password: "SignifyDemo123!",
+        code: reauthRecoveryCode,
+      },
+      jar: adminJar,
+    });
+    assert(result.response.status === 200, "step-up authentication failed");
+    result = await request(
+      baseUrl,
+      `/api/platform/organizations/${primaryOrganizationId}/status`,
+      {
+        method: "PUT",
+        body: { status: "active", reason: "Verified step-up action" },
+        jar: adminJar,
+      },
+    );
+    assert(
+      result.response.status === 200,
+      "sensitive owner action failed after step-up authentication",
+    );
+    result = await request(baseUrl, "/api/platform/sessions", {
+      jar: adminJar,
+    });
+    assert(
+      result.response.status === 200 &&
+        result.body.sessions.length >= 2 &&
+        result.body.sessions.filter((session) => session.current).length ===
+          1 &&
+        result.body.sessions.some((session) => session.mfaVerifiedAt),
+      "Application Owner session history was incomplete",
+    );
+    const currentOwnerSession = result.body.sessions.find(
+        (session) => session.current,
+      ),
+      previousOwnerSession = result.body.sessions.find(
+        (session) => !session.current,
+      );
+    result = await request(
+      baseUrl,
+      `/api/platform/sessions/${currentOwnerSession.id}`,
+      {
+        method: "DELETE",
+        body: { reason: "Must use sign out" },
+        jar: adminJar,
+      },
+    );
+    assert(
+      result.response.status === 409 &&
+        result.body.error.code === "CURRENT_SESSION",
+      "current session could be revoked without sign out",
+    );
+    result = await request(
+      baseUrl,
+      `/api/platform/sessions/${previousOwnerSession.id}`,
+      {
+        method: "DELETE",
+        body: { reason: "Smoke-test device revocation" },
+        jar: adminJar,
+      },
+    );
+    assert(
+      result.response.status === 200,
+      "individual session revocation failed",
+    );
+    result = await request(baseUrl, "/api/platform/sessions", {
+      method: "DELETE",
+      body: { reason: "Smoke-test global session revocation" },
+      jar: adminJar,
+    });
+    assert(
+      result.response.status === 200 && result.body.revoked >= 1,
+      "other-session revocation failed",
+    );
+    result = await request(baseUrl, "/api/platform/mfa", {
+      method: "DELETE",
+      body: {
+        password: "SignifyDemo123!",
+        code: disableRecoveryCode,
+        reason: "Smoke-test MFA lifecycle",
+      },
+      jar: adminJar,
+    });
+    assert(result.response.status === 200, "MFA disable workflow failed");
+    result = await request(baseUrl, "/api/platform/owners", { jar: adminJar });
+    assert(
+      result.response.status === 403 &&
+        result.body.error.code === "OWNER_MFA_REQUIRED",
+      "required MFA policy did not resume after MFA was disabled",
+    );
+    application.config.signature.requireOwnerMfa = false;
+    for (let attempt = 0; attempt < 12; attempt += 1) {
       result = await request(baseUrl, "/api/signature/login", {
         method: "POST",
         body: { email: "nobody@example.com", password: "wrong" },
       });
+      if (result.response.status === 429) break;
+    }
     assert(
       result.response.status === 429 &&
         result.body.error.code === "RATE_LIMITED" &&
@@ -1971,7 +2651,7 @@ async function main() {
     }
     assert(retiredKeyRejected, "retired credential key still decrypted data");
     console.log(
-      "Smoke test passed: migrations, three-tier RBAC, Application Owner control plane, tenant lifecycle, owner-only Stripe, tenant Microsoft consent, request validation, auth, browser-bound OAuth state, verification retry, invitations, CSRF, tenant isolation, workspace switching, approval integrity, atomic updates, subscription enforcement, recovery, Microsoft directory pagination, image normalization, templates, rollout, campaigns, brand rendering, Stripe webhooks, rate limiting, database integrity, and reopen",
+      "Smoke test passed: migrations, three-tier RBAC, Application Owner MFA and control plane, tenant lifecycle, owner-only Stripe, tenant Microsoft consent, request validation, auth, browser-bound OAuth state, verification retry, invitations, CSRF, tenant isolation, workspace switching, approval integrity, atomic updates, subscription enforcement, recovery, Microsoft directory pagination, image normalization, templates, rollout, campaigns, brand rendering, Stripe webhooks, rate limiting, database integrity, and reopen",
     );
   } finally {
     if (server.listening) await new Promise((resolve) => server.close(resolve));

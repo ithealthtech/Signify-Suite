@@ -1,0 +1,17 @@
+.git
+.github
+.env
+.env.*
+!.env.example
+node_modules
+dist
+data
+backups
+tmp
+*.db
+*.sqlite*
+*.log
+*.zip
+public/uploads
+public/generated-banners/*
+!public/generated-banners/.gitkeep

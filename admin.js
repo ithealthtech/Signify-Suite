@@ -1,5 +1,14 @@
 "use strict";
-const { $, $$, api, escapeHtml, initials } = window.Signify;
+const {
+  $,
+  $$,
+  api,
+  busy: sharedBusy,
+  createToast,
+  dateLabel: sharedDateLabel,
+  escapeHtml,
+  initials,
+} = window.Signify;
 let state = {
   me: null,
   config: null,
@@ -19,36 +28,31 @@ const brandFonts = {
   verdana: "Verdana, Arial, sans-serif",
   georgia: 'Georgia, "Times New Roman", serif',
 };
-function toast(message) {
-  const element = $("#toast");
-  element.textContent = message;
-  element.classList.add("show");
-  clearTimeout(toast.timer);
-  toast.timer = setTimeout(() => element.classList.remove("show"), 2500);
-}
+const toast = createToast($("#toast"), 2500);
 function busy(button, on, label = "Working…") {
-  if (!button) return;
-  if (on) {
-    button.dataset.label = button.textContent;
-    button.textContent = label;
-    button.disabled = true;
-  } else {
-    button.textContent = button.dataset.label || button.textContent;
-    button.disabled = false;
+  sharedBusy(button, on, label);
+}
+async function waitForJob(id, onStatus = () => {}) {
+  for (let attempt = 0; attempt < 120; attempt += 1) {
+    const { job } = await api(`/api/signature/jobs/${encodeURIComponent(id)}`);
+    onStatus(job);
+    if (job.status === "completed") return job.result;
+    if (job.status === "dead_lettered")
+      throw new Error(job.error || "The background operation failed.");
+    await new Promise((resolve) => setTimeout(resolve, 1000));
   }
+  throw new Error(
+    "The operation is still queued. Its status remains available after refresh.",
+  );
 }
 function dateLabel(value) {
-  if (!value) return "Never";
-  const date = new Date(value);
-  return Number.isNaN(date.valueOf())
-    ? value
-    : date.toLocaleString(undefined, {
-        month: "short",
-        day: "numeric",
-        year: "numeric",
-        hour: "numeric",
-        minute: "2-digit",
-      });
+  return sharedDateLabel(value, {
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+  });
 }
 function templateOptions() {
   return (
@@ -471,10 +475,16 @@ async function syncDirectory(event) {
   busy(button, true, "Syncing…");
   $("#syncStatus").textContent = "Connecting to Microsoft 365…";
   try {
-    const result = await api("/api/signature/directory-sync", {
-      method: "POST",
-      body: "{}",
-    });
+    const accepted = await api("/api/signature/directory-sync", {
+        method: "POST",
+        body: "{}",
+      }),
+      result = await waitForJob(accepted.job.id, (job) => {
+        $("#syncStatus").textContent =
+          job.status === "running"
+            ? "Importing licensed Microsoft 365 users..."
+            : "Directory sync queued...";
+      });
     $("#syncStatus").textContent =
       `${result.seen} licensed users found · ${result.added} added`;
     const users = await api("/api/signature/users");
@@ -493,14 +503,15 @@ async function runRollout(event) {
   const button = event.currentTarget;
   busy(button, true, "Rolling out…");
   try {
-    const result = await api("/api/signature/bulk-rollout", {
-      method: "POST",
-      body: JSON.stringify({
-        templateId: $("#rolloutTemplate").value,
-        overwrite: $("#rolloutOverwrite").checked,
-        sendEmail: $("#rolloutEmail").checked,
+    const accepted = await api("/api/signature/bulk-rollout", {
+        method: "POST",
+        body: JSON.stringify({
+          templateId: $("#rolloutTemplate").value,
+          overwrite: $("#rolloutOverwrite").checked,
+          sendEmail: $("#rolloutEmail").checked,
+        }),
       }),
-    });
+      result = await waitForJob(accepted.job.id);
     const details = [
       `Updated ${result.updated} of ${result.total} signatures`,
       result.emailed ? `${result.emailed} emailed` : "",

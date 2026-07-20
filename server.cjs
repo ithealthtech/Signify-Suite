@@ -7,7 +7,10 @@ const { URL } = require("node:url");
 const { loadConfig } = require("./server/config.cjs");
 const { openDatabase } = require("./server/database.cjs");
 const { createSignaturePortal } = require("./server/signature-portal.cjs");
-const { startJobWorker } = require("./server/job-queue.cjs");
+const { createJobQueue, startJobWorker } = require("./server/job-queue.cjs");
+const { createMediaStorage } = require("./server/media-storage.cjs");
+const { createObservability } = require("./server/observability.cjs");
+const { acquireRuntimeLease } = require("./server/runtime-lease.cjs");
 const {
   applyPendingRestore,
   createApplicationOperations,
@@ -197,13 +200,57 @@ function serve(config, req, res, pathname, requestId) {
           : "no-cache",
     "X-Request-Id": requestId,
   });
-  if (req.method === "HEAD") return res.end();
+  if (req.method === "HEAD") {
+    res.end();
+    return true;
+  }
   fs.createReadStream(resolved).pipe(res);
+}
+
+async function serveObjectMedia(mediaStorage, req, res, pathname, requestId) {
+  if (mediaStorage.mode !== "s3") return false;
+  const match = pathname.match(
+    /^\/(uploads|generated-banners)\/([a-z0-9_-]+)\/([a-z0-9_.-]+)$/i,
+  );
+  if (!match || !["GET", "HEAD"].includes(req.method)) return false;
+  let object;
+  try {
+    object = await mediaStorage.read({
+      collection: match[1],
+      organizationId: match[2],
+      name: match[3],
+    });
+  } catch (error) {
+    if (error.name === "NoSuchKey" || error.$metadata?.httpStatusCode === 404)
+      return json(
+        res,
+        404,
+        { error: { code: "MEDIA_NOT_FOUND", message: "Media not found." } },
+        requestId,
+      );
+    throw error;
+  }
+  res.writeHead(200, {
+    "Content-Type": object.contentType,
+    ...(Number.isFinite(object.contentLength)
+      ? { "Content-Length": object.contentLength }
+      : {}),
+    "Cache-Control": object.cacheControl,
+    "X-Content-Type-Options": "nosniff",
+    "X-Request-Id": requestId,
+  });
+  if (req.method === "HEAD") return res.end();
+  object.body.pipe(res);
+  return true;
 }
 
 function createApplication(options = {}) {
   const config = options.config || loadConfig(options.env);
-  const restored = options.db ? null : applyPendingRestore(config);
+  const runtimeHealth = options.runtimeHealth || { ready: true, error: null };
+  const restored =
+    options.db || options.skipPendingRestore
+      ? null
+      : applyPendingRestore(config);
   const db = options.db || openDatabase(config.databasePath);
   const operations = createApplicationOperations({
     config,
@@ -211,6 +258,11 @@ function createApplication(options = {}) {
     fetchImpl: options.fetchImpl,
     version: packageMetadata.version,
   });
+  const mediaStorage =
+    options.mediaStorage ||
+    createMediaStorage(config, { s3Client: options.s3Client });
+  const jobHandlers = {},
+    jobQueue = createJobQueue(db, jobHandlers);
   const signaturePortal = createSignaturePortal({
     db,
     production: config.production,
@@ -219,19 +271,25 @@ function createApplication(options = {}) {
     readJsonBody,
     readBody,
     publicRoot: config.publicRoot,
+    mediaStorage,
     trustProxy: config.trustProxy,
     fetchImpl: options.fetchImpl,
     stripeFactory: options.stripeFactory,
     operations,
+    enqueueJob: jobQueue.enqueue,
+    deletionGraceDays: config.deletionGraceDays,
+    packageVersion: packageMetadata.version,
   });
+  Object.assign(jobHandlers, signaturePortal.jobHandlers);
   const rateBuckets = new Map(),
-    metrics = {
-      startedAt: new Date().toISOString(),
-      requests: 0,
-      errors: 0,
-      durationMs: 0,
-      status: { success: 0, redirect: 0, clientError: 0, serverError: 0 },
-    };
+    observability =
+      options.observability ||
+      createObservability({
+        config,
+        db,
+        fetchImpl: options.fetchImpl,
+        output: options.logOutput,
+      });
   function clientIp(req) {
     if (config.trustProxy) {
       const forwarded = String(req.headers["x-forwarded-for"] || "")
@@ -253,6 +311,10 @@ function createApplication(options = {}) {
           limit: 10,
           windowMs: 60 * 60 * 1000,
         },
+        "/api/signature/login/mfa": {
+          limit: 10,
+          windowMs: 15 * 60 * 1000,
+        },
       },
       policy = policies[pathname];
     if (req.method !== "POST" || !policy) return null;
@@ -272,53 +334,29 @@ function createApplication(options = {}) {
       ? Math.max(1, Math.ceil((bucket.resetAt - now) / 1000))
       : null;
   }
-  function log(level, event, fields = {}) {
-    if (config.logLevel === "silent") return;
-    const order = { debug: 10, info: 20, warn: 30, error: 40 };
-    if ((order[level] || 20) < (order[config.logLevel] || 20)) return;
-    console[level === "error" ? "error" : "log"](
-      JSON.stringify({
-        time: new Date().toISOString(),
-        level,
-        event,
-        ...fields,
-      }),
-    );
-  }
   const handler = async (req, res) => {
-    const requestId = randomUUID();
+    const requestId = randomUUID(),
+      trace = observability.traceContext(req.headers.traceparent),
+      spanId = randomUUID().replaceAll("-", "").slice(0, 16);
     const startedAt = Date.now();
     for (const [name, value] of Object.entries(
       securityHeaders(config.production),
     ))
       res.setHeader(name, value);
     res.setHeader("X-Request-Id", requestId);
+    res.setHeader("traceparent", `00-${trace.traceId}-${spanId}-01`);
     res.once("finish", () => {
       const durationMs = Date.now() - startedAt;
-      metrics.requests += 1;
-      metrics.durationMs += durationMs;
-      if (res.statusCode >= 500) {
-        metrics.status.serverError += 1;
-        metrics.errors += 1;
-      } else if (res.statusCode >= 400) metrics.status.clientError += 1;
-      else if (res.statusCode >= 300) metrics.status.redirect += 1;
-      else metrics.status.success += 1;
-      log(
-        res.statusCode >= 500
-          ? "error"
-          : res.statusCode >= 400
-            ? "warn"
-            : "info",
-        "http.request",
-        {
-          requestId,
-          method: req.method,
-          path: String(req.url || "").split("?")[0],
-          status: res.statusCode,
-          durationMs,
-          ip: clientIp(req),
-        },
-      );
+      observability.recordRequest({
+        requestId,
+        traceId: trace.traceId,
+        spanId,
+        method: req.method,
+        path: String(req.url || "").split("?")[0],
+        status: res.statusCode,
+        durationMs,
+        ip: clientIp(req),
+      });
     });
     try {
       const url = new URL(req.url || "/", "http://signature.local");
@@ -361,7 +399,7 @@ function createApplication(options = {}) {
           requestId,
         );
       }
-      if (url.pathname === "/api/metrics") {
+      if (["/api/metrics", "/api/metrics/prometheus"].includes(url.pathname)) {
         if (req.method !== "GET")
           return json(
             res,
@@ -375,20 +413,17 @@ function createApplication(options = {}) {
             requestId,
             { Allow: "GET" },
           );
-        return json(
-          res,
-          200,
-          {
-            startedAt: metrics.startedAt,
-            requests: metrics.requests,
-            errors: metrics.errors,
-            averageDurationMs: metrics.requests
-              ? Number((metrics.durationMs / metrics.requests).toFixed(2))
-              : 0,
-            status: metrics.status,
-          },
-          requestId,
-        );
+        if (url.pathname === "/api/metrics/prometheus") {
+          const body = Buffer.from(observability.prometheus());
+          res.writeHead(200, {
+            "Content-Type": "text/plain; version=0.0.4; charset=utf-8",
+            "Content-Length": body.length,
+            "Cache-Control": "no-store",
+            "X-Request-Id": requestId,
+          });
+          return res.end(body);
+        }
+        return json(res, 200, observability.snapshot(), requestId);
       }
       if (["/api/health", "/api/ready"].includes(url.pathname)) {
         if (req.method !== "GET")
@@ -405,6 +440,20 @@ function createApplication(options = {}) {
             { Allow: "GET" },
           );
         db.prepare("SELECT 1").get();
+        if (!runtimeHealth.ready)
+          return json(
+            res,
+            503,
+            {
+              status: "unavailable",
+              service: "signify-creator",
+              database: "ready",
+              runtime: runtimeHealth.error || "runtime lease unavailable",
+              version: packageMetadata.version,
+              time: new Date().toISOString(),
+            },
+            requestId,
+          );
         return json(
           res,
           200,
@@ -412,11 +461,17 @@ function createApplication(options = {}) {
             status: "ok",
             service: "signify-creator",
             database: "ready",
+            runtime: "ready",
+            version: packageMetadata.version,
             time: new Date().toISOString(),
           },
           requestId,
         );
       }
+      if (
+        await serveObjectMedia(mediaStorage, req, res, url.pathname, requestId)
+      )
+        return;
       const handled = await signaturePortal(req, res, url, requestId);
       if (handled !== false) return handled;
       if (req.method !== "GET" && req.method !== "HEAD")
@@ -434,7 +489,7 @@ function createApplication(options = {}) {
         );
       return serve(config, req, res, url.pathname, requestId);
     } catch (error) {
-      log(
+      observability.log(
         error.status && error.status < 500 ? "warn" : "error",
         "request.error",
         {
@@ -458,61 +513,84 @@ function createApplication(options = {}) {
       );
     }
   };
-  return { config, db, handler, operations, restored };
+  return {
+    config,
+    db,
+    handler,
+    jobHandlers,
+    jobQueue,
+    mediaStorage,
+    observability,
+    operations,
+    restored,
+    runtimeHealth,
+  };
 }
 
 function startServer(options = {}) {
-  const application = createApplication(options);
-  const server = http.createServer(application.handler);
-  const jobs = startJobWorker(application.db, {
-    publicRoot: application.config.publicRoot,
+  const runtimeHealth = { ready: true, error: null },
+    application = createApplication({ ...options, runtimeHealth });
+  const runtimeLease = acquireRuntimeLease(application.db, {
+    onHealth(ready, error) {
+      runtimeHealth.ready = ready;
+      runtimeHealth.error = error?.message || null;
+      if (error)
+        application.observability.log("error", "runtime.lease_unhealthy", {
+          code: error.code,
+          message: error.message,
+        });
+    },
   });
+  application.observability.start();
+  const server = http.createServer(application.handler);
+  const jobs =
+    application.config.jobMode === "embedded"
+      ? startJobWorker(application.db, {
+          publicRoot: application.config.publicRoot,
+          mediaStorage: application.mediaStorage,
+          handlers: application.jobHandlers,
+        })
+      : { stop: async () => {} };
   server.requestTimeout = 30000;
   server.headersTimeout = 15000;
   server.keepAliveTimeout = 5000;
   server.once("error", async (error) => {
-    console.error(
-      JSON.stringify({
-        time: new Date().toISOString(),
-        level: "error",
-        event: "server.start_failed",
-        code: error.code || "LISTEN_FAILED",
-        message: error.message,
-      }),
-    );
+    application.observability.log("error", "server.start_failed", {
+      code: error.code || "LISTEN_FAILED",
+      message: error.message,
+    });
     await jobs.stop();
+    runtimeLease.release();
     application.db.close();
     process.exitCode = 1;
   });
   server.listen(application.config.port, application.config.host, () =>
-    console.log(
-      JSON.stringify({
-        time: new Date().toISOString(),
-        level: "info",
-        event: "server.started",
-        url: `http://${application.config.host}:${application.config.port}`,
-      }),
-    ),
+    application.observability.log("info", "server.started", {
+      url: `http://${application.config.host}:${application.config.port}`,
+      jobMode: application.config.jobMode,
+    }),
   );
   let shuttingDown = false;
   async function shutdown(signal) {
     if (shuttingDown) return;
     shuttingDown = true;
-    console.log(`${signal} received; closing Signify Creator.`);
+    application.observability.log("info", "server.stopping", { signal });
     const forceClose = setTimeout(() => server.closeAllConnections(), 10000);
     forceClose.unref();
     server.closeIdleConnections();
     server.close(async () => {
       clearTimeout(forceClose);
       await jobs.stop();
+      await application.observability.stop();
+      runtimeLease.release();
       application.db.close();
       process.exit(0);
     });
   }
   process.once("SIGINT", () => shutdown("SIGINT"));
   process.once("SIGTERM", () => shutdown("SIGTERM"));
-  return { ...application, jobs, server };
+  return { ...application, jobs, runtimeLease, server };
 }
 
 if (require.main === module) startServer();
-module.exports = { createApplication, startServer };
+module.exports = { createApplication, serveObjectMedia, startServer };

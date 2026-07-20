@@ -1,24 +1,42 @@
 "use strict";
-const fs = require("node:fs");
-const path = require("node:path");
-const { DatabaseSync } = require("node:sqlite");
-const { loadConfig } = require("../server/config.cjs");
 
-const config = loadConfig(),
-  source = path.resolve(config.databasePath);
-if (!fs.existsSync(source))
-  throw new Error(`Database does not exist: ${source}`);
-const backupRoot = path.resolve(
-    process.env.BACKUP_DIR || path.join(config.sourceRoot, "backups"),
-  ),
-  stamp = new Date().toISOString().replace(/[:.]/g, "-"),
-  target = path.join(backupRoot, `signify-creator-${stamp}.db`);
-fs.mkdirSync(backupRoot, { recursive: true });
-const db = new DatabaseSync(source);
-try {
-  db.exec("PRAGMA wal_checkpoint(TRUNCATE)");
-  db.exec(`VACUUM INTO '${target.replaceAll("'", "''")}'`);
-} finally {
-  db.close();
+const { loadConfig } = require("../server/config.cjs");
+const { openDatabase } = require("../server/database.cjs");
+const {
+  createApplicationOperations,
+} = require("../server/application-operations.cjs");
+const { createRecoveryManager } = require("../server/recovery.cjs");
+const packageMetadata = require("../package.json");
+
+async function main() {
+  const config = loadConfig(),
+    db = openDatabase(config.databasePath);
+  try {
+    const operations = createApplicationOperations({
+        config,
+        db,
+        version: packageMetadata.version,
+      }),
+      backup = operations.createBackup(),
+      recovery = createRecoveryManager(config),
+      result = await recovery.protect(operations.managedFile(backup.name));
+    console.log(
+      JSON.stringify({
+        status: "protected",
+        backup,
+        sha256: result.sha256,
+        offsite: result.offsite,
+        media: result.media,
+        removedLocal: result.removedLocal.length,
+        removedOffsite: result.removedOffsite.length,
+      }),
+    );
+  } finally {
+    db.close();
+  }
 }
-console.log(`Backup created: ${target}`);
+
+main().catch((error) => {
+  console.error(error.message);
+  process.exitCode = 1;
+});

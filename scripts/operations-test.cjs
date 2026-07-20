@@ -19,7 +19,9 @@ async function main() {
     databasePath: path.join(root, "data", "signify.db"),
     backupPath: path.join(root, "backups"),
     updateRepository: "ithealthtech/Signify-Suite",
+    updateGithubToken: "sandbox-release-token",
   };
+  let releaseRequest;
   let db = openDatabase(config.databasePath);
   db.exec(
     "CREATE TABLE recovery_probe(value TEXT NOT NULL); INSERT INTO recovery_probe VALUES ('before');",
@@ -28,16 +30,19 @@ async function main() {
     config,
     db,
     version: "0.4.0",
-    fetchImpl: async () => ({
-      ok: true,
-      json: async () => ({
-        tag_name: "v0.5.0",
-        published_at: "2026-07-18T00:00:00Z",
-        html_url:
-          "https://github.com/ithealthtech/Signify-Suite/releases/tag/v0.5.0",
-        body: "Release notes",
-      }),
-    }),
+    fetchImpl: async (url, options) => {
+      releaseRequest = { url, options };
+      return {
+        ok: true,
+        json: async () => ({
+          tag_name: "v0.5.0",
+          published_at: "2026-07-18T00:00:00Z",
+          html_url:
+            "https://github.com/ithealthtech/Signify-Suite/releases/tag/v0.5.0",
+          body: "Release notes",
+        }),
+      };
+    },
   });
   const backup = operations.createBackup();
   assert(
@@ -58,6 +63,15 @@ async function main() {
   assert(
     update.updateAvailable && update.latestVersion === "0.5.0",
     "Update comparison failed.",
+  );
+  assert(
+    releaseRequest.options.headers.Authorization ===
+      "Bearer sandbox-release-token",
+    "Private release checks must authenticate server-side.",
+  );
+  assert(
+    releaseRequest.options.headers["X-GitHub-Api-Version"] === "2022-11-28",
+    "Release checks must pin the GitHub API version.",
   );
   const unavailableOperations = createApplicationOperations({
     config,

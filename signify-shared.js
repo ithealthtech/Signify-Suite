@@ -97,5 +97,45 @@ window.Signify = (() => {
       .toUpperCase();
   }
 
-  return Object.freeze({ $, $$, api, escapeHtml, initials });
+  function createToast(element, duration = 3000) {
+    let timer;
+    return (message) => {
+      if (!element) return;
+      element.textContent = message;
+      element.classList.add("show");
+      clearTimeout(timer);
+      timer = setTimeout(() => element.classList.remove("show"), duration);
+    };
+  }
+
+  function busy(button, active, label = "Working...") {
+    if (!button) return;
+    if (active) {
+      button.dataset.label = button.textContent;
+      button.textContent = label;
+      button.disabled = true;
+      return;
+    }
+    button.textContent = button.dataset.label || button.textContent;
+    button.disabled = false;
+  }
+
+  function dateLabel(value, options) {
+    if (!value) return "Never";
+    const date = new Date(value);
+    if (Number.isNaN(date.valueOf()))
+      return options ? String(value) : "Unknown";
+    return date.toLocaleString(undefined, options);
+  }
+
+  return Object.freeze({
+    $,
+    $$,
+    api,
+    busy,
+    createToast,
+    dateLabel,
+    escapeHtml,
+    initials,
+  });
 })();

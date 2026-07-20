@@ -1,5 +1,6 @@
 "use strict";
 const path = require("node:path");
+const { decodeKey } = require("./credential-vault.cjs");
 
 function bool(value, fallback = false) {
   if (value === undefined || value === "") return fallback;
@@ -31,6 +32,17 @@ function loadConfig(env = process.env, baseDir = path.join(__dirname, "..")) {
   const sessionHours = Number(env.SIGNATURE_SESSION_HOURS || 12);
   if (!Number.isFinite(sessionHours) || sessionHours < 1 || sessionHours > 168)
     throw new Error("SIGNATURE_SESSION_HOURS must be from 1 to 168.");
+  const workerHeartbeatSeconds = Number(
+    env.SIGNIFY_WORKER_HEARTBEAT_SECONDS || 10,
+  );
+  if (
+    !Number.isInteger(workerHeartbeatSeconds) ||
+    workerHeartbeatSeconds < 5 ||
+    workerHeartbeatSeconds > 300
+  )
+    throw new Error(
+      "SIGNIFY_WORKER_HEARTBEAT_SECONDS must be an integer from 5 to 300.",
+    );
   const mediaLimitMb = Number(env.SIGNIFY_TENANT_MEDIA_LIMIT_MB || 250);
   if (
     !Number.isFinite(mediaLimitMb) ||
@@ -38,6 +50,15 @@ function loadConfig(env = process.env, baseDir = path.join(__dirname, "..")) {
     mediaLimitMb > 10240
   )
     throw new Error("SIGNIFY_TENANT_MEDIA_LIMIT_MB must be from 10 to 10240.");
+  const deletionGraceDays = Number(env.SIGNIFY_TENANT_DELETION_GRACE_DAYS || 7);
+  if (
+    !Number.isInteger(deletionGraceDays) ||
+    deletionGraceDays < 1 ||
+    deletionGraceDays > 90
+  )
+    throw new Error(
+      "SIGNIFY_TENANT_DELETION_GRACE_DAYS must be an integer from 1 to 90.",
+    );
   const allowDefaultAdmin = bool(
       env.SIGNATURE_ALLOW_DEFAULT_ADMIN,
       !production,
@@ -54,9 +75,65 @@ function loadConfig(env = process.env, baseDir = path.join(__dirname, "..")) {
       String(env.SIGNIFY_PUBLIC_URL || "").trim(),
       "SIGNIFY_PUBLIC_URL",
     ),
-    logLevel = String(env.LOG_LEVEL || "info").toLowerCase();
+    logLevel = String(env.LOG_LEVEL || "info").toLowerCase(),
+    jobMode = String(env.SIGNIFY_JOB_MODE || "embedded").toLowerCase(),
+    mediaStorage = String(env.SIGNIFY_MEDIA_STORAGE || "local").toLowerCase();
   if (!["debug", "info", "warn", "error", "silent"].includes(logLevel))
     throw new Error("LOG_LEVEL must be debug, info, warn, error, or silent.");
+  if (!["embedded", "external"].includes(jobMode))
+    throw new Error("SIGNIFY_JOB_MODE must be embedded or external.");
+  if (!["local", "s3"].includes(mediaStorage))
+    throw new Error("SIGNIFY_MEDIA_STORAGE must be local or s3.");
+  const s3 = {
+    bucket: String(env.S3_BUCKET || "").trim(),
+    region: String(env.S3_REGION || "us-east-1").trim(),
+    endpoint: httpUrl(String(env.S3_ENDPOINT || "").trim(), "S3_ENDPOINT"),
+    forcePathStyle: bool(env.S3_FORCE_PATH_STYLE, false),
+    accessKeyId: String(env.S3_ACCESS_KEY_ID || "").trim(),
+    secretAccessKey: String(env.S3_SECRET_ACCESS_KEY || "").trim(),
+  };
+  if (mediaStorage === "s3" && (!s3.bucket || !s3.region))
+    throw new Error(
+      "S3_BUCKET and S3_REGION are required for S3 media storage.",
+    );
+  if (Boolean(s3.accessKeyId) !== Boolean(s3.secretAccessKey))
+    throw new Error(
+      "S3_ACCESS_KEY_ID and S3_SECRET_ACCESS_KEY must be configured together.",
+    );
+  const backupStorage = String(
+      env.SIGNIFY_BACKUP_STORAGE || "local",
+    ).toLowerCase(),
+    backupAccessKeyId = String(env.BACKUP_S3_ACCESS_KEY_ID || "").trim(),
+    backupSecretAccessKey = String(
+      env.BACKUP_S3_SECRET_ACCESS_KEY || "",
+    ).trim(),
+    backupPrefix = String(env.BACKUP_S3_PREFIX || "signify-recovery")
+      .trim()
+      .replace(/^\/+|\/+$/g, ""),
+    backupRetentionDays = Number(env.SIGNIFY_BACKUP_RETENTION_DAYS || 30),
+    backupMinimumCopies = Number(env.SIGNIFY_BACKUP_MINIMUM_COPIES || 7);
+  if (!["local", "s3"].includes(backupStorage))
+    throw new Error("SIGNIFY_BACKUP_STORAGE must be local or s3.");
+  if (
+    !Number.isInteger(backupRetentionDays) ||
+    backupRetentionDays < 1 ||
+    backupRetentionDays > 3650
+  )
+    throw new Error("SIGNIFY_BACKUP_RETENTION_DAYS must be from 1 to 3650.");
+  if (
+    !Number.isInteger(backupMinimumCopies) ||
+    backupMinimumCopies < 1 ||
+    backupMinimumCopies > 365
+  )
+    throw new Error("SIGNIFY_BACKUP_MINIMUM_COPIES must be from 1 to 365.");
+  if (backupStorage === "s3" && !String(env.BACKUP_S3_BUCKET || "").trim())
+    throw new Error("BACKUP_S3_BUCKET is required for S3 backup storage.");
+  if (Boolean(backupAccessKeyId) !== Boolean(backupSecretAccessKey))
+    throw new Error(
+      "BACKUP_S3_ACCESS_KEY_ID and BACKUP_S3_SECRET_ACCESS_KEY must be configured together.",
+    );
+  if (!/^[a-zA-Z0-9][a-zA-Z0-9/_.-]{0,199}$/.test(backupPrefix))
+    throw new Error("BACKUP_S3_PREFIX contains unsupported characters.");
   if (allowDefaultAdmin && !validEmail(bootstrapEmail))
     throw new Error("SIGNIFY_BOOTSTRAP_EMAIL must be a valid email address.");
   if (allowDefaultAdmin && bootstrapPassword.length < 10)
@@ -134,12 +211,143 @@ function loadConfig(env = process.env, baseDir = path.join(__dirname, "..")) {
     throw new Error(
       "Stripe integration requires STRIPE_SECRET_KEY, STRIPE_WEBHOOK_SECRET, and at least one Stripe price.",
     );
+  const credentialEncryptionKey = String(
+    env.SIGNIFY_CREDENTIAL_ENCRYPTION_KEY || "",
+  ).trim();
+  if (production && !credentialEncryptionKey)
+    throw new Error(
+      "SIGNIFY_CREDENTIAL_ENCRYPTION_KEY is required in production.",
+    );
+  if (credentialEncryptionKey) decodeKey(credentialEncryptionKey);
+  const observabilityEndpoint = httpUrl(
+      String(env.SIGNIFY_OBSERVABILITY_ENDPOINT || "").trim(),
+      "SIGNIFY_OBSERVABILITY_ENDPOINT",
+    ),
+    observabilityNumber = (
+      name,
+      fallback,
+      minimum,
+      maximum,
+      integer = false,
+    ) => {
+      const value = Number(env[name] || fallback);
+      if (
+        !Number.isFinite(value) ||
+        (integer && !Number.isInteger(value)) ||
+        value < minimum ||
+        value > maximum
+      )
+        throw new Error(`${name} must be from ${minimum} to ${maximum}.`);
+      return value;
+    };
+  if (
+    production &&
+    observabilityEndpoint &&
+    !observabilityEndpoint.startsWith("https://")
+  )
+    throw new Error(
+      "SIGNIFY_OBSERVABILITY_ENDPOINT must use HTTPS in production.",
+    );
+  if (
+    observabilityEndpoint &&
+    (new URL(observabilityEndpoint).username ||
+      new URL(observabilityEndpoint).password)
+  )
+    throw new Error(
+      "SIGNIFY_OBSERVABILITY_ENDPOINT must not contain URL credentials.",
+    );
   return {
     production,
     port,
     host: env.HOST || "127.0.0.1",
     trustProxy: bool(env.TRUST_PROXY, false),
     logLevel,
+    jobMode,
+    workerHealthPath: String(env.SIGNIFY_WORKER_HEALTH_PATH || "").trim(),
+    workerHeartbeatMs: workerHeartbeatSeconds * 1000,
+    mediaStorage,
+    deletionGraceDays,
+    observability: {
+      endpoint: observabilityEndpoint,
+      token: String(env.SIGNIFY_OBSERVABILITY_TOKEN || "").trim(),
+      service: String(env.SIGNIFY_SERVICE_NAME || "signify-creator").trim(),
+      environment: String(
+        env.SIGNIFY_ENVIRONMENT || (production ? "production" : "development"),
+      ).trim(),
+      batchSize: observabilityNumber(
+        "SIGNIFY_OBSERVABILITY_BATCH_SIZE",
+        100,
+        1,
+        500,
+        true,
+      ),
+      maxBuffer: observabilityNumber(
+        "SIGNIFY_OBSERVABILITY_MAX_BUFFER",
+        1000,
+        100,
+        10000,
+        true,
+      ),
+      flushIntervalMs: observabilityNumber(
+        "SIGNIFY_OBSERVABILITY_FLUSH_MS",
+        5000,
+        1000,
+        60000,
+        true,
+      ),
+      timeoutMs: observabilityNumber(
+        "SIGNIFY_OBSERVABILITY_TIMEOUT_MS",
+        5000,
+        500,
+        30000,
+        true,
+      ),
+      minimumRequestSample: observabilityNumber(
+        "SIGNIFY_ALERT_MIN_REQUESTS",
+        20,
+        1,
+        10000,
+        true,
+      ),
+      errorRateThreshold: observabilityNumber(
+        "SIGNIFY_ALERT_ERROR_RATE",
+        0.05,
+        0.001,
+        1,
+      ),
+      queueAgeThresholdSeconds: observabilityNumber(
+        "SIGNIFY_ALERT_QUEUE_AGE_SECONDS",
+        300,
+        30,
+        86400,
+        true,
+      ),
+      alertCooldownMs:
+        observabilityNumber(
+          "SIGNIFY_ALERT_COOLDOWN_SECONDS",
+          300,
+          30,
+          86400,
+          true,
+        ) * 1000,
+    },
+    recovery: {
+      mode: backupStorage,
+      retentionDays: backupRetentionDays,
+      minimumCopies: backupMinimumCopies,
+      bucket: String(env.BACKUP_S3_BUCKET || "").trim(),
+      region: String(env.BACKUP_S3_REGION || "us-east-1").trim(),
+      endpoint: httpUrl(
+        String(env.BACKUP_S3_ENDPOINT || "").trim(),
+        "BACKUP_S3_ENDPOINT",
+      ),
+      prefix: backupPrefix,
+      forcePathStyle: bool(env.BACKUP_S3_FORCE_PATH_STYLE, false),
+      includeLocalMedia: bool(env.SIGNIFY_BACKUP_INCLUDE_LOCAL_MEDIA, true),
+      accessKeyId: backupAccessKeyId,
+      secretAccessKey: backupSecretAccessKey,
+    },
+    s3,
     sourceRoot: baseDir,
     publicRoot: path.join(baseDir, "public"),
     databasePath:
@@ -148,6 +356,7 @@ function loadConfig(env = process.env, baseDir = path.join(__dirname, "..")) {
     updateRepository: String(
       env.SIGNIFY_UPDATE_REPOSITORY || "ithealthtech/Signify-Suite",
     ).trim(),
+    updateGithubToken: String(env.SIGNIFY_UPDATE_GITHUB_TOKEN || "").trim(),
     signature: {
       sessionHours,
       mediaLimitBytes: Math.floor(mediaLimitMb * 1024 * 1024),
@@ -174,10 +383,9 @@ function loadConfig(env = process.env, baseDir = path.join(__dirname, "..")) {
         "SIGNIFY_MEDIA_BASE_URL",
       ),
       allowRegistration: bool(env.SIGNIFY_ALLOW_REGISTRATION, !production),
+      requireOwnerMfa: bool(env.SIGNIFY_REQUIRE_OWNER_MFA, production),
       applicationOwnerEmail,
-      credentialEncryptionKey: String(
-        env.SIGNIFY_CREDENTIAL_ENCRYPTION_KEY || "",
-      ).trim(),
+      credentialEncryptionKey,
       microsoftClientId: String(
         env.MICROSOFT_CLIENT_ID || env.AZURE_CLIENT_ID || "",
       ).trim(),
