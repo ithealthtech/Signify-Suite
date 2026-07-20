@@ -14,6 +14,26 @@ function sha256(file) {
   return createHash("sha256").update(fs.readFileSync(file)).digest("hex");
 }
 
+function artifactFiles(directory) {
+  return fs.readdirSync(directory, { withFileTypes: true }).flatMap((entry) => {
+    const absolute = path.join(directory, entry.name);
+    return entry.isDirectory() ? artifactFiles(absolute) : [absolute];
+  });
+}
+
+function compareVersions(left, right) {
+  const parse = (value) => {
+    const match = String(value || "").match(/^(\d+)\.(\d+)\.(\d+)/);
+    if (!match) throw new Error(`Invalid semantic version: ${value}`);
+    return match.slice(1).map(Number);
+  };
+  const a = parse(left),
+    b = parse(right);
+  for (let index = 0; index < 3; index += 1)
+    if (a[index] !== b[index]) return a[index] - b[index];
+  return 0;
+}
+
 function verifyArtifact(artifact) {
   const root = fs.realpathSync(artifact),
     manifestFile = path.join(root, "manifest.json"),
@@ -34,7 +54,11 @@ function verifyArtifact(artifact) {
       if (!match) throw new Error(`Invalid deployment checksum entry: ${line}`);
       return { digest: match[1], relative: match[2] };
     });
+  const inventory = new Set();
   for (const entry of entries) {
+    if (inventory.has(entry.relative))
+      throw new Error(`Duplicate deployment checksum entry: ${entry.relative}`);
+    inventory.add(entry.relative);
     const file = path.resolve(root, entry.relative);
     if (file !== root && !file.startsWith(root + path.sep))
       throw new Error("Deployment checksum inventory contains an unsafe path.");
@@ -43,6 +67,13 @@ function verifyArtifact(artifact) {
     if (sha256(file) !== entry.digest)
       throw new Error(`Deployment checksum mismatch: ${entry.relative}.`);
   }
+  const unlisted = artifactFiles(root)
+    .map((file) => path.relative(root, file).replaceAll(path.sep, "/"))
+    .filter((file) => file !== "checksums.txt" && !inventory.has(file));
+  if (unlisted.length)
+    throw new Error(
+      `Deployment artifact contains unlisted files: ${unlisted.join(", ")}`,
+    );
   return { root, manifest, files: entries.length };
 }
 
@@ -130,6 +161,7 @@ async function deployArtifact({
   probe,
   openDatabase,
   snapshotDatabase,
+  allowDowngrade = false,
 }) {
   const verified = verifyArtifact(artifact),
     preflight = preflightDatabase({
@@ -151,6 +183,19 @@ async function deployArtifact({
   const previousTarget = fs.existsSync(current)
     ? fs.realpathSync(current)
     : null;
+  if (previousTarget) {
+    const previous = verifyArtifact(previousTarget);
+    if (
+      !allowDowngrade &&
+      compareVersions(verified.manifest.version, previous.manifest.version) < 0
+    ) {
+      const error = new Error(
+        `Refusing downgrade from ${previous.manifest.version} to ${verified.manifest.version}.`,
+      );
+      error.code = "DEPLOYMENT_DOWNGRADE_BLOCKED";
+      throw error;
+    }
+  }
   if (previousTarget === fs.realpathSync(release))
     return {
       status: "unchanged",
@@ -241,6 +286,7 @@ async function readinessProbe(url, expectedVersion = null, attempts = 30) {
 }
 
 module.exports = {
+  compareVersions,
   deployArtifact,
   consistentSnapshot,
   deploymentBackup,

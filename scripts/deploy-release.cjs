@@ -14,6 +14,7 @@ async function main() {
     currentLink = process.env.SIGNIFY_CURRENT_LINK,
     databasePath = process.env.DATABASE_PATH,
     backupDirectory = process.env.BACKUP_DIR,
+    allowDowngrade = process.env.SIGNIFY_DEPLOY_ALLOW_DOWNGRADE === "true",
     restart = process.env.SIGNIFY_DEPLOY_RESTART_SCRIPT,
     healthUrl = process.env.SIGNIFY_DEPLOY_HEALTH_URL;
   if (!releasesDirectory || !currentLink || !restart || !healthUrl)
@@ -26,6 +27,7 @@ async function main() {
     currentLink,
     databasePath,
     backupDirectory,
+    allowDowngrade,
     install: installDependencies,
     restart: () => restartScript(restart),
     probe: (manifest) => readinessProbe(healthUrl, manifest?.version || null),

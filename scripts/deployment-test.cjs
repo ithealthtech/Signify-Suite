@@ -100,6 +100,9 @@ async function main() {
 
   const verified = verifyArtifact(newArtifact);
   assert.equal(verified.files, 2);
+  fs.writeFileSync(path.join(newArtifact, "injected.cjs"), "untrusted");
+  assert.throws(() => verifyArtifact(newArtifact), /unlisted files/i);
+  fs.rmSync(path.join(newArtifact, "injected.cjs"));
   fs.appendFileSync(path.join(badArtifact, "server.cjs"), "tampered");
   assert.throws(() => verifyArtifact(badArtifact), /checksum mismatch/i);
 
@@ -140,6 +143,23 @@ async function main() {
   assert.equal(probes, 1);
   assert.equal(installs, 1);
 
+  await assert.rejects(
+    deployArtifact({
+      artifact: oldArtifact,
+      releasesDirectory: releases,
+      currentLink: current,
+      databasePath: database,
+      backupDirectory: backups,
+      openDatabase: opener(database),
+      snapshotDatabase: (source, target) => fs.copyFileSync(source, target),
+      restart: async () => {
+        throw new Error("Downgrade must be blocked before restart.");
+      },
+      probe: async () => {},
+    }),
+    (error) => error.code === "DEPLOYMENT_DOWNGRADE_BLOCKED",
+  );
+
   let rollbackProbes = 0;
   await assert.rejects(
     deployArtifact({
@@ -173,7 +193,7 @@ async function main() {
     retryDelay: 100,
   });
   console.log(
-    "Deployment test passed: artifact verification, migration preflight, atomic activation, health gate, and rollback",
+    "Deployment test passed: closed artifact inventory, downgrade prevention, migration preflight, atomic activation, health gate, and rollback",
   );
 }
 

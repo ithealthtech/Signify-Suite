@@ -203,6 +203,11 @@ exec node --env-file=/opt/signify/shared/.env.local \
   "$artifact/scripts/deploy-release.cjs" "$artifact"
 ```
 
+The controller rejects files not listed in `checksums.txt`, checksum changes,
+and version downgrades. A disaster-recovery rollback to an older application
+version requires the operator to set `SIGNIFY_DEPLOY_ALLOW_DOWNGRADE=true` for
+that deployment invocation and document the database compatibility decision.
+
 Configure the persistent environment:
 
 ```env
