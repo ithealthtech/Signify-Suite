@@ -28,7 +28,7 @@ jobs:
       - run: npm ci
       - run: npm run check
       - run: npm audit --omit=dev
-      - uses: actions/dependency-review-action@v4
+      - uses: actions/dependency-review-action@v5
         if: github.event_name == 'pull_request'
       - uses: actions/upload-artifact@v7
         with:
