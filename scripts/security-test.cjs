@@ -41,6 +41,16 @@ assert.match(
   /^permissions:\r?\n(?: {2}.+\r?\n)* {2}actions: read$/m,
   "CodeQL requires actions: read to access workflow-run metadata",
 );
+assert.match(
+  codeqlWorkflow,
+  /^ {10}upload: never$/m,
+  "Private repositories without GitHub Advanced Security must retain SARIF without uploading it",
+);
+assert.match(
+  codeqlWorkflow,
+  /^ {8}uses: actions\/upload-artifact@v6$/m,
+  "CodeQL SARIF must be retained as a workflow artifact",
+);
 
 console.log(
   "Security test passed: high-confidence secret patterns and required governance controls",
