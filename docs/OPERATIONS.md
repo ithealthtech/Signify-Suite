@@ -115,3 +115,14 @@ Track database size, WAL growth, backup duration, media usage, failed jobs, and
 request latency. Each tenant's combined upload and generated-banner storage is
 bounded by `SIGNIFY_TENANT_MEDIA_LIMIT_MB`; aged unreferenced media is removed by
 the maintenance worker after seven days.
+
+## PostgreSQL acceptance boundary
+
+The PostgreSQL schema and migration runner are transition tools, not the current
+web runtime authority. Run `npm run postgres:test` with a dedicated
+`TEST_DATABASE_URL` to prove clean migrations, idempotency, and core constraints
+against the target provider. Run `npm run postgres:migrate` only with an
+intentionally configured `DATABASE_URL`. Both commands enforce production TLS,
+use bounded connection timeouts, and serialize migration writers with an
+advisory lock. Do not retire SQLite backups or select PostgreSQL for web traffic
+until repository conversion and imported-data isolation tests are complete.

@@ -31,6 +31,44 @@ are available only in the Application Owner control plane.
 Signify uses Node's built-in HTTP server and SQLite. Express, PostgreSQL, and a
 separate web server are not required inside the application process.
 
+### PostgreSQL transition
+
+The release includes a production-typed PostgreSQL schema and migration runner,
+but the web request path remains on SQLite until its repositories are converted
+and tenant-isolation acceptance passes against PostgreSQL. `DATABASE_URL` is not
+a runtime database selector yet.
+
+Validate a dedicated, empty sandbox database with:
+
+```bash
+TEST_DATABASE_URL=postgresql://signify_test:password@host:5432/signify_test \
+DATABASE_SSL_MODE=verify-full npm run postgres:test
+```
+
+Apply migrations to an intentionally configured database with:
+
+```bash
+DATABASE_URL=postgresql://signify:password@host:5432/signify \
+DATABASE_SSL_MODE=verify-full npm run postgres:migrate
+```
+
+Production rejects `DATABASE_SSL_MODE=disable`. Supply `DATABASE_CA_CERT` for a
+private certificate authority. Migration history has SHA-256 checksums and is
+serialized with a PostgreSQL advisory lock.
+
+Import a fully migrated SQLite database only into an empty PostgreSQL target:
+
+```bash
+SOURCE_DATABASE_PATH=/persistent/signify/data/signify-creator.db \
+DATABASE_URL=postgresql://signify:password@host:5432/signify \
+DATABASE_SSL_MODE=verify-full npm run postgres:import
+```
+
+The importer opens SQLite read-only, verifies integrity and foreign keys, copies
+all application tables in dependency order inside one serializable transaction,
+and compares every target row count. Any populated target or mismatch aborts and
+rolls back the import.
+
 ## Quick Start
 
 Clone the repository and install dependencies:

@@ -55,6 +55,9 @@ const root = path.join(__dirname, ".."),
     "scripts/backup.cjs",
     "scripts/grant-application-owner.cjs",
     "scripts/migrate-media-to-s3.cjs",
+    "scripts/postgres-migrate.cjs",
+    "scripts/postgres-import.cjs",
+    "scripts/postgres-test.cjs",
     "scripts/reset-signature-admin.cjs",
     "scripts/rotate-integration-credentials.cjs",
     "scripts/setup.cjs",
@@ -125,7 +128,9 @@ const packageMetadata = JSON.parse(
   builtAt = sourceDate
     ? new Date(sourceDate * 1000).toISOString()
     : new Date().toISOString(),
-  migrations = releaseFiles(path.join(destination, "server", "migrations"))
+  sqliteMigrations = releaseFiles(
+    path.join(destination, "server", "migrations"),
+  )
     .filter((file) => file.endsWith(".sql"))
     .map((file) => ({
       version: path.basename(file),
@@ -138,7 +143,17 @@ const packageMetadata = JSON.parse(
     commit: commitSha(),
     builtAt,
     node: packageMetadata.engines.node,
-    migrations,
+    migrations: {
+      sqlite: sqliteMigrations,
+      postgres: releaseFiles(
+        path.join(destination, "server", "postgres", "migrations"),
+      )
+        .filter((file) => file.endsWith(".sql"))
+        .map((file) => ({
+          version: path.basename(file),
+          sha256: sha256(file),
+        })),
+    },
   };
 fs.writeFileSync(
   path.join(destination, "manifest.json"),

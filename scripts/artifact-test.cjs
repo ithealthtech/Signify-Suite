@@ -63,6 +63,9 @@ const manifest = JSON.parse(
   ),
   migrationFiles = relativeFiles
     .filter((file) => /^server\/migrations\/\d+.*\.sql$/.test(file))
+    .sort(),
+  postgresMigrationFiles = relativeFiles
+    .filter((file) => /^server\/postgres\/migrations\/\d+.*\.sql$/.test(file))
     .sort();
 if (
   manifest.schemaVersion !== 1 ||
@@ -74,15 +77,36 @@ if (
 )
   throw new Error("Production manifest metadata is invalid.");
 if (
-  JSON.stringify(manifest.migrations.map((item) => item.version)) !==
+  JSON.stringify(manifest.migrations.sqlite.map((item) => item.version)) !==
   JSON.stringify(migrationFiles.map((file) => path.basename(file)))
 )
   throw new Error("Production manifest migration history is incomplete.");
-for (const migration of manifest.migrations) {
+if (
+  JSON.stringify(manifest.migrations.postgres.map((item) => item.version)) !==
+  JSON.stringify(postgresMigrationFiles.map((file) => path.basename(file)))
+)
+  throw new Error(
+    "Production manifest PostgreSQL migration history is incomplete.",
+  );
+for (const migration of manifest.migrations.sqlite) {
   const file = path.join(artifact, "server", "migrations", migration.version),
     digest = createHash("sha256").update(fs.readFileSync(file)).digest("hex");
   if (digest !== migration.sha256)
     throw new Error(`Migration checksum mismatch: ${migration.version}`);
+}
+for (const migration of manifest.migrations.postgres) {
+  const file = path.join(
+      artifact,
+      "server",
+      "postgres",
+      "migrations",
+      migration.version,
+    ),
+    digest = createHash("sha256").update(fs.readFileSync(file)).digest("hex");
+  if (digest !== migration.sha256)
+    throw new Error(
+      `PostgreSQL migration checksum mismatch: ${migration.version}`,
+    );
 }
 
 const checksumLines = fs
@@ -122,5 +146,5 @@ if (populatedSecret)
   );
 
 console.log(
-  `Artifact test passed: ${relativeFiles.length} allowlisted files, ${checksumEntries.size} checksums, ${manifest.migrations.length} migrations, empty runtime directories, and no populated provider secrets`,
+  `Artifact test passed: ${relativeFiles.length} allowlisted files, ${checksumEntries.size} checksums, ${manifest.migrations.sqlite.length} SQLite and ${manifest.migrations.postgres.length} PostgreSQL migrations, empty runtime directories, and no populated provider secrets`,
 );
