@@ -8,6 +8,8 @@ const state = {
   stripePrices: [],
   mfa: null,
   sessions: [],
+  flags: {},
+  fleet: null,
 };
 let pendingReauthentication = null;
 
@@ -592,6 +594,117 @@ async function loadJobs() {
         .join("")
     : '<tr><td colspan="6"><div class="empty">No jobs match this view.</div></td></tr>';
 }
+async function loadFleet() {
+  const result = await api("/api/platform/control/overview");
+  state.fleet = result;
+  const stats = [
+    ["Release", result.fleet.version],
+    ["Database", result.fleet.database],
+    ["Schema migrations", result.fleet.migrations],
+    ["Media storage", result.fleet.mediaStorage],
+    ["Queued jobs", result.usage.queued_jobs],
+    ["Dead letters", result.usage.dead_lettered_jobs],
+  ];
+  $("#fleetStats").innerHTML = stats
+    .map(
+      ([label, value]) =>
+        `<div class="stat-card"><span>${escapeHtml(label)}</span><strong>${escapeHtml(String(value ?? "-"))}</strong></div>`,
+    )
+    .join("");
+  $("#fleetRows").innerHTML = result.tenants.length
+    ? result.tenants
+        .map(
+          (tenant) =>
+            `<tr><td><strong>${escapeHtml(tenant.name)}</strong></td><td><span class="status-dot ${escapeHtml(tenant.status)}">${escapeHtml(tenant.status)}</span></td><td>${tenant.users}</td><td>${tenant.templates}</td><td>${tenant.campaigns}</td><td>${tenant.tracked_clicks}</td></tr>`,
+        )
+        .join("")
+    : '<tr><td colspan="6"><div class="empty">No tenants are configured.</div></td></tr>';
+  $("#activeSupportAccess").hidden = !result.supportAccess;
+  if (result.supportAccess)
+    $("#activeSupportSummary").textContent =
+      `${result.supportAccess.organizationName} until ${dateLabel(result.supportAccess.expiresAt)}.`;
+}
+
+async function saveTenantFeatures(event) {
+  event.preventDefault();
+  const form = event.currentTarget,
+    button = event.submitter,
+    reason = form.elements.reason.value,
+    organizationId = encodeURIComponent(state.detail.organization.id),
+    keys = ["campaigns", "directory_sync", "tracking"];
+  busy(button, true, "Saving...");
+  try {
+    const changed = keys.filter(
+      (key) =>
+        form.elements[key].checked !== Boolean(state.flags[key]?.enabled),
+    );
+    if (!changed.length) throw new Error("No feature access changes to save.");
+    for (const key of changed) {
+      const result = await api(
+        `/api/platform/organizations/${organizationId}/feature-flags/${key}`,
+        {
+          method: "PUT",
+          body: JSON.stringify({ enabled: form.elements[key].checked, reason }),
+        },
+      );
+      state.flags = result.flags;
+    }
+    form.elements.reason.value = "";
+    toast("Feature access updated");
+  } catch (error) {
+    toast(error.message);
+  } finally {
+    busy(button, false);
+  }
+}
+
+async function startSupportAccess(event) {
+  event.preventDefault();
+  const form = event.currentTarget,
+    button = event.submitter,
+    body = Object.fromEntries(new FormData(form)),
+    organizationId = encodeURIComponent(state.detail.organization.id);
+  busy(button, true, "Opening...");
+  try {
+    const result = await api(
+      `/api/platform/organizations/${organizationId}/support-access`,
+      {
+        method: "POST",
+        body: JSON.stringify(body),
+      },
+    );
+    form.reset();
+    $("#tenantDialog").close();
+    await loadFleet();
+    window.open(result.workspaceUrl, "_blank", "noopener");
+    toast("Audited support access started");
+  } catch (error) {
+    toast(error.message);
+  } finally {
+    busy(button, false);
+  }
+}
+
+async function endSupportAccess(event) {
+  event.preventDefault();
+  const form = event.currentTarget,
+    button = event.submitter;
+  busy(button, true, "Ending...");
+  try {
+    await api("/api/platform/support-access", {
+      method: "DELETE",
+      body: JSON.stringify({ reason: form.elements.reason.value }),
+    });
+    form.reset();
+    $("#supportAccessEndDialog").close();
+    await loadFleet();
+    toast("Support access ended");
+  } catch (error) {
+    toast(error.message);
+  } finally {
+    busy(button, false);
+  }
+}
 function openJobRetry(button) {
   const form = $("#retryJobForm");
   form.reset();
@@ -623,12 +736,14 @@ async function retryJob(event) {
 }
 async function openTenant(id) {
   const encodedId = encodeURIComponent(id),
-    [result, lifecycle] = await Promise.all([
+    [result, lifecycle, featureResult] = await Promise.all([
       api(`/api/platform/organizations/${encodedId}`),
       api(`/api/platform/organizations/${encodedId}/lifecycle`),
+      api(`/api/platform/organizations/${encodedId}/feature-flags`),
     ]);
   state.detail = result;
   state.lifecycle = lifecycle;
+  state.flags = featureResult.flags;
   $("#detailName").textContent = result.organization.name;
   $("#detailSlug").textContent = result.organization.slug;
   $("#detailSummary").innerHTML =
@@ -649,6 +764,13 @@ async function openTenant(id) {
   checkoutForm.plan.value = result.subscription.plan;
   checkoutForm.customerEmail.value =
     result.members.find((member) => member.role === "admin")?.email || "";
+  const featureForm = $("#tenantFeatureForm");
+  for (const key of ["campaigns", "directory_sync", "tracking"])
+    featureForm.elements[key].checked = Boolean(
+      featureResult.flags[key]?.enabled,
+    );
+  featureForm.elements.reason.value = "";
+  $("#supportAccessForm").reset();
   $("#stripeSubscriptionForm").elements.plan.value = result.subscription.plan;
   $("#detailMembers").innerHTML = result.members.length
     ? result.members
@@ -912,6 +1034,7 @@ function bindEvents() {
       if (button.dataset.section === "audit") await loadAudit();
       if (button.dataset.section === "operations") await loadOperations();
       if (button.dataset.section === "jobs") await loadJobs();
+      if (button.dataset.section === "fleet") await loadFleet();
     }),
   );
   $("#openCreateTenant").addEventListener("click", () => {
@@ -941,6 +1064,8 @@ function bindEvents() {
   );
   $("#createTenantForm").addEventListener("submit", createTenant);
   $("#tenantStatusForm").addEventListener("submit", updateTenantStatus);
+  $("#tenantFeatureForm").addEventListener("submit", saveTenantFeatures);
+  $("#supportAccessForm").addEventListener("submit", startSupportAccess);
   $("#subscriptionForm").addEventListener("submit", updateSubscription);
   $("#checkoutForm").addEventListener("submit", createCheckout);
   $("#stripeSubscriptionForm").addEventListener(
@@ -1067,6 +1192,19 @@ function bindEvents() {
   );
   $("#refreshJobs").addEventListener("click", () =>
     loadJobs().catch((error) => toast(error.message)),
+  );
+  $("#refreshFleet").addEventListener("click", () =>
+    loadFleet().catch((error) => toast(error.message)),
+  );
+  $("#endSupportAccess").addEventListener("click", () => {
+    $("#supportAccessEndForm").reset();
+    $("#supportAccessEndDialog").showModal();
+  });
+  $("#supportAccessEndForm").addEventListener("submit", endSupportAccess);
+  $$("[data-close-support-access]").forEach((button) =>
+    button.addEventListener("click", () =>
+      $("#supportAccessEndDialog").close(),
+    ),
   );
   $("#jobStatus").addEventListener("change", () =>
     loadJobs().catch((error) => toast(error.message)),

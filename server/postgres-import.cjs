@@ -33,9 +33,14 @@ const IMPORT_TABLES = [
   "application_owner_mfa_recovery_codes",
   "mfa_login_challenges",
   "tenant_deletion_requests",
+  "feature_flags",
+  "support_access_grants",
 ];
 
-const BOOLEAN_COLUMNS = new Set(["stripe_webhook_events.livemode"]);
+const BOOLEAN_COLUMNS = new Set([
+  "stripe_webhook_events.livemode",
+  "feature_flags.enabled",
+]);
 
 function quoteIdentifier(value) {
   if (!/^[a-z][a-z0-9_]*$/.test(value))

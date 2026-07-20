@@ -152,6 +152,25 @@
 .control-form .button {
   justify-self: start;
 }
+.feature-toggle-list {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+}
+.feature-toggle-list label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 42px;
+  padding: 10px 12px;
+  border: 1px solid #d7dce5;
+  border-radius: 6px;
+  background: #fff;
+}
+.feature-toggle-list input {
+  min-height: auto;
+  margin: 0;
+}
 .form-grid > label {
   flex: 1;
 }
@@ -193,6 +212,9 @@ hr {
     flex-direction: column;
   }
   .detail-summary {
+    grid-template-columns: 1fr;
+  }
+  .feature-toggle-list {
     grid-template-columns: 1fr;
   }
   .platform-shell {

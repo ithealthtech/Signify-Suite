@@ -33,6 +33,9 @@ const {
 const { createPlatformJobRoutes } = require("./routes/platform-jobs.cjs");
 const { createTenantLifecycle } = require("./routes/platform-tenants.cjs");
 const {
+  createPlatformControlRoutes,
+} = require("./routes/platform-control.cjs");
+const {
   BRAND_FONT_STACKS,
   campaignInput,
   canonicalBrandFont,
@@ -366,6 +369,7 @@ function createSignaturePortal({
   operations,
   enqueueJob,
   deletionGraceDays = 7,
+  packageVersion = "unknown",
 }) {
   seed(db, signature);
   const credentialVault = createCredentialVault(
@@ -636,11 +640,32 @@ function createSignaturePortal({
       error.code = "AUTH_REQUIRED";
       throw error;
     }
-    const row = db
+    db.prepare(
+      "UPDATE support_access_grants SET status='expired',updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE status='active' AND expires_at<=strftime('%Y-%m-%dT%H:%M:%fZ','now')",
+    ).run();
+    let row = db
       .prepare(
         `SELECT u.*,m.role AS membership_role,m.status AS membership_status,o.id AS organization_id,o.name AS organization_name,o.slug AS organization_slug,o.settings_json AS organization_settings,s.id AS session_id,s.csrf_token_hash FROM signature_sessions s JOIN signature_users u ON u.id=s.user_id JOIN organization_memberships m ON m.user_id=u.id AND m.organization_id=s.organization_id JOIN organizations o ON o.id=m.organization_id WHERE s.token_hash=? AND s.expires_at>strftime('%Y-%m-%dT%H:%M:%fZ','now') AND u.status='active' AND m.status='active' AND o.status='active'`,
       )
       .get(tokenHash(token));
+    if (!row)
+      row = db
+        .prepare(
+          `SELECT u.*,u.signature_json,'admin' AS membership_role,'active' AS membership_status,
+           o.id AS organization_id,o.name AS organization_name,o.slug AS organization_slug,
+           o.status AS organization_status,o.settings_json AS organization_settings,
+           s.id AS session_id,s.csrf_token_hash
+           FROM signature_sessions s
+           JOIN signature_users u ON u.id=s.user_id
+           JOIN application_owners ao ON ao.user_id=u.id AND ao.status='active'
+           JOIN organizations o ON o.id=s.organization_id AND o.status='active'
+           JOIN support_access_grants g ON g.session_id=s.id AND g.owner_user_id=u.id
+             AND g.organization_id=o.id AND g.status='active'
+             AND g.expires_at>strftime('%Y-%m-%dT%H:%M:%fZ','now')
+           WHERE s.token_hash=? AND s.expires_at>strftime('%Y-%m-%dT%H:%M:%fZ','now')
+             AND u.status='active'`,
+        )
+        .get(tokenHash(token));
     if (!row) {
       const error = new Error("Session expired.");
       error.status = 401;
@@ -702,6 +727,10 @@ function createSignaturePortal({
       /^\/api\/platform\/organizations\/[^/]+\/(?:export|deletion)$/.test(
         pathname,
       ) ||
+      /^\/api\/platform\/organizations\/[^/]+\/(?:feature-flags|support-access)(?:\/|$)/.test(
+        pathname,
+      ) ||
+      pathname === "/api/platform/support-access" ||
       pathname === "/api/platform/billing/reconcile" ||
       (req.method === "DELETE" &&
         /^\/api\/platform\/integrations\/(?:microsoft|stripe)$/.test(
@@ -1776,6 +1805,14 @@ function createSignaturePortal({
       enqueueJob,
       mediaStorage,
       deletionGraceDays,
+    }),
+    platformControl = createPlatformControlRoutes({
+      db,
+      json,
+      readJsonBody,
+      recordAudit: recordApplicationAudit,
+      packageVersion,
+      mediaStorage,
     });
   Object.assign(workflowHandlers, tenantLifecycle.jobHandlers);
   const handle = async function handle(req, res, url, requestId) {
@@ -2542,6 +2579,8 @@ function createSignaturePortal({
         return;
       if (await handlePlatformJobs({ req, res, url, requestId, owner })) return;
       if (await tenantLifecycle.routes({ req, res, url, requestId, owner }))
+        return;
+      if (await platformControl.routes({ req, res, url, requestId, owner }))
         return;
       if (url.pathname === "/api/platform/integrations" && req.method === "GET")
         return json(
@@ -4454,6 +4493,24 @@ function createSignaturePortal({
     const user = requireSession(req);
     if (!["GET", "HEAD", "OPTIONS"].includes(req.method))
       enforceCsrf(req, user);
+    const gatedFeature = url.pathname.startsWith("/api/signature/campaigns")
+      ? "campaigns"
+      : url.pathname === "/api/signature/directory-sync"
+        ? "directory_sync"
+        : url.pathname === "/api/signature/analytics"
+          ? "tracking"
+          : null;
+    if (
+      gatedFeature &&
+      !platformControl.featureEnabled(user.organizationId, gatedFeature)
+    )
+      throw Object.assign(
+        new Error("This feature is disabled for the tenant."),
+        {
+          status: 403,
+          code: "FEATURE_DISABLED",
+        },
+      );
     const jobMatch = url.pathname.match(/^\/api\/signature\/jobs\/([^/]+)$/);
     if (jobMatch && req.method === "GET") {
       requireAdmin(user);

@@ -6,6 +6,8 @@ campaign banners, approvals, bulk rollout, tenant-scoped Microsoft 365
 integration, Application Owner billing, analytics, audit history, uploads, QR
 codes, and vCards.
 
+![Signify Creator Application Owner fleet dashboard](docs/images/application-owner-fleet.png)
+
 ## Access Model
 
 Signify has three explicit access tiers:

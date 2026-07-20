@@ -276,6 +276,7 @@ function createApplication(options = {}) {
     operations,
     enqueueJob: jobQueue.enqueue,
     deletionGraceDays: config.deletionGraceDays,
+    packageVersion: packageMetadata.version,
   });
   Object.assign(jobHandlers, signaturePortal.jobHandlers);
   const rateBuckets = new Map(),

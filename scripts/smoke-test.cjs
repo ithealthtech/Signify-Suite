@@ -2036,6 +2036,88 @@ async function main() {
         !JSON.stringify(result.body).includes("microsoft-setup-secret"),
       "first-run readiness did not complete safely",
     );
+    result = await request(baseUrl, "/api/platform/control/overview", {
+      jar: adminJar,
+    });
+    assert(
+      result.response.status === 200 &&
+        result.body.fleet.version === "0.4.0" &&
+        result.body.fleet.migrations >= 21 &&
+        result.body.tenants.some(
+          (tenant) => tenant.id === controlPlaneOrganizationId,
+        ),
+      "consolidated usage or fleet status was incomplete",
+    );
+    result = await request(
+      baseUrl,
+      `/api/platform/organizations/${controlPlaneOrganizationId}/feature-flags/campaigns`,
+      {
+        method: "PUT",
+        body: { enabled: false, reason: "Campaign maintenance regression" },
+        jar: adminJar,
+      },
+    );
+    assert(
+      result.response.status === 200 &&
+        result.body.flags.campaigns.enabled === false,
+      "tenant feature flag was not persisted",
+    );
+    result = await request(baseUrl, "/api/signature/campaigns", {
+      jar: controlPlaneTenantJar,
+    });
+    assert(
+      result.response.status === 403 &&
+        result.body.error.code === "FEATURE_DISABLED",
+      "disabled tenant feature remained reachable",
+    );
+    await request(
+      baseUrl,
+      `/api/platform/organizations/${controlPlaneOrganizationId}/feature-flags/campaigns`,
+      {
+        method: "PUT",
+        body: { enabled: true, reason: "Campaign maintenance complete" },
+        jar: adminJar,
+      },
+    );
+    result = await request(
+      baseUrl,
+      `/api/platform/organizations/${controlPlaneOrganizationId}/support-access`,
+      {
+        method: "POST",
+        body: { minutes: 15, reason: "Customer support regression" },
+        jar: adminJar,
+      },
+    );
+    assert(
+      result.response.status === 201 &&
+        result.body.grant.organizationId === controlPlaneOrganizationId,
+      "time-bounded support access was not created",
+    );
+    result = await request(baseUrl, "/api/signature/session", {
+      jar: adminJar,
+    });
+    assert(
+      result.response.status === 200 &&
+        result.body.user.organizationId === controlPlaneOrganizationId &&
+        result.body.user.applicationOwner === true,
+      "support access did not establish a scoped workspace session",
+    );
+    result = await request(baseUrl, "/api/platform/support-access", {
+      method: "DELETE",
+      body: { reason: "Support work complete" },
+      jar: adminJar,
+    });
+    assert(
+      result.response.status === 200 && result.body.revoked === true,
+      "support access could not be revoked",
+    );
+    result = await request(baseUrl, "/api/signature/session", {
+      jar: adminJar,
+    });
+    assert(
+      result.response.status === 200 && result.body.user === null,
+      "revoked support access remained usable",
+    );
     result = await request(
       baseUrl,
       `/api/platform/organizations/${controlPlaneOrganizationId}/export`,

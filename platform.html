@@ -38,6 +38,7 @@
           Updates &amp; backups
         </button>
         <button data-section="jobs" type="button">Background jobs</button>
+        <button data-section="fleet" type="button">Fleet &amp; usage</button>
         <button data-section="audit" type="button">Application audit</button>
       </aside>
       <section class="admin-content">
@@ -393,6 +394,41 @@
                 </tr>
               </thead>
               <tbody id="ownerRows"></tbody>
+            </table>
+          </div>
+        </section>
+        <section class="admin-section" data-admin-section="fleet">
+          <div class="page-head">
+            <div>
+              <span class="eyebrow">Cross-tenant operations</span>
+              <h1>Fleet &amp; usage</h1>
+              <p>Release, schema, queue, and tenant utilization.</p>
+            </div>
+            <button class="button" id="refreshFleet" type="button">
+              Refresh
+            </button>
+          </div>
+          <div class="stat-grid platform-stats" id="fleetStats"></div>
+          <div class="control-form" id="activeSupportAccess" hidden>
+            <h2>Active support access</h2>
+            <p id="activeSupportSummary"></p>
+            <button class="button danger" id="endSupportAccess" type="button">
+              End support access
+            </button>
+          </div>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Tenant</th>
+                  <th>Status</th>
+                  <th>People</th>
+                  <th>Templates</th>
+                  <th>Campaigns</th>
+                  <th>Tracked clicks</th>
+                </tr>
+              </thead>
+              <tbody id="fleetRows"></tbody>
             </table>
           </div>
         </section>
@@ -812,6 +848,42 @@
             </button>
           </div>
         </div>
+        <form class="control-form" id="tenantFeatureForm">
+          <h3>Feature access</h3>
+          <div class="feature-toggle-list">
+            <label><input name="campaigns" type="checkbox" /> Campaigns</label>
+            <label
+              ><input name="directory_sync" type="checkbox" /> Microsoft
+              directory sync</label
+            >
+            <label
+              ><input name="tracking" type="checkbox" /> Link analytics</label
+            >
+          </div>
+          <label>Reason<input name="reason" required minlength="3" /></label>
+          <button class="button" type="submit">Save feature access</button>
+        </form>
+        <form class="control-form" id="supportAccessForm">
+          <h3>Support access</h3>
+          <p>
+            Opens this tenant as a temporary, audited Tenant Administrator
+            session.
+          </p>
+          <div class="form-grid">
+            <label
+              >Duration<select name="minutes">
+                <option value="15">15 minutes</option>
+                <option value="30" selected>30 minutes</option>
+                <option value="60">1 hour</option>
+                <option value="120">2 hours</option>
+              </select></label
+            >
+            <label>Reason<input name="reason" required minlength="3" /></label>
+          </div>
+          <button class="button" type="submit">
+            Open workspace for support
+          </button>
+        </form>
         <form class="control-form" id="subscriptionForm">
           <h3>Subscription</h3>
           <div class="form-grid three">
@@ -951,6 +1023,32 @@
           <button class="button primary" id="confirmOperation" type="submit">
             Continue
           </button>
+        </div>
+      </form>
+    </dialog>
+    <dialog id="supportAccessEndDialog">
+      <form class="dialog-form" id="supportAccessEndForm">
+        <div class="dialog-head">
+          <div>
+            <span class="eyebrow">Privileged access</span>
+            <h2>End support access</h2>
+          </div>
+          <button type="button" data-close-support-access aria-label="Close">
+            &times;
+          </button>
+        </div>
+        <p>
+          This immediately removes access to the tenant workspace from this
+          owner session.
+        </p>
+        <label
+          >Reason<input name="reason" required minlength="3" autocomplete="off"
+        /></label>
+        <div class="dialog-actions">
+          <button class="button" type="button" data-close-support-access>
+            Cancel
+          </button>
+          <button class="button danger" type="submit">End access</button>
         </div>
       </form>
     </dialog>
