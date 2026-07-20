@@ -1,5 +1,13 @@
 "use strict";
-const { $, $$, api, escapeHtml, initials } = window.Signify;
+const {
+  $,
+  $$,
+  api,
+  busy: sharedBusy,
+  createToast,
+  escapeHtml,
+  initials,
+} = window.Signify;
 const els = {
   authView: $("#authView"),
   appView: $("#appView"),
@@ -38,12 +46,7 @@ let state = {
   previewController: null,
 };
 
-function toast(message) {
-  els.toast.textContent = message;
-  els.toast.classList.add("show");
-  clearTimeout(toast.timer);
-  toast.timer = setTimeout(() => els.toast.classList.remove("show"), 2600);
-}
+const toast = createToast(els.toast, 2600);
 function activeUser() {
   return (
     state.users.find((user) => user.id === state.selectedUserId) ||
@@ -52,15 +55,7 @@ function activeUser() {
   );
 }
 function setBusy(button, busy, label = "Working…") {
-  if (!button) return;
-  if (busy) {
-    button.dataset.label = button.textContent;
-    button.textContent = label;
-    button.disabled = true;
-  } else {
-    button.textContent = button.dataset.label || button.textContent;
-    button.disabled = false;
-  }
+  sharedBusy(button, busy, label);
 }
 function markDirty() {
   state.dirty = true;

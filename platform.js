@@ -1,5 +1,13 @@
 "use strict";
-const { $, $$, api: rawApi, escapeHtml } = window.Signify;
+const {
+  $,
+  $$,
+  api: rawApi,
+  busy,
+  createToast,
+  dateLabel,
+  escapeHtml,
+} = window.Signify;
 const state = {
   page: 1,
   pagination: null,
@@ -23,11 +31,6 @@ async function api(path, options = {}) {
   }
 }
 
-function dateLabel(value) {
-  if (!value) return "Never";
-  const date = new Date(value);
-  return Number.isNaN(date.valueOf()) ? "Unknown" : date.toLocaleString();
-}
 function fileSize(value) {
   const bytes = Number(value || 0);
   if (bytes < 1024) return `${bytes} B`;
@@ -35,23 +38,7 @@ function fileSize(value) {
     exponent = Math.min(Math.floor(Math.log(bytes) / Math.log(1024)), 3);
   return `${(bytes / 1024 ** exponent).toFixed(exponent > 1 ? 1 : 0)} ${units[exponent - 1]}`;
 }
-function toast(message) {
-  const element = $("#toast");
-  element.textContent = message;
-  element.classList.add("show");
-  clearTimeout(toast.timer);
-  toast.timer = setTimeout(() => element.classList.remove("show"), 3000);
-}
-function busy(button, active, label = "Working...") {
-  if (active) {
-    button.dataset.label = button.textContent;
-    button.textContent = label;
-    button.disabled = true;
-  } else {
-    button.textContent = button.dataset.label || button.textContent;
-    button.disabled = false;
-  }
-}
+const toast = createToast($("#toast"));
 function requestOwnerReauthentication() {
   if (pendingReauthentication) return pendingReauthentication.promise;
   const form = $("#ownerReauthForm"),

@@ -64,6 +64,39 @@ async function main() {
     api("/slow", { timeoutMs: 10 }),
     (error) => error.code === "REQUEST_TIMEOUT",
   );
+  const { busy, createToast, dateLabel } = context.window.Signify,
+    button = {
+      dataset: {},
+      disabled: false,
+      textContent: "Save",
+    };
+  busy(button, true, "Saving...");
+  assert.deepEqual(
+    { disabled: button.disabled, label: button.textContent },
+    { disabled: true, label: "Saving..." },
+  );
+  busy(button, false);
+  assert.deepEqual(
+    { disabled: button.disabled, label: button.textContent },
+    { disabled: false, label: "Save" },
+  );
+  const classes = new Set(),
+    toastElement = {
+      classList: {
+        add: (value) => classes.add(value),
+        remove: (value) => classes.delete(value),
+      },
+      textContent: "",
+    },
+    showToast = createToast(toastElement, 10);
+  showToast("Saved");
+  assert.equal(toastElement.textContent, "Saved");
+  assert.equal(classes.has("show"), true);
+  await new Promise((resolve) => setTimeout(resolve, 20));
+  assert.equal(classes.has("show"), false);
+  assert.equal(dateLabel(""), "Never");
+  assert.equal(dateLabel("invalid"), "Unknown");
+  assert.equal(dateLabel("invalid", { year: "numeric" }), "invalid");
   const platformSource = fs.readFileSync(
     path.join(__dirname, "..", "platform.js"),
     "utf8",

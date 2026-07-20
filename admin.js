@@ -1,5 +1,14 @@
 "use strict";
-const { $, $$, api, escapeHtml, initials } = window.Signify;
+const {
+  $,
+  $$,
+  api,
+  busy: sharedBusy,
+  createToast,
+  dateLabel: sharedDateLabel,
+  escapeHtml,
+  initials,
+} = window.Signify;
 let state = {
   me: null,
   config: null,
@@ -19,23 +28,9 @@ const brandFonts = {
   verdana: "Verdana, Arial, sans-serif",
   georgia: 'Georgia, "Times New Roman", serif',
 };
-function toast(message) {
-  const element = $("#toast");
-  element.textContent = message;
-  element.classList.add("show");
-  clearTimeout(toast.timer);
-  toast.timer = setTimeout(() => element.classList.remove("show"), 2500);
-}
+const toast = createToast($("#toast"), 2500);
 function busy(button, on, label = "Working…") {
-  if (!button) return;
-  if (on) {
-    button.dataset.label = button.textContent;
-    button.textContent = label;
-    button.disabled = true;
-  } else {
-    button.textContent = button.dataset.label || button.textContent;
-    button.disabled = false;
-  }
+  sharedBusy(button, on, label);
 }
 async function waitForJob(id, onStatus = () => {}) {
   for (let attempt = 0; attempt < 120; attempt += 1) {
@@ -51,17 +46,13 @@ async function waitForJob(id, onStatus = () => {}) {
   );
 }
 function dateLabel(value) {
-  if (!value) return "Never";
-  const date = new Date(value);
-  return Number.isNaN(date.valueOf())
-    ? value
-    : date.toLocaleString(undefined, {
-        month: "short",
-        day: "numeric",
-        year: "numeric",
-        hour: "numeric",
-        minute: "2-digit",
-      });
+  return sharedDateLabel(value, {
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+  });
 }
 function templateOptions() {
   return (
