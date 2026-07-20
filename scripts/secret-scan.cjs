@@ -15,7 +15,9 @@ const root = path.join(__dirname, ".."),
     .split("\0")
     .filter(Boolean),
   forbiddenNames = files.filter(
-    (file) => /(^|\/)\.env(?:\..+)?$/.test(file) && file !== ".env.example",
+    (file) =>
+      /(^|\/)\.env(?:\..+)?$/.test(file) &&
+      !/(^|\/)\.env(?:\.[a-z0-9_-]+)*\.example$/i.test(file),
   ),
   findings = [];
 

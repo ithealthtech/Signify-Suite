@@ -23,6 +23,7 @@ are available only in the Application Owner control plane.
 
 ## Requirements
 
+- Docker Engine with Docker Compose for the recommended self-hosted deployment
 - Node.js 22.13 or newer; Node.js 24 LTS is recommended
 - npm 10 or newer
 - A persistent, writable filesystem
@@ -123,6 +124,43 @@ configured bootstrap account, and select **Application > First-time setup**.
 Database migrations run automatically when the server starts.
 
 ## Production Installation
+
+### Recommended: Docker Compose
+
+Docker Compose runs an immutable, non-root web container, a separately
+supervised worker, one-shot setup and migration tools, health checks, and named
+persistent volumes. The application port binds to loopback so TLS terminates at
+the host reverse proxy.
+
+```bash
+cp .env.container.example .env.container
+node -e "console.log(require('node:crypto').randomBytes(32).toString('base64'))"
+```
+
+Set the generated value as `SIGNIFY_CREDENTIAL_ENCRYPTION_KEY` and replace the
+public URL, company, and owner-email examples in `.env.container`. Then run:
+
+```bash
+docker compose build
+docker compose run --rm setup
+docker compose run --rm migrate
+docker compose up -d web worker
+docker compose exec web node scripts/doctor.cjs
+```
+
+The setup command prints the generated initial password. Sign in at the public
+HTTPS URL, enroll Application Owner MFA, and complete **First-time setup**.
+Configure nginx, Caddy, or the hosting proxy to forward HTTPS traffic to
+`127.0.0.1:4173` with the original host and `X-Forwarded-Proto` headers.
+
+Runtime data is stored only in the `signify-data`, `signify-uploads`, and
+`signify-generated-banners` volumes. The container root filesystem is read-only,
+Linux capabilities are dropped, and both services run as the unprivileged
+`node` user.
+
+This SQLite Compose topology supports one web container and one worker on a
+single host. Do not add web or worker replicas until PostgreSQL is the verified
+runtime authority.
 
 ### Install a release package
 

@@ -59,6 +59,8 @@ for (const required of [
   "checksums.txt",
   "public/signature-it-banner.png",
   "scripts/access-review.cjs",
+  "scripts/migrate.cjs",
+  "scripts/doctor.cjs",
 ])
   if (!relativeFiles.includes(required))
     throw new Error(`Production artifact is missing ${required}.`);

@@ -1,5 +1,29 @@
 # Deployment
 
+## Recommended container deployment
+
+Use `compose.yaml` for a single self-hosted server. Copy
+`.env.container.example` to `.env.container`, configure the public HTTPS URL,
+owner email, company name, and a generated credential-encryption key, then run:
+
+```bash
+docker compose build
+docker compose run --rm setup
+docker compose run --rm migrate
+docker compose up -d web worker
+docker compose exec web node scripts/doctor.cjs
+```
+
+Publish only the reverse proxy. The Compose port maps to `127.0.0.1` and must
+not be exposed directly. Persist all three named volumes and include them in the
+host backup policy. Setup and migrations are one-shot, idempotent services; the
+web service does not process background jobs, and the worker does not accept
+HTTP traffic.
+
+The current SQLite topology is limited to one host, one web process, and one
+worker process. Horizontal replicas require the documented PostgreSQL runtime
+conversion and acceptance suite.
+
 ## 1. Build and install
 
 ```powershell
