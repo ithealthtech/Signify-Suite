@@ -198,21 +198,25 @@ traffic arrives through a trusted reverse proxy.
 Use this table when filling in `.env.local`. Microsoft 365 and Stripe can be
 configured later from **Application > First-time setup**.
 
-| Setting                             | What to enter                                            | Required |
-| ----------------------------------- | -------------------------------------------------------- | -------- |
-| `NODE_ENV`                          | `production`                                             | Yes      |
-| `HOST` / `PORT`                     | Private listen address and hosting-provider port         | Yes      |
-| `DATABASE_PATH`                     | Absolute path on persistent storage                      | Yes      |
-| `SIGNIFY_PUBLIC_URL`                | Public HTTPS address, with no trailing slash             | Yes      |
-| `SIGNIFY_ASSET_BASE_URL`            | Usually the same value as `SIGNIFY_PUBLIC_URL`           | Yes      |
-| `SIGNIFY_MEDIA_BASE_URL`            | Usually the same value as `SIGNIFY_PUBLIC_URL`           | Yes      |
-| `SIGNIFY_APPLICATION_OWNER_EMAIL`   | Email for the first Application Owner                    | Yes      |
-| `SIGNIFY_CREDENTIAL_ENCRYPTION_KEY` | One generated 32-byte key; keep it permanently           | Yes      |
-| `SIGNIFY_JOB_MODE`                  | `embedded`, or `external` with a supervised worker       | Yes      |
-| `SIGNATURE_ALLOW_DEFAULT_ADMIN`     | `false` after the first account exists                   | Yes      |
-| `TRUST_PROXY`                       | `true` only behind a trusted, private reverse proxy      | No       |
-| `MICROSOFT_*`                       | Leave blank and complete Microsoft setup in the owner UI | No       |
-| `STRIPE_*`                          | Leave blank and complete Stripe setup in the owner UI    | No       |
+| Setting                             | What to enter                                            | Required          |
+| ----------------------------------- | -------------------------------------------------------- | ----------------- |
+| `NODE_ENV`                          | `production`                                             | Yes               |
+| `HOST` / `PORT`                     | Private listen address and hosting-provider port         | Yes               |
+| `DATABASE_PATH`                     | Absolute path on persistent storage                      | Yes               |
+| `SIGNIFY_PUBLIC_URL`                | Public HTTPS address, with no trailing slash             | Yes               |
+| `SIGNIFY_ASSET_BASE_URL`            | Usually the same value as `SIGNIFY_PUBLIC_URL`           | Yes               |
+| `SIGNIFY_MEDIA_BASE_URL`            | Usually the same value as `SIGNIFY_PUBLIC_URL`           | Yes               |
+| `SIGNIFY_APPLICATION_OWNER_EMAIL`   | Email for the first Application Owner                    | Yes               |
+| `SIGNIFY_CREDENTIAL_ENCRYPTION_KEY` | One generated 32-byte key; keep it permanently           | Yes               |
+| `SIGNIFY_JOB_MODE`                  | `embedded`, or `external` with a supervised worker       | Yes               |
+| `SIGNIFY_MEDIA_STORAGE`             | `local` for one host, or `s3` for private object storage | Yes               |
+| `S3_BUCKET` / `S3_REGION`           | Tenant-media bucket and its region                       | With `s3`         |
+| `S3_ENDPOINT`                       | S3-compatible endpoint; blank for AWS                    | Provider-specific |
+| `S3_ACCESS_KEY_ID` / secret         | Static credentials, or workload identity                 | Provider-specific |
+| `SIGNATURE_ALLOW_DEFAULT_ADMIN`     | `false` after the first account exists                   | Yes               |
+| `TRUST_PROXY`                       | `true` only behind a trusted, private reverse proxy      | No                |
+| `MICROSOFT_*`                       | Leave blank and complete Microsoft setup in the owner UI | No                |
+| `STRIPE_*`                          | Leave blank and complete Stripe setup in the owner UI    | No                |
 
 Generate the encryption key once:
 
@@ -251,6 +255,13 @@ npm run worker
 Run exactly one worker for a SQLite deployment. The queue uses atomic claims,
 but additional worker processes do not improve SQLite write throughput.
 
+For multi-instance or disposable application hosts, set
+`SIGNIFY_MEDIA_STORAGE=s3`. Signify stores private, server-side-encrypted
+objects under tenant-prefixed keys and serves stable signature URLs through the
+application. Configure bucket versioning and lifecycle retention at the storage
+provider. Do not make the bucket public. Static access keys are optional when
+the host supplies an IAM workload identity.
+
 ### 5. Configure the reverse proxy
 
 Terminate TLS at nginx, Caddy, IIS, Apache, or the hosting platform. Proxy to
@@ -268,8 +279,8 @@ port directly to the internet.
 These locations must survive deployments and restarts:
 
 - the SQLite database plus its `-wal` and `-shm` files
-- `public/uploads/`
-- `public/generated-banners/`
+- `public/uploads/` and `public/generated-banners/` when using local media
+- the private object-storage bucket and version history when using S3 media
 - the configured backup directory
 
 Do not deploy Signify to an ephemeral serverless filesystem.

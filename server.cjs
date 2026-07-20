@@ -8,6 +8,7 @@ const { loadConfig } = require("./server/config.cjs");
 const { openDatabase } = require("./server/database.cjs");
 const { createSignaturePortal } = require("./server/signature-portal.cjs");
 const { startJobWorker } = require("./server/job-queue.cjs");
+const { createMediaStorage } = require("./server/media-storage.cjs");
 const {
   applyPendingRestore,
   createApplicationOperations,
@@ -197,8 +198,48 @@ function serve(config, req, res, pathname, requestId) {
           : "no-cache",
     "X-Request-Id": requestId,
   });
-  if (req.method === "HEAD") return res.end();
+  if (req.method === "HEAD") {
+    res.end();
+    return true;
+  }
   fs.createReadStream(resolved).pipe(res);
+}
+
+async function serveObjectMedia(mediaStorage, req, res, pathname, requestId) {
+  if (mediaStorage.mode !== "s3") return false;
+  const match = pathname.match(
+    /^\/(uploads|generated-banners)\/([a-z0-9_-]+)\/([a-z0-9_.-]+)$/i,
+  );
+  if (!match || !["GET", "HEAD"].includes(req.method)) return false;
+  let object;
+  try {
+    object = await mediaStorage.read({
+      collection: match[1],
+      organizationId: match[2],
+      name: match[3],
+    });
+  } catch (error) {
+    if (error.name === "NoSuchKey" || error.$metadata?.httpStatusCode === 404)
+      return json(
+        res,
+        404,
+        { error: { code: "MEDIA_NOT_FOUND", message: "Media not found." } },
+        requestId,
+      );
+    throw error;
+  }
+  res.writeHead(200, {
+    "Content-Type": object.contentType,
+    ...(Number.isFinite(object.contentLength)
+      ? { "Content-Length": object.contentLength }
+      : {}),
+    "Cache-Control": object.cacheControl,
+    "X-Content-Type-Options": "nosniff",
+    "X-Request-Id": requestId,
+  });
+  if (req.method === "HEAD") return res.end();
+  object.body.pipe(res);
+  return true;
 }
 
 function createApplication(options = {}) {
@@ -211,6 +252,9 @@ function createApplication(options = {}) {
     fetchImpl: options.fetchImpl,
     version: packageMetadata.version,
   });
+  const mediaStorage =
+    options.mediaStorage ||
+    createMediaStorage(config, { s3Client: options.s3Client });
   const signaturePortal = createSignaturePortal({
     db,
     production: config.production,
@@ -219,6 +263,7 @@ function createApplication(options = {}) {
     readJsonBody,
     readBody,
     publicRoot: config.publicRoot,
+    mediaStorage,
     trustProxy: config.trustProxy,
     fetchImpl: options.fetchImpl,
     stripeFactory: options.stripeFactory,
@@ -417,6 +462,10 @@ function createApplication(options = {}) {
           requestId,
         );
       }
+      if (
+        await serveObjectMedia(mediaStorage, req, res, url.pathname, requestId)
+      )
+        return;
       const handled = await signaturePortal(req, res, url, requestId);
       if (handled !== false) return handled;
       if (req.method !== "GET" && req.method !== "HEAD")
@@ -458,7 +507,7 @@ function createApplication(options = {}) {
       );
     }
   };
-  return { config, db, handler, operations, restored };
+  return { config, db, handler, mediaStorage, operations, restored };
 }
 
 function startServer(options = {}) {
@@ -468,6 +517,7 @@ function startServer(options = {}) {
     application.config.jobMode === "embedded"
       ? startJobWorker(application.db, {
           publicRoot: application.config.publicRoot,
+          mediaStorage: application.mediaStorage,
         })
       : { stop: async () => {} };
   server.requestTimeout = 30000;
@@ -519,4 +569,4 @@ function startServer(options = {}) {
 }
 
 if (require.main === module) startServer();
-module.exports = { createApplication, startServer };
+module.exports = { createApplication, serveObjectMedia, startServer };

@@ -137,9 +137,11 @@ function startJobWorker(db, options = {}) {
           DELETE FROM email_verification_tokens WHERE expires_at<=strftime('%Y-%m-%dT%H:%M:%fZ','now') OR used_at IS NOT NULL;
           DELETE FROM oauth_states WHERE expires_at<=strftime('%Y-%m-%dT%H:%M:%fZ','now');`),
       "maintenance.media": () =>
-        options.publicRoot
-          ? cleanupOrphanMedia(db, options.publicRoot, 7)
-          : { removedFiles: 0, removedBytes: 0 },
+        options.mediaStorage
+          ? options.mediaStorage.cleanup(db, 7)
+          : options.publicRoot
+            ? cleanupOrphanMedia(db, options.publicRoot, 7)
+            : { removedFiles: 0, removedBytes: 0 },
       ...(options.handlers || {}),
     },
     queue = createJobQueue(db, handlers, options);

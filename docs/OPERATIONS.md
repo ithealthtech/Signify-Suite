@@ -12,6 +12,11 @@
 5. Start `server.cjs` and require `GET /api/ready` to return HTTP 200 before
    moving proxy traffic.
 
+When `SIGNIFY_MEDIA_STORAGE=s3`, verify private object put/get/delete access and
+bucket versioning before moving traffic. Stable signature media is proxied by
+the application; provider credentials and raw object keys are never returned to
+the browser.
+
 ## Monitor
 
 - `GET /api/live` proves the Node process can serve requests.

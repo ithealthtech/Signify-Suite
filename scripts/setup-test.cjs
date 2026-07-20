@@ -19,6 +19,8 @@ const root = path.join(__dirname, ".."),
     NODE_ENV: "production",
     HOST: "127.0.0.1",
     PORT: "4199",
+    SIGNIFY_JOB_MODE: "external",
+    SIGNIFY_MEDIA_STORAGE: "local",
     DATABASE_PATH: databasePath,
     BACKUP_DIR: backupDirectory,
     SIGNIFY_PUBLIC_URL: "https://setup.example.com",
@@ -113,6 +115,8 @@ try {
 
   const configured = parseEnv(fs.readFileSync(environmentFile, "utf8"));
   assert.equal(configured.SIGNATURE_ALLOW_DEFAULT_ADMIN, "false");
+  assert.equal(configured.SIGNIFY_JOB_MODE, "external");
+  assert.equal(configured.SIGNIFY_MEDIA_STORAGE, "local");
   assert.equal(configured.SIGNIFY_BOOTSTRAP_PASSWORD || "", "");
   assert.equal(
     configured.SIGNIFY_APPLICATION_OWNER_EMAIL,

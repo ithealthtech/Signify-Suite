@@ -56,11 +56,30 @@ function loadConfig(env = process.env, baseDir = path.join(__dirname, "..")) {
       "SIGNIFY_PUBLIC_URL",
     ),
     logLevel = String(env.LOG_LEVEL || "info").toLowerCase(),
-    jobMode = String(env.SIGNIFY_JOB_MODE || "embedded").toLowerCase();
+    jobMode = String(env.SIGNIFY_JOB_MODE || "embedded").toLowerCase(),
+    mediaStorage = String(env.SIGNIFY_MEDIA_STORAGE || "local").toLowerCase();
   if (!["debug", "info", "warn", "error", "silent"].includes(logLevel))
     throw new Error("LOG_LEVEL must be debug, info, warn, error, or silent.");
   if (!["embedded", "external"].includes(jobMode))
     throw new Error("SIGNIFY_JOB_MODE must be embedded or external.");
+  if (!["local", "s3"].includes(mediaStorage))
+    throw new Error("SIGNIFY_MEDIA_STORAGE must be local or s3.");
+  const s3 = {
+    bucket: String(env.S3_BUCKET || "").trim(),
+    region: String(env.S3_REGION || "us-east-1").trim(),
+    endpoint: httpUrl(String(env.S3_ENDPOINT || "").trim(), "S3_ENDPOINT"),
+    forcePathStyle: bool(env.S3_FORCE_PATH_STYLE, false),
+    accessKeyId: String(env.S3_ACCESS_KEY_ID || "").trim(),
+    secretAccessKey: String(env.S3_SECRET_ACCESS_KEY || "").trim(),
+  };
+  if (mediaStorage === "s3" && (!s3.bucket || !s3.region))
+    throw new Error(
+      "S3_BUCKET and S3_REGION are required for S3 media storage.",
+    );
+  if (Boolean(s3.accessKeyId) !== Boolean(s3.secretAccessKey))
+    throw new Error(
+      "S3_ACCESS_KEY_ID and S3_SECRET_ACCESS_KEY must be configured together.",
+    );
   if (allowDefaultAdmin && !validEmail(bootstrapEmail))
     throw new Error("SIGNIFY_BOOTSTRAP_EMAIL must be a valid email address.");
   if (allowDefaultAdmin && bootstrapPassword.length < 10)
@@ -153,6 +172,8 @@ function loadConfig(env = process.env, baseDir = path.join(__dirname, "..")) {
     trustProxy: bool(env.TRUST_PROXY, false),
     logLevel,
     jobMode,
+    mediaStorage,
+    s3,
     sourceRoot: baseDir,
     publicRoot: path.join(baseDir, "public"),
     databasePath:

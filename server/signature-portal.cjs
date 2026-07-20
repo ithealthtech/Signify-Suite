@@ -354,6 +354,7 @@ function createSignaturePortal({
   readJsonBody,
   readBody,
   publicRoot = path.join(__dirname, "..", "public"),
+  mediaStorage,
   trustProxy = false,
   fetchImpl = fetch,
   stripeFactory = (key) =>
@@ -3924,14 +3925,22 @@ function createSignaturePortal({
       }
       const ext = processed.format === "jpeg" ? "jpg" : processed.format,
         name = `${slug(body.kind || "image")}-${randomUUID()}.${ext}`,
-        stored = writeTenantMedia({
-          publicRoot,
-          organizationId: user.organizationId,
-          collection: "uploads",
-          name,
-          bytes: processed.bytes,
-          limitBytes: signature.mediaLimitBytes || 250 * 1024 * 1024,
-        });
+        stored = await (mediaStorage
+          ? mediaStorage.write({
+              organizationId: user.organizationId,
+              collection: "uploads",
+              name,
+              bytes: processed.bytes,
+              limitBytes: signature.mediaLimitBytes || 250 * 1024 * 1024,
+            })
+          : writeTenantMedia({
+              publicRoot,
+              organizationId: user.organizationId,
+              collection: "uploads",
+              name,
+              bytes: processed.bytes,
+              limitBytes: signature.mediaLimitBytes || 250 * 1024 * 1024,
+            }));
       recordAudit(user, "asset.uploaded", "asset", name, {
         kind: limited(body.kind || "image", 40),
         sourceBytes: bytes.length,
@@ -3993,14 +4002,22 @@ function createSignaturePortal({
       );
       gif.finish();
       const name = `banner-${randomUUID()}.gif`,
-        stored = writeTenantMedia({
-          publicRoot,
-          organizationId: user.organizationId,
-          collection: "generated-banners",
-          name,
-          bytes: Buffer.from(gif.bytes()),
-          limitBytes: signature.mediaLimitBytes || 250 * 1024 * 1024,
-        });
+        stored = await (mediaStorage
+          ? mediaStorage.write({
+              organizationId: user.organizationId,
+              collection: "generated-banners",
+              name,
+              bytes: Buffer.from(gif.bytes()),
+              limitBytes: signature.mediaLimitBytes || 250 * 1024 * 1024,
+            })
+          : writeTenantMedia({
+              publicRoot,
+              organizationId: user.organizationId,
+              collection: "generated-banners",
+              name,
+              bytes: Buffer.from(gif.bytes()),
+              limitBytes: signature.mediaLimitBytes || 250 * 1024 * 1024,
+            }));
       recordAudit(user, "asset.generated", "asset", name, {
         kind: "animated-banner",
         frames: frames.length,

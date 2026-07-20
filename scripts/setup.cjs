@@ -113,8 +113,16 @@ function environmentFile(env, existingKeys = []) {
     "PORT",
     "TRUST_PROXY",
     "LOG_LEVEL",
+    "SIGNIFY_JOB_MODE",
     "DATABASE_PATH",
     "BACKUP_DIR",
+    "SIGNIFY_MEDIA_STORAGE",
+    "S3_BUCKET",
+    "S3_REGION",
+    "S3_ENDPOINT",
+    "S3_FORCE_PATH_STYLE",
+    "S3_ACCESS_KEY_ID",
+    "S3_SECRET_ACCESS_KEY",
     "SIGNATURE_SESSION_HOURS",
     "SIGNIFY_TENANT_MEDIA_LIMIT_MB",
     "SIGNATURE_ALLOW_DEFAULT_ADMIN",
@@ -141,7 +149,7 @@ function environmentFile(env, existingKeys = []) {
     ...existingKeys.filter(
       (key) =>
         !managedKeys.includes(key) &&
-        /^(SIGNIFY_|SIGNATURE_|MICROSOFT_|AZURE_|STRIPE_)/.test(key),
+        /^(SIGNIFY_|SIGNATURE_|MICROSOFT_|AZURE_|STRIPE_|S3_)/.test(key),
     ),
   ];
   return `${keys.map((key) => `${key}=${environmentValue(env[key] || "")}`).join("\n")}\n`;

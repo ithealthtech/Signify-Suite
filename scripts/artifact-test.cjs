@@ -114,7 +114,7 @@ for (const [file, expected] of checksumEntries) {
 
 const example = fs.readFileSync(path.join(artifact, ".env.example"), "utf8"),
   populatedSecret = example.match(
-    /^(?:MICROSOFT_CLIENT_SECRET|STRIPE_SECRET_KEY|STRIPE_WEBHOOK_SECRET|SIGNIFY_CREDENTIAL_ENCRYPTION_KEY)=(?!\s*$).+/m,
+    /^(?:MICROSOFT_CLIENT_SECRET|STRIPE_SECRET_KEY|STRIPE_WEBHOOK_SECRET|SIGNIFY_CREDENTIAL_ENCRYPTION_KEY|S3_SECRET_ACCESS_KEY)=(?!\s*$).+/m,
   );
 if (populatedSecret)
   throw new Error(
