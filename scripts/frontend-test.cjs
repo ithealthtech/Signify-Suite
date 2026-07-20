@@ -104,6 +104,10 @@ async function main() {
     signatureSource = fs.readFileSync(
       path.join(__dirname, "..", "signature.js"),
       "utf8",
+    ),
+    platformHtml = fs.readFileSync(
+      path.join(__dirname, "..", "platform.html"),
+      "utf8",
     );
   for (const unsafeAccess of [
     "busy(event.currentTarget, false)",
@@ -129,8 +133,26 @@ async function main() {
     /loadSetup\(\{ navigate: true \}\)/,
     "MFA completion must resume first-time setup discovery",
   );
+  for (const formId of ["microsoftSetupForm", "stripeConnectForm"])
+    assert.match(
+      platformHtml,
+      new RegExp(
+        `<form[^>]+id="${formId}"[^>]+autocomplete="off"[^>]+data-form-type="other"`,
+      ),
+      `${formId} must opt out of login autofill`,
+    );
+  assert.equal(
+    (platformHtml.match(/autocomplete="new-password"/g) || []).length,
+    2,
+    "Provider secrets must be marked as new credentials",
+  );
+  assert.equal(
+    (platformHtml.match(/data-1p-ignore/g) || []).length,
+    4,
+    "Provider identifiers and secrets must opt out of password-manager autofill",
+  );
   console.log(
-    "Frontend tests passed: GET deduplication, write isolation, structured errors, and timeouts",
+    "Frontend tests passed: GET deduplication, write isolation, structured errors, timeouts, and provider credential autofill isolation",
   );
 }
 

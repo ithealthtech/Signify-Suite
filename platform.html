@@ -76,7 +76,12 @@
             /></label>
             <button class="button primary" type="submit">Save identity</button>
           </form>
-          <form class="control-form integration-form" id="microsoftSetupForm">
+          <form
+            class="control-form integration-form"
+            id="microsoftSetupForm"
+            autocomplete="off"
+            data-form-type="other"
+          >
             <h2>2. Microsoft 365 application</h2>
             <div class="form-grid">
               <label
@@ -84,12 +89,16 @@
                   name="clientId"
                   required
                   autocomplete="off"
+                  data-1p-ignore
+                  data-lpignore="true"
               /></label>
               <label
                 >Home tenant ID<input
                   name="homeTenantId"
                   required
                   autocomplete="off"
+                  data-1p-ignore
+                  data-lpignore="true"
               /></label>
             </div>
             <label
@@ -97,7 +106,9 @@
                 name="clientSecret"
                 type="password"
                 required
-                autocomplete="off"
+                autocomplete="new-password"
+                data-1p-ignore
+                data-lpignore="true"
             /></label>
             <label
               >Reason<input
@@ -236,7 +247,12 @@
             </div>
           </div>
           <div class="integration-status" id="stripeIntegrationStatus"></div>
-          <form class="control-form integration-form" id="stripeConnectForm">
+          <form
+            class="control-form integration-form"
+            id="stripeConnectForm"
+            autocomplete="off"
+            data-form-type="other"
+          >
             <h2>Stripe account</h2>
             <p>
               Use a test secret key during setup. The key is encrypted before it
@@ -246,7 +262,9 @@
               >Stripe secret key<input
                 name="secretKey"
                 type="password"
-                autocomplete="off"
+                autocomplete="new-password"
+                data-1p-ignore
+                data-lpignore="true"
                 spellcheck="false"
                 required
             /></label>
