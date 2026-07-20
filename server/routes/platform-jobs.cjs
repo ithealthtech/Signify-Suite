@@ -24,6 +24,7 @@ function jobDto(row) {
     availableAt: row.available_at,
     lockedAt: row.locked_at,
     completedAt: row.completed_at,
+    deadLetteredAt: row.dead_lettered_at,
     lastError: row.last_error,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
@@ -40,7 +41,7 @@ function createPlatformJobRoutes({ db, json, readJsonBody, recordAudit }) {
   }) {
     if (!url.pathname.startsWith("/api/platform/jobs")) return false;
     if (url.pathname === "/api/platform/jobs" && req.method === "GET") {
-      const allowed = new Set(["all", "queued", "running", "failed"]),
+      const allowed = new Set(["all", "queued", "running", "dead_lettered"]),
         status = allowed.has(url.searchParams.get("status"))
           ? url.searchParams.get("status")
           : "all",
@@ -52,11 +53,11 @@ function createPlatformJobRoutes({ db, json, readJsonBody, recordAudit }) {
           .prepare(
             `SELECT j.id,j.organization_id,o.name organization_name,j.type,j.status,
               j.attempts,j.max_attempts,j.available_at,j.locked_at,j.completed_at,
-              j.last_error,j.created_at,j.updated_at
+              j.dead_lettered_at,j.last_error,j.created_at,j.updated_at
              FROM background_jobs j
              LEFT JOIN organizations o ON o.id=j.organization_id
              WHERE (?='all' OR j.status=?)
-             ORDER BY CASE j.status WHEN 'failed' THEN 0 WHEN 'running' THEN 1
+             ORDER BY CASE j.status WHEN 'dead_lettered' THEN 0 WHEN 'running' THEN 1
                WHEN 'queued' THEN 2 ELSE 3 END,j.updated_at DESC
              LIMIT ?`,
           )
@@ -71,15 +72,15 @@ function createPlatformJobRoutes({ db, json, readJsonBody, recordAudit }) {
         job = db
           .prepare(
             `UPDATE background_jobs SET status='queued',attempts=0,locked_at=NULL,
-              completed_at=NULL,last_error='',available_at=strftime('%Y-%m-%dT%H:%M:%fZ','now'),
+              completed_at=NULL,dead_lettered_at=NULL,last_error='',available_at=strftime('%Y-%m-%dT%H:%M:%fZ','now'),
               updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now')
-             WHERE id=? AND status='failed' RETURNING id,type,organization_id`,
+             WHERE id=? AND status='dead_lettered' RETURNING id,type,organization_id`,
           )
           .get(id);
       if (!job)
-        throw Object.assign(new Error("Failed job not found."), {
+        throw Object.assign(new Error("Dead-lettered job not found."), {
           status: 404,
-          code: "FAILED_JOB_NOT_FOUND",
+          code: "DEAD_LETTERED_JOB_NOT_FOUND",
         });
       recordAudit(
         owner,

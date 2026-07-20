@@ -365,8 +365,8 @@
           <div class="table-tools">
             <label
               >Status<select id="jobStatus">
-                <option value="all">All active and failed</option>
-                <option value="failed" selected>Failed</option>
+                <option value="all">All recent</option>
+                <option value="dead_lettered" selected>Dead letter</option>
                 <option value="running">Running</option>
                 <option value="queued">Queued</option>
               </select></label
@@ -557,7 +557,7 @@
         <div class="dialog-head">
           <div>
             <span class="eyebrow">Queue recovery</span>
-            <h2>Retry failed job</h2>
+            <h2>Retry dead-lettered job</h2>
           </div>
           <button type="button" data-close-job aria-label="Close">Ã—</button>
         </div>

@@ -1429,10 +1429,10 @@ async function main() {
     application.db
       .prepare(
         `INSERT INTO background_jobs(id,type,payload_json,status,attempts,max_attempts,last_error)
-         VALUES ('smoke-failed-job','provider.sync','{"secret":"must-not-leak"}','failed',5,5,'Provider timeout')`,
+         VALUES ('smoke-failed-job','provider.sync','{"secret":"must-not-leak"}','dead_lettered',5,5,'Provider timeout')`,
       )
       .run();
-    result = await request(baseUrl, "/api/platform/jobs?status=failed", {
+    result = await request(baseUrl, "/api/platform/jobs?status=dead_lettered", {
       jar: adminJar,
     });
     assert(

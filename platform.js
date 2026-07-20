@@ -386,7 +386,7 @@ async function loadJobs() {
     ? result.jobs
         .map(
           (job) =>
-            `<tr><td><strong>${escapeHtml(job.type)}</strong>${job.lastError ? `<small class="job-error">${escapeHtml(job.lastError)}</small>` : ""}</td><td>${escapeHtml(job.organizationName)}</td><td><span class="status-dot ${escapeHtml(job.status)}">${escapeHtml(job.status)}</span></td><td>${job.attempts} / ${job.maxAttempts}</td><td>${escapeHtml(dateLabel(job.updatedAt))}</td><td><button class="button" type="button" data-retry-job="${escapeHtml(job.id)}" data-job-type="${escapeHtml(job.type)}" ${job.status !== "failed" ? "disabled" : ""}>Retry</button></td></tr>`,
+            `<tr><td><strong>${escapeHtml(job.type)}</strong>${job.lastError ? `<small class="job-error">${escapeHtml(job.lastError)}</small>` : ""}</td><td>${escapeHtml(job.organizationName)}</td><td><span class="status-dot ${escapeHtml(job.status)}">${escapeHtml(job.status.replaceAll("_", " "))}</span></td><td>${job.attempts} / ${job.maxAttempts}</td><td>${escapeHtml(dateLabel(job.updatedAt))}</td><td><button class="button" type="button" data-retry-job="${escapeHtml(job.id)}" data-job-type="${escapeHtml(job.type)}" ${job.status !== "dead_lettered" ? "disabled" : ""}>Retry</button></td></tr>`,
         )
         .join("")
     : '<tr><td colspan="6"><div class="empty">No jobs match this view.</div></td></tr>';

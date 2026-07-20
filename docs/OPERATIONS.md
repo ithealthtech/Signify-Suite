@@ -35,9 +35,10 @@ authoritative.
 
 ## Background Jobs
 
-Jobs are stored in `background_jobs`. The worker atomically claims one job at a
-time, retries transient errors with exponential backoff, and recovers stale
-locks after restart.
+Jobs are stored in `background_jobs`. The worker atomically claims jobs, permits
+only one active job per tenant, retries transient errors with exponential
+backoff, and recovers stale locks after restart. Jobs that exhaust their retry
+budget move to `dead_lettered` with their terminal error and timestamp retained.
 
 Use `SIGNIFY_JOB_MODE=embedded` when the web server is the only supervised
 Node.js process. For a separately supervised worker, configure
@@ -45,9 +46,10 @@ Node.js process. For a separately supervised worker, configure
 same environment and persistent storage. Stop both processes before replacing
 or restoring the SQLite database. Run exactly one worker for SQLite.
 
-Do not edit running jobs manually. Diagnose the stored `last_error`, correct the
-root cause, then set a failed job to `queued` with `attempts=0`,
-`locked_at=NULL`, and `available_at` set to the current UTC time.
+Do not edit jobs manually. An Application Owner can inspect recent jobs in the
+control plane, diagnose the stored error, correct its root cause, and requeue a
+dead-lettered job with a required audit reason. Requeueing resets the attempt
+count and terminal timestamp without replacing the original job identity.
 
 ## Backup And Restore
 

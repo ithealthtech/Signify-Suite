@@ -34,6 +34,9 @@ async function main() {
         attempts += 1;
         if (attempts === 1) throw new Error("transient failure");
       },
+      terminal: async () => {
+        throw new Error("permanent failure");
+      },
     },
     { retryBaseSeconds: 1, staleAfterMinutes: 1 },
   );
@@ -72,6 +75,42 @@ async function main() {
       .get(retry.id);
     assert.equal(retryRow.status, "completed");
     assert.equal(retryRow.attempts, 2);
+
+    const terminal = queue.enqueue("terminal", {}, { maxAttempts: 1 });
+    assert.equal(await queue.runOnce(), true);
+    const terminalRow = db
+      .prepare("SELECT * FROM background_jobs WHERE id=?")
+      .get(terminal.id);
+    assert.equal(terminalRow.status, "dead_lettered");
+    assert.ok(terminalRow.dead_lettered_at);
+    assert.match(terminalRow.last_error, /permanent failure/);
+
+    db.prepare(
+      "INSERT INTO organizations(id,name,slug) VALUES ('tenant-a','Tenant A','tenant-a'),('tenant-b','Tenant B','tenant-b')",
+    ).run();
+    const activeTenantJob = queue.enqueue(
+        "successful",
+        { value: 42 },
+        { organizationId: "tenant-a" },
+      ),
+      blockedTenantJob = queue.enqueue(
+        "successful",
+        { value: 42 },
+        { organizationId: "tenant-a" },
+      ),
+      otherTenantJob = queue.enqueue(
+        "successful",
+        { value: 42 },
+        { organizationId: "tenant-b" },
+      );
+    db.prepare(
+      "UPDATE background_jobs SET status='running',locked_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE id=?",
+    ).run(activeTenantJob.id);
+    const tenantClaim = queue.claim();
+    assert.equal(tenantClaim.id, otherTenantJob.id);
+    assert.notEqual(tenantClaim.id, blockedTenantJob.id);
+    queue.complete(tenantClaim.id);
+    queue.complete(activeTenantJob.id);
 
     const stale = queue.enqueue("successful", { value: 42 });
     db.prepare(
@@ -114,7 +153,7 @@ async function main() {
     await waitForCompleted(workerDb, externalJob.id);
     await worker.stop("test");
     console.log(
-      "Job tests passed: deduplication, atomic execution, retry, completion, stale recovery, external execution, and graceful shutdown",
+      "Job tests passed: deduplication, atomic execution, retry, dead letters, tenant concurrency, completion, stale recovery, external execution, and graceful shutdown",
     );
   } finally {
     db.close();

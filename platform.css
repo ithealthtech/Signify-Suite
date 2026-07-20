@@ -82,7 +82,8 @@
 }
 .status-dot.suspended::before,
 .status-dot.error::before,
-.status-dot.failed::before {
+.status-dot.failed::before,
+.status-dot.dead_lettered::before {
   background: #c2413b;
 }
 .status-dot.queued::before {

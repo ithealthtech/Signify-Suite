@@ -22,7 +22,8 @@ function createJobQueue(db, handlers = {}, options = {}) {
            payload_json=excluded.payload_json,
            status='queued',attempts=0,max_attempts=excluded.max_attempts,
            available_at=strftime('%Y-%m-%dT%H:%M:%fZ','now'),locked_at=NULL,
-           completed_at=NULL,last_error='',updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now')`,
+           completed_at=NULL,dead_lettered_at=NULL,last_error='',
+           updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now')`,
       ).run(
         id,
         jobOptions.organizationId || null,
@@ -69,6 +70,11 @@ function createJobQueue(db, handlers = {}, options = {}) {
            updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now')
            WHERE id=(SELECT id FROM background_jobs
              WHERE status='queued' AND available_at<=strftime('%Y-%m-%dT%H:%M:%fZ','now')
+             AND (organization_id IS NULL OR NOT EXISTS (
+               SELECT 1 FROM background_jobs active
+               WHERE active.organization_id=background_jobs.organization_id
+               AND active.status='running'
+             ))
              ORDER BY available_at,created_at LIMIT 1)
            RETURNING *`,
         )
@@ -84,7 +90,7 @@ function createJobQueue(db, handlers = {}, options = {}) {
   function complete(id) {
     db.prepare(
       `UPDATE background_jobs SET status='completed',locked_at=NULL,
-       completed_at=strftime('%Y-%m-%dT%H:%M:%fZ','now'),last_error='',
+       completed_at=strftime('%Y-%m-%dT%H:%M:%fZ','now'),dead_lettered_at=NULL,last_error='',
        updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE id=?`,
     ).run(id);
   }
@@ -94,11 +100,13 @@ function createJobQueue(db, handlers = {}, options = {}) {
       delay = retryBaseSeconds * 2 ** Math.max(0, job.attempts - 1);
     db.prepare(
       `UPDATE background_jobs SET status=?,locked_at=NULL,last_error=?,
+       dead_lettered_at=CASE WHEN ? THEN strftime('%Y-%m-%dT%H:%M:%fZ','now') ELSE NULL END,
        available_at=CASE WHEN ? THEN available_at ELSE datetime('now',?) END,
        updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE id=?`,
     ).run(
-      terminal ? "failed" : "queued",
+      terminal ? "dead_lettered" : "queued",
       String(error?.message || error).slice(0, 1000),
+      terminal ? 1 : 0,
       terminal ? 1 : 0,
       `+${delay} seconds`,
       job.id,
