@@ -39,6 +39,15 @@ function loadConfig(env = process.env, baseDir = path.join(__dirname, "..")) {
     mediaLimitMb > 10240
   )
     throw new Error("SIGNIFY_TENANT_MEDIA_LIMIT_MB must be from 10 to 10240.");
+  const deletionGraceDays = Number(env.SIGNIFY_TENANT_DELETION_GRACE_DAYS || 7);
+  if (
+    !Number.isInteger(deletionGraceDays) ||
+    deletionGraceDays < 1 ||
+    deletionGraceDays > 90
+  )
+    throw new Error(
+      "SIGNIFY_TENANT_DELETION_GRACE_DAYS must be an integer from 1 to 90.",
+    );
   const allowDefaultAdmin = bool(
       env.SIGNATURE_ALLOW_DEFAULT_ADMIN,
       !production,
@@ -173,6 +182,7 @@ function loadConfig(env = process.env, baseDir = path.join(__dirname, "..")) {
     logLevel,
     jobMode,
     mediaStorage,
+    deletionGraceDays,
     s3,
     sourceRoot: baseDir,
     publicRoot: path.join(baseDir, "public"),

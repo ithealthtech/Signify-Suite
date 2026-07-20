@@ -10,6 +10,7 @@ const { loadConfig } = require("../server/config.cjs");
 const { migrateMedia } = require("./migrate-media-to-s3.cjs");
 const {
   cleanupOrphanMedia,
+  createLocalMediaStorage,
   createS3MediaStorage,
   mediaKey,
   tenantUsage,
@@ -72,6 +73,29 @@ try {
 }
 
 async function testS3() {
+  const localRoot = fs.mkdtempSync(
+    path.join(os.tmpdir(), "signify-local-delete-test-"),
+  );
+  try {
+    writeTenantMedia({
+      publicRoot: localRoot,
+      organizationId: "tenant-delete",
+      collection: "uploads",
+      name: "logo.png",
+      bytes: Buffer.from("local-media"),
+      limitBytes: 100,
+    });
+    const localDeletion = await createLocalMediaStorage({
+      publicRoot: localRoot,
+    }).deleteTenant("tenant-delete");
+    assert.deepEqual(localDeletion, { removedFiles: 1, removedBytes: 11 });
+    assert.equal(
+      fs.existsSync(path.join(localRoot, "uploads", "tenant-delete")),
+      false,
+    );
+  } finally {
+    fs.rmSync(localRoot, { recursive: true, force: true });
+  }
   assert.throws(
     () => loadConfig({ SIGNIFY_MEDIA_STORAGE: "s3" }),
     /S3_BUCKET and S3_REGION are required/,
@@ -193,6 +217,15 @@ async function testS3() {
   assert.deepEqual(deletion.input.Delete.Objects, [
     { Key: "uploads/tenant-one/orphan.png" },
   ]);
+  const tenantDeletion = await storage.deleteTenant("tenant-one"),
+    deleteCommands = calls.filter(
+      (command) => command.constructor.name === "DeleteObjectsCommand",
+    );
+  assert.deepEqual(tenantDeletion, { removedFiles: 2, removedBytes: 7 });
+  assert.deepEqual(deleteCommands.at(-1).input.Delete.Objects, [
+    { Key: "existing" },
+    { Key: "existing" },
+  ]);
   assert.equal(
     mediaKey("generated-banners", "tenant-one", "campaign.gif"),
     "generated-banners/tenant-one/campaign.gif",
@@ -260,7 +293,7 @@ async function testS3() {
     fs.rmSync(migrationRoot, { recursive: true, force: true });
   }
   console.log(
-    "S3 media tests passed: private writes, tenant quotas, reads, signed URLs, references, migration verification, and orphan cleanup",
+    "Media tests passed: private writes, tenant quotas, reads, signed URLs, references, migration verification, orphan cleanup, and tenant purge",
   );
 }
 

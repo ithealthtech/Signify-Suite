@@ -160,6 +160,21 @@ function createLocalMediaStorage({ publicRoot }) {
     async cleanup(db, olderThanDays = 7) {
       return cleanupOrphanMedia(db, publicRoot, olderThanDays);
     },
+    async deleteTenant(organizationId) {
+      const tenant = tenantComponent(organizationId);
+      let removedFiles = 0,
+        removedBytes = 0;
+      for (const collection of ["uploads", "generated-banners"]) {
+        const directory = path.join(publicRoot, collection, tenant);
+        if (!fs.existsSync(directory)) continue;
+        removedFiles += fs
+          .readdirSync(directory, { recursive: true, withFileTypes: true })
+          .filter((entry) => entry.isFile()).length;
+        removedBytes += directoryBytes(directory);
+        fs.rmSync(directory, { recursive: true, force: true });
+      }
+      return { removedFiles, removedBytes };
+    },
     async signedReadUrl({ collection, organizationId, name }) {
       return `/${mediaKey(collection, organizationId, name)}`;
     },
@@ -307,6 +322,34 @@ function createS3MediaStorage({ s3, client, presign = getSignedUrl }) {
       return {
         removedFiles: candidates.length,
         removedBytes: candidates.reduce(
+          (total, item) => total + Number(item.Size || 0),
+          0,
+        ),
+      };
+    },
+    async deleteTenant(organizationId) {
+      const tenant = tenantComponent(organizationId),
+        tenantObjects = (
+          await Promise.all([
+            objects(`uploads/${tenant}/`),
+            objects(`generated-banners/${tenant}/`),
+          ])
+        ).flat();
+      for (let offset = 0; offset < tenantObjects.length; offset += 1000) {
+        const batch = tenantObjects.slice(offset, offset + 1000);
+        await s3Client.send(
+          new DeleteObjectsCommand({
+            Bucket: s3.bucket,
+            Delete: {
+              Objects: batch.map((item) => ({ Key: item.Key })),
+              Quiet: true,
+            },
+          }),
+        );
+      }
+      return {
+        removedFiles: tenantObjects.length,
+        removedBytes: tenantObjects.reduce(
           (total, item) => total + Number(item.Size || 0),
           0,
         ),

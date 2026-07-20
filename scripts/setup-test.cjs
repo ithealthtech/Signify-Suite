@@ -118,6 +118,7 @@ try {
   assert.equal(configured.SIGNIFY_REQUIRE_OWNER_MFA, "true");
   assert.equal(configured.SIGNIFY_JOB_MODE, "external");
   assert.equal(configured.SIGNIFY_MEDIA_STORAGE, "local");
+  assert.equal(configured.SIGNIFY_TENANT_DELETION_GRACE_DAYS, "7");
   assert.equal(configured.SIGNIFY_BOOTSTRAP_PASSWORD || "", "");
   assert.equal(
     configured.SIGNIFY_APPLICATION_OWNER_EMAIL,
@@ -168,6 +169,10 @@ try {
   assert.notEqual(result.status, 0);
   assert.match(result.stderr, /HTTPS URL/);
   assert.equal(fs.existsSync(path.join(invalidDirectory, "invalid.db")), false);
+
+  result = run({ SIGNIFY_TENANT_DELETION_GRACE_DAYS: "0" }, ["--no-write-env"]);
+  assert.notEqual(result.status, 0);
+  assert.match(result.stderr, /DELETION_GRACE_DAYS/);
 
   console.log(
     "Setup test passed: configuration generation, credential generation, migrations, owner bootstrap, rerun safety, backups, and production validation",

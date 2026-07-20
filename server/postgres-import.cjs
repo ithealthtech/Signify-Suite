@@ -32,6 +32,7 @@ const IMPORT_TABLES = [
   "application_owner_mfa",
   "application_owner_mfa_recovery_codes",
   "mfa_login_challenges",
+  "tenant_deletion_requests",
 ];
 
 const BOOLEAN_COLUMNS = new Set(["stripe_webhook_events.livemode"]);

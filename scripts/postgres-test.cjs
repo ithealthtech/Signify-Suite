@@ -1,8 +1,6 @@
 "use strict";
 
 const assert = require("node:assert/strict");
-const fs = require("node:fs");
-const path = require("node:path");
 const {
   createPostgresPool,
   migratePostgres,
@@ -23,6 +21,7 @@ const expectedTables = [
   "signature_sessions",
   "signature_templates",
   "signature_users",
+  "tenant_deletion_requests",
 ];
 
 function staticChecks() {
@@ -36,17 +35,9 @@ function staticChecks() {
     new Set(migrations.map(({ checksum }) => checksum)).size,
     migrations.length,
   );
-  const schema = fs.readFileSync(
-    path.join(
-      __dirname,
-      "..",
-      "server",
-      "postgres",
-      "migrations",
-      "001_baseline.sql",
-    ),
-    "utf8",
-  );
+  const schema = migrationFiles()
+    .map((migration) => migration.sql)
+    .join("\n");
   for (const table of expectedTables)
     assert.match(schema, new RegExp(`CREATE TABLE ${table}\\b`));
   assert.match(schema, /JSONB/);

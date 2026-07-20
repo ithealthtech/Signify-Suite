@@ -136,3 +136,17 @@ audits changed projections. Application Owners can queue the same durable job
 from **Integrations > Stripe > Reconcile subscriptions**. Failed batches use the
 normal exponential retry and dead-letter controls. Webhooks remain the primary
 low-latency path; reconciliation covers missed or delayed events.
+
+## Tenant data lifecycle
+
+Application Owners can create a redacted JSON export from a tenant record. The
+export includes tenant-owned product data but excludes password hashes, session
+and one-time token material, integration credentials, and raw job payloads.
+
+Scheduling deletion requires the exact tenant slug, immediately suspends the
+tenant, revokes its non-owner sessions, and creates a durable `tenant.delete`
+job after `SIGNIFY_TENANT_DELETION_GRACE_DAYS`. Cancellation is available until
+purging begins. The worker deletes tenant database records in one transaction,
+removes local or S3 tenant media, cleans users with no remaining membership or
+Application Owner role, and preserves the deletion request plus application
+audit history. A media failure retries safely after database deletion.

@@ -11,17 +11,20 @@ function createJobQueue(db, handlers = {}, options = {}) {
   function enqueue(type, payload = {}, jobOptions = {}) {
     const id = randomUUID(),
       dedupeKey = jobOptions.dedupeKey || null,
-      maxAttempts = Math.max(1, Number(jobOptions.maxAttempts || 5));
+      maxAttempts = Math.max(1, Number(jobOptions.maxAttempts || 5)),
+      availableAt = jobOptions.availableAt || null;
+    if (availableAt && !Number.isFinite(Date.parse(availableAt)))
+      throw new Error("Job availableAt must be an ISO date.");
     if (dedupeKey) {
       db.prepare(
-        `INSERT INTO background_jobs(id,organization_id,type,payload_json,max_attempts,dedupe_key)
-         VALUES (?,?,?,?,?,?)
+        `INSERT INTO background_jobs(id,organization_id,type,payload_json,max_attempts,dedupe_key,available_at)
+         VALUES (?,?,?,?,?,?,COALESCE(?,strftime('%Y-%m-%dT%H:%M:%fZ','now')))
          ON CONFLICT(dedupe_key) DO UPDATE SET
            organization_id=excluded.organization_id,
            type=excluded.type,
            payload_json=excluded.payload_json,
            status='queued',attempts=0,max_attempts=excluded.max_attempts,
-           available_at=strftime('%Y-%m-%dT%H:%M:%fZ','now'),locked_at=NULL,
+           available_at=excluded.available_at,locked_at=NULL,
            completed_at=NULL,dead_lettered_at=NULL,last_error='',result_json='{}',
            updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now')
          WHERE background_jobs.status IN ('completed','dead_lettered')`,
@@ -32,19 +35,21 @@ function createJobQueue(db, handlers = {}, options = {}) {
         JSON.stringify(payload),
         maxAttempts,
         dedupeKey,
+        availableAt,
       );
       return db
         .prepare("SELECT * FROM background_jobs WHERE dedupe_key=?")
         .get(dedupeKey);
     }
     db.prepare(
-      "INSERT INTO background_jobs(id,organization_id,type,payload_json,max_attempts) VALUES (?,?,?,?,?)",
+      "INSERT INTO background_jobs(id,organization_id,type,payload_json,max_attempts,available_at) VALUES (?,?,?,?,?,COALESCE(?,strftime('%Y-%m-%dT%H:%M:%fZ','now')))",
     ).run(
       id,
       jobOptions.organizationId || null,
       type,
       JSON.stringify(payload),
       maxAttempts,
+      availableAt,
     );
     return db.prepare("SELECT * FROM background_jobs WHERE id=?").get(id);
   }

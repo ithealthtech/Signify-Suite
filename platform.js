@@ -622,10 +622,13 @@ async function retryJob(event) {
   }
 }
 async function openTenant(id) {
-  const result = await api(
-    `/api/platform/organizations/${encodeURIComponent(id)}`,
-  );
+  const encodedId = encodeURIComponent(id),
+    [result, lifecycle] = await Promise.all([
+      api(`/api/platform/organizations/${encodedId}`),
+      api(`/api/platform/organizations/${encodedId}/lifecycle`),
+    ]);
   state.detail = result;
+  state.lifecycle = lifecycle;
   $("#detailName").textContent = result.organization.name;
   $("#detailSlug").textContent = result.organization.slug;
   $("#detailSummary").innerHTML =
@@ -655,7 +658,111 @@ async function openTenant(id) {
         )
         .join("")
     : "<div><span>No accepted tenant members yet.</span></div>";
+  const deletion = lifecycle.deletion,
+    pending = ["pending", "purging"].includes(deletion?.status);
+  $("#tenantDeletionStatus").textContent = pending
+    ? deletion.status === "purging"
+      ? "Tenant deletion is running."
+      : `Deletion scheduled for ${dateLabel(deletion.executeAfter)}.`
+    : deletion?.status === "canceled"
+      ? `Deletion canceled ${dateLabel(deletion.canceledAt)}.`
+      : "No deletion is scheduled.";
+  $("#scheduleTenantDeletion").hidden = pending;
+  $("#cancelTenantDeletion").hidden = !pending || deletion.status !== "pending";
+  $("#tenantStatusForm").elements.status.disabled = pending;
+  $("#tenantStatusForm").querySelector('button[type="submit"]').disabled =
+    pending;
   if (!$("#tenantDialog").open) $("#tenantDialog").showModal();
+}
+
+function openTenantLifecycleAction(action) {
+  const organization = state.detail.organization,
+    form = $("#tenantLifecycleForm"),
+    confirmation = $("#tenantDeletionConfirmation"),
+    definition = {
+      export: {
+        title: "Export tenant data",
+        message: `Create a redacted data export for ${organization.name}.`,
+        button: "Create export",
+      },
+      schedule: {
+        title: "Schedule tenant deletion",
+        message: `Type DELETE ${organization.slug} after entering the deletion reason.`,
+        button: "Schedule deletion",
+      },
+      cancel: {
+        title: "Cancel tenant deletion",
+        message: `Keep ${organization.name} and cancel its pending purge.`,
+        button: "Cancel deletion",
+      },
+    }[action];
+  form.reset();
+  form.elements.action.value = action;
+  confirmation.hidden = action !== "schedule";
+  form.elements.confirmation.required = action === "schedule";
+  $("#tenantLifecycleTitle").textContent = definition.title;
+  $("#tenantLifecycleMessage").textContent = definition.message;
+  $("#confirmTenantLifecycle").textContent = definition.button;
+  $("#confirmTenantLifecycle").classList.toggle(
+    "danger",
+    action === "schedule",
+  );
+  $("#tenantDialog").close();
+  $("#tenantLifecycleDialog").showModal();
+}
+
+function closeTenantLifecycleDialog(reopenTenant = true) {
+  $("#tenantLifecycleDialog").close();
+  if (reopenTenant && state.detail && !$("#tenantDialog").open)
+    $("#tenantDialog").showModal();
+}
+
+async function submitTenantLifecycle(event) {
+  event.preventDefault();
+  const form = event.currentTarget;
+  if (!form.reportValidity()) return;
+  const organization = state.detail.organization,
+    button = event.submitter,
+    body = Object.fromEntries(new FormData(form)),
+    action = body.action;
+  busy(button, true, action === "export" ? "Exporting..." : "Saving...");
+  try {
+    if (action === "export") {
+      const result = await api(
+          `/api/platform/organizations/${organization.id}/export`,
+          { method: "POST", body: JSON.stringify({ reason: body.reason }) },
+        ),
+        blob = new Blob([JSON.stringify(result.export, null, 2)], {
+          type: "application/json",
+        }),
+        link = document.createElement("a");
+      link.href = URL.createObjectURL(blob);
+      link.download = `${organization.slug}-export-${new Date().toISOString().slice(0, 10)}.json`;
+      link.click();
+      URL.revokeObjectURL(link.href);
+      toast("Tenant export created");
+      closeTenantLifecycleDialog();
+    } else {
+      await api(`/api/platform/organizations/${organization.id}/deletion`, {
+        method: action === "schedule" ? "POST" : "DELETE",
+        body: JSON.stringify({
+          reason: body.reason,
+          ...(action === "schedule" ? { confirmation: body.confirmation } : {}),
+        }),
+      });
+      closeTenantLifecycleDialog(false);
+      await Promise.all([loadTenants(), openTenant(organization.id)]);
+      toast(
+        action === "schedule"
+          ? "Tenant deletion scheduled"
+          : "Tenant deletion canceled",
+      );
+    }
+  } catch (error) {
+    toast(error.message);
+  } finally {
+    busy(button, false);
+  }
 }
 async function createTenant(event) {
   event.preventDefault();
@@ -841,6 +948,23 @@ function bindEvents() {
     stripeSubscriptionAction,
   );
   $("#openStripePortal").addEventListener("click", openStripePortal);
+  $("#exportTenant").addEventListener("click", () =>
+    openTenantLifecycleAction("export"),
+  );
+  $("#scheduleTenantDeletion").addEventListener("click", () =>
+    openTenantLifecycleAction("schedule"),
+  );
+  $("#cancelTenantDeletion").addEventListener("click", () =>
+    openTenantLifecycleAction("cancel"),
+  );
+  $("#tenantLifecycleForm").addEventListener("submit", submitTenantLifecycle);
+  $$("[data-close-tenant-lifecycle]").forEach((button) =>
+    button.addEventListener("click", () => closeTenantLifecycleDialog()),
+  );
+  $("#tenantLifecycleDialog").addEventListener("cancel", (event) => {
+    event.preventDefault();
+    closeTenantLifecycleDialog();
+  });
   $("#tenantRows").addEventListener("click", (event) => {
     const button = event.target.closest("[data-tenant-id]");
     if (button)

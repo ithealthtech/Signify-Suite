@@ -597,6 +597,40 @@
       </form>
     </dialog>
 
+    <dialog id="tenantLifecycleDialog">
+      <form class="dialog-form" id="tenantLifecycleForm">
+        <div class="dialog-head">
+          <div>
+            <span class="eyebrow">Tenant data lifecycle</span>
+            <h2 id="tenantLifecycleTitle">Tenant operation</h2>
+          </div>
+          <button type="button" data-close-tenant-lifecycle aria-label="Close">
+            &times;
+          </button>
+        </div>
+        <p id="tenantLifecycleMessage"></p>
+        <input name="action" type="hidden" />
+        <label
+          >Reason<input name="reason" required minlength="3" maxlength="500"
+        /></label>
+        <label id="tenantDeletionConfirmation" hidden
+          >Confirmation<input name="confirmation" autocomplete="off"
+        /></label>
+        <div class="dialog-actions">
+          <button class="button" type="button" data-close-tenant-lifecycle>
+            Cancel
+          </button>
+          <button
+            class="button primary"
+            id="confirmTenantLifecycle"
+            type="submit"
+          >
+            Continue
+          </button>
+        </div>
+      </form>
+    </dialog>
+
     <dialog id="ownerReauthDialog">
       <form class="dialog-form" id="ownerReauthForm">
         <div class="dialog-head">
@@ -754,6 +788,30 @@
           </div>
           <button class="button" type="submit">Update status</button>
         </form>
+        <div class="control-form" id="tenantDataLifecycle">
+          <h3>Data lifecycle</h3>
+          <p id="tenantDeletionStatus">No deletion is scheduled.</p>
+          <div class="integration-actions">
+            <button class="button" id="exportTenant" type="button">
+              Export tenant data
+            </button>
+            <button
+              class="button danger"
+              id="scheduleTenantDeletion"
+              type="button"
+            >
+              Schedule deletion
+            </button>
+            <button
+              class="button"
+              id="cancelTenantDeletion"
+              type="button"
+              hidden
+            >
+              Cancel deletion
+            </button>
+          </div>
+        </div>
         <form class="control-form" id="subscriptionForm">
           <h3>Subscription</h3>
           <div class="form-grid three">

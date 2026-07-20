@@ -31,6 +31,7 @@ const {
   createPlatformOperationsRoutes,
 } = require("./routes/platform-operations.cjs");
 const { createPlatformJobRoutes } = require("./routes/platform-jobs.cjs");
+const { createTenantLifecycle } = require("./routes/platform-tenants.cjs");
 const {
   BRAND_FONT_STACKS,
   campaignInput,
@@ -364,6 +365,7 @@ function createSignaturePortal({
     new Stripe(key, { maxNetworkRetries: 2, timeout: 10000 }),
   operations,
   enqueueJob,
+  deletionGraceDays = 7,
 }) {
   seed(db, signature);
   const credentialVault = createCredentialVault(
@@ -695,6 +697,9 @@ function createSignaturePortal({
     return (
       /^\/api\/platform\/owners(?:\/|$)/.test(pathname) ||
       /^\/api\/platform\/organizations\/[^/]+\/(?:status|subscription|billing\/subscription)$/.test(
+        pathname,
+      ) ||
+      /^\/api\/platform\/organizations\/[^/]+\/(?:export|deletion)$/.test(
         pathname,
       ) ||
       pathname === "/api/platform/billing/reconcile" ||
@@ -1762,7 +1767,17 @@ function createSignaturePortal({
       json,
       readJsonBody,
       recordAudit: recordApplicationAudit,
+    }),
+    tenantLifecycle = createTenantLifecycle({
+      db,
+      json,
+      readJsonBody,
+      recordAudit: recordApplicationAudit,
+      enqueueJob,
+      mediaStorage,
+      deletionGraceDays,
     });
+  Object.assign(workflowHandlers, tenantLifecycle.jobHandlers);
   const handle = async function handle(req, res, url, requestId) {
     if (url.pathname === "/webhooks/stripe" && req.method === "POST") {
       const stripeConfiguration = stripeSettings(),
@@ -2526,6 +2541,8 @@ function createSignaturePortal({
       if (await handlePlatformOperations({ req, res, url, requestId, owner }))
         return;
       if (await handlePlatformJobs({ req, res, url, requestId, owner })) return;
+      if (await tenantLifecycle.routes({ req, res, url, requestId, owner }))
+        return;
       if (url.pathname === "/api/platform/integrations" && req.method === "GET")
         return json(
           res,
@@ -3334,6 +3351,20 @@ function createSignaturePortal({
               },
             },
             requestId,
+          );
+        if (
+          status === "active" &&
+          db
+            .prepare(
+              "SELECT 1 FROM tenant_deletion_requests WHERE organization_id=? AND status IN ('pending','purging')",
+            )
+            .get(statusMatch[1])
+        )
+          throw Object.assign(
+            new Error(
+              "Cancel the pending deletion before reactivating this tenant.",
+            ),
+            { status: 409, code: "TENANT_DELETION_PENDING" },
           );
         const changed = db
           .prepare(

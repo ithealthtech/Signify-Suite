@@ -1579,6 +1579,7 @@ async function main() {
       "Application Owner could not create a tenant",
     );
     const controlPlaneOrganizationId = result.body.organization.id,
+      controlPlaneSlug = result.body.organization.slug,
       controlPlaneInvitationToken = new URL(
         result.body.invitationUrl,
       ).searchParams.get("invite");
@@ -2021,6 +2022,158 @@ async function main() {
         result.body.microsoft.configured === true &&
         !JSON.stringify(result.body).includes("microsoft-setup-secret"),
       "first-run readiness did not complete safely",
+    );
+    result = await request(
+      baseUrl,
+      `/api/platform/organizations/${controlPlaneOrganizationId}/export`,
+      {
+        method: "POST",
+        body: { reason: "Tenant portability regression" },
+        jar: adminJar,
+      },
+    );
+    const exportedTenant = JSON.stringify(result.body?.export || {});
+    assert(
+      result.response.status === 200 &&
+        result.body.export.organization.id === controlPlaneOrganizationId &&
+        result.body.export.members.some(
+          (member) => member.email === "tenant.owner@example.com",
+        ) &&
+        !exportedTenant.includes("password_hash") &&
+        !exportedTenant.includes("token_hash") &&
+        !exportedTenant.includes("encrypted_credentials"),
+      "tenant export was incomplete or exposed authentication secrets",
+    );
+    await application.mediaStorage.write({
+      organizationId: controlPlaneOrganizationId,
+      collection: "uploads",
+      name: "purge-proof.png",
+      bytes: Buffer.from("tenant-media"),
+      limitBytes: 1024,
+    });
+    result = await request(
+      baseUrl,
+      `/api/platform/organizations/${controlPlaneOrganizationId}/deletion`,
+      {
+        method: "POST",
+        body: {
+          reason: "Reject unsafe tenant deletion",
+          confirmation: "DELETE wrong-tenant",
+        },
+        jar: adminJar,
+      },
+    );
+    assert(
+      result.response.status === 400 &&
+        result.body.error.code === "TENANT_DELETION_CONFIRMATION_REQUIRED",
+      "tenant deletion accepted an incorrect confirmation",
+    );
+    const scheduleTenantDeletion = () =>
+      request(
+        baseUrl,
+        `/api/platform/organizations/${controlPlaneOrganizationId}/deletion`,
+        {
+          method: "POST",
+          body: {
+            reason: "End-of-contract lifecycle regression",
+            confirmation: `DELETE ${controlPlaneSlug}`,
+          },
+          jar: adminJar,
+        },
+      );
+    result = await scheduleTenantDeletion();
+    assert(
+      result.response.status === 202 &&
+        result.body.deletion.status === "pending" &&
+        Date.parse(result.body.deletion.executeAfter) > Date.now() &&
+        application.db
+          .prepare("SELECT status FROM organizations WHERE id=?")
+          .get(controlPlaneOrganizationId).status === "suspended",
+      "tenant deletion was not delayed and suspended atomically",
+    );
+    result = await request(
+      baseUrl,
+      `/api/platform/organizations/${controlPlaneOrganizationId}/status`,
+      {
+        method: "PUT",
+        body: { status: "active", reason: "Unsafe reactivation attempt" },
+        jar: adminJar,
+      },
+    );
+    assert(
+      result.response.status === 409 &&
+        result.body.error.code === "TENANT_DELETION_PENDING",
+      "pending deletion allowed the tenant to be reactivated",
+    );
+    result = await request(
+      baseUrl,
+      `/api/platform/organizations/${controlPlaneOrganizationId}/deletion`,
+      {
+        method: "DELETE",
+        body: { reason: "Customer retention regression" },
+        jar: adminJar,
+      },
+    );
+    assert(
+      result.response.status === 200 &&
+        result.body.deletion.status === "canceled" &&
+        application.db
+          .prepare("SELECT status FROM background_jobs WHERE dedupe_key=?")
+          .get(`tenant.delete:${controlPlaneOrganizationId}`).status ===
+          "completed",
+      "tenant deletion cancellation did not cancel its durable job",
+    );
+    result = await scheduleTenantDeletion();
+    const deletionRequestId = result.body.deletion.id;
+    application.db
+      .prepare(
+        "UPDATE tenant_deletion_requests SET execute_after=strftime('%Y-%m-%dT%H:%M:%fZ','now','-1 second') WHERE id=?",
+      )
+      .run(deletionRequestId);
+    application.db
+      .prepare(
+        "UPDATE background_jobs SET available_at=strftime('%Y-%m-%dT%H:%M:%fZ','now','-1 second') WHERE dedupe_key=?",
+      )
+      .run(`tenant.delete:${controlPlaneOrganizationId}`);
+    for (let attempt = 0; attempt < 20; attempt += 1) {
+      const deletion = application.db
+        .prepare("SELECT status FROM tenant_deletion_requests WHERE id=?")
+        .get(deletionRequestId);
+      if (deletion.status === "completed") break;
+      if (!(await application.jobQueue.runOnce())) break;
+    }
+    assert(
+      !application.db
+        .prepare("SELECT 1 FROM organizations WHERE id=?")
+        .get(controlPlaneOrganizationId) &&
+        !application.db
+          .prepare("SELECT 1 FROM signature_users WHERE email=?")
+          .get("tenant.owner@example.com") &&
+        application.db
+          .prepare("SELECT status FROM tenant_deletion_requests WHERE id=?")
+          .get(deletionRequestId).status === "completed" &&
+        !fs.existsSync(
+          path.join(
+            application.config.publicRoot,
+            "uploads",
+            controlPlaneOrganizationId,
+          ),
+        ) &&
+        application.db
+          .prepare(
+            "SELECT COUNT(*) count FROM application_audit_logs WHERE action IN ('tenant.exported','tenant.deletion_scheduled','tenant.deletion_canceled') AND target_id IS NOT NULL",
+          )
+          .get().count >= 4,
+      "durable tenant purge did not remove tenant data/media while retaining lifecycle evidence",
+    );
+    result = await request(
+      baseUrl,
+      `/api/platform/organizations/${controlPlaneOrganizationId}`,
+      { jar: adminJar },
+    );
+    assert(
+      result.response.status === 404,
+      "deleted tenant remained directly accessible",
     );
     application.db
       .prepare(

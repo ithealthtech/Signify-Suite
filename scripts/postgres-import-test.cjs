@@ -27,7 +27,7 @@ try {
 
   const source = openImportSource(sourcePath);
   try {
-    assert.equal(IMPORT_TABLES.length, 27);
+    assert.equal(IMPORT_TABLES.length, 28);
     for (const table of IMPORT_TABLES) {
       const data = sourceTable(source, table);
       assert.ok(data.columns.length > 0, table);

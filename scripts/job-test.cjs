@@ -62,6 +62,27 @@ async function main() {
     assert.equal(completed.status, "completed");
     assert.deepEqual(JSON.parse(completed.result_json), { accepted: true });
 
+    const delayed = queue.enqueue(
+      "successful",
+      { value: 42 },
+      { availableAt: new Date(Date.now() + 60000).toISOString() },
+    );
+    assert.equal(queue.claim(), null);
+    db.prepare(
+      "UPDATE background_jobs SET available_at=strftime('%Y-%m-%dT%H:%M:%fZ','now','-1 second') WHERE id=?",
+    ).run(delayed.id);
+    assert.equal(await queue.runOnce(), true);
+    assert.equal(
+      db
+        .prepare("SELECT status FROM background_jobs WHERE id=?")
+        .get(delayed.id).status,
+      "completed",
+    );
+    assert.throws(
+      () => queue.enqueue("successful", {}, { availableAt: "not-a-date" }),
+      /availableAt/,
+    );
+
     const activeDedupe = queue.enqueue(
         "successful",
         { value: 42 },

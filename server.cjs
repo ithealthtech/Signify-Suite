@@ -274,6 +274,7 @@ function createApplication(options = {}) {
     stripeFactory: options.stripeFactory,
     operations,
     enqueueJob: jobQueue.enqueue,
+    deletionGraceDays: config.deletionGraceDays,
   });
   Object.assign(jobHandlers, signaturePortal.jobHandlers);
   const rateBuckets = new Map(),

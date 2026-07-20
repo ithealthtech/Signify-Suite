@@ -210,6 +210,7 @@ BACKUP_DIR=/persistent/signify/backups
 
 SIGNATURE_SESSION_HOURS=12
 SIGNIFY_TENANT_MEDIA_LIMIT_MB=250
+SIGNIFY_TENANT_DELETION_GRACE_DAYS=7
 SIGNATURE_ALLOW_DEFAULT_ADMIN=false
 SIGNIFY_BOOTSTRAP_EMAIL=owner@example.com
 SIGNIFY_BOOTSTRAP_PASSWORD=replace-with-a-long-random-password
@@ -224,7 +225,9 @@ SIGNIFY_CREDENTIAL_ENCRYPTION_KEY=replace-with-a-generated-32-byte-key
 
 Use absolute persistent paths for `DATABASE_PATH` and `BACKUP_DIR`.
 `SIGNIFY_TENANT_MEDIA_LIMIT_MB` limits the combined uploads and generated-banner
-storage for each tenant. Keep the encryption key outside database backups.
+storage for each tenant. `SIGNIFY_TENANT_DELETION_GRACE_DAYS` controls the
+reversible delay before a scheduled tenant purge and accepts 1 through 90 days.
+Keep the encryption key outside database backups.
 Losing the key makes credentials saved through the integration wizard
 unrecoverable.
 
@@ -236,26 +239,27 @@ traffic arrives through a trusted reverse proxy.
 Use this table when filling in `.env.local`. Microsoft 365 and Stripe can be
 configured later from **Application > First-time setup**.
 
-| Setting                             | What to enter                                            | Required          |
-| ----------------------------------- | -------------------------------------------------------- | ----------------- |
-| `NODE_ENV`                          | `production`                                             | Yes               |
-| `HOST` / `PORT`                     | Private listen address and hosting-provider port         | Yes               |
-| `DATABASE_PATH`                     | Absolute path on persistent storage                      | Yes               |
-| `SIGNIFY_PUBLIC_URL`                | Public HTTPS address, with no trailing slash             | Yes               |
-| `SIGNIFY_ASSET_BASE_URL`            | Usually the same value as `SIGNIFY_PUBLIC_URL`           | Yes               |
-| `SIGNIFY_MEDIA_BASE_URL`            | Usually the same value as `SIGNIFY_PUBLIC_URL`           | Yes               |
-| `SIGNIFY_APPLICATION_OWNER_EMAIL`   | Email for the first Application Owner                    | Yes               |
-| `SIGNIFY_CREDENTIAL_ENCRYPTION_KEY` | One generated 32-byte key; keep it permanently           | Yes               |
-| `SIGNIFY_JOB_MODE`                  | `embedded`, or `external` with a supervised worker       | Yes               |
-| `SIGNIFY_MEDIA_STORAGE`             | `local` for one host, or `s3` for private object storage | Yes               |
-| `S3_BUCKET` / `S3_REGION`           | Tenant-media bucket and its region                       | With `s3`         |
-| `S3_ENDPOINT`                       | S3-compatible endpoint; blank for AWS                    | Provider-specific |
-| `S3_ACCESS_KEY_ID` / secret         | Static credentials, or workload identity                 | Provider-specific |
-| `SIGNATURE_ALLOW_DEFAULT_ADMIN`     | `false` after the first account exists                   | Yes               |
-| `SIGNIFY_REQUIRE_OWNER_MFA`         | `true` to require enrollment before control-plane use    | Yes               |
-| `TRUST_PROXY`                       | `true` only behind a trusted, private reverse proxy      | No                |
-| `MICROSOFT_*`                       | Leave blank and complete Microsoft setup in the owner UI | No                |
-| `STRIPE_*`                          | Leave blank and complete Stripe setup in the owner UI    | No                |
+| Setting                              | What to enter                                            | Required          |
+| ------------------------------------ | -------------------------------------------------------- | ----------------- |
+| `NODE_ENV`                           | `production`                                             | Yes               |
+| `HOST` / `PORT`                      | Private listen address and hosting-provider port         | Yes               |
+| `DATABASE_PATH`                      | Absolute path on persistent storage                      | Yes               |
+| `SIGNIFY_PUBLIC_URL`                 | Public HTTPS address, with no trailing slash             | Yes               |
+| `SIGNIFY_ASSET_BASE_URL`             | Usually the same value as `SIGNIFY_PUBLIC_URL`           | Yes               |
+| `SIGNIFY_MEDIA_BASE_URL`             | Usually the same value as `SIGNIFY_PUBLIC_URL`           | Yes               |
+| `SIGNIFY_APPLICATION_OWNER_EMAIL`    | Email for the first Application Owner                    | Yes               |
+| `SIGNIFY_CREDENTIAL_ENCRYPTION_KEY`  | One generated 32-byte key; keep it permanently           | Yes               |
+| `SIGNIFY_JOB_MODE`                   | `embedded`, or `external` with a supervised worker       | Yes               |
+| `SIGNIFY_MEDIA_STORAGE`              | `local` for one host, or `s3` for private object storage | Yes               |
+| `SIGNIFY_TENANT_DELETION_GRACE_DAYS` | Reversible tenant-deletion delay from `1` through `90`   | Yes               |
+| `S3_BUCKET` / `S3_REGION`            | Tenant-media bucket and its region                       | With `s3`         |
+| `S3_ENDPOINT`                        | S3-compatible endpoint; blank for AWS                    | Provider-specific |
+| `S3_ACCESS_KEY_ID` / secret          | Static credentials, or workload identity                 | Provider-specific |
+| `SIGNATURE_ALLOW_DEFAULT_ADMIN`      | `false` after the first account exists                   | Yes               |
+| `SIGNIFY_REQUIRE_OWNER_MFA`          | `true` to require enrollment before control-plane use    | Yes               |
+| `TRUST_PROXY`                        | `true` only behind a trusted, private reverse proxy      | No                |
+| `MICROSOFT_*`                        | Leave blank and complete Microsoft setup in the owner UI | No                |
+| `STRIPE_*`                           | Leave blank and complete Stripe setup in the owner UI    | No                |
 
 Generate the encryption key once:
 
