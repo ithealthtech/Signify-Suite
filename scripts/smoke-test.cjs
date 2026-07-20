@@ -1426,6 +1426,49 @@ async function main() {
         result.body.error.code === "RESTORE_CONFIRMATION_REQUIRED",
       "Restore was accepted without explicit confirmation",
     );
+    application.db
+      .prepare(
+        `INSERT INTO background_jobs(id,type,payload_json,status,attempts,max_attempts,last_error)
+         VALUES ('smoke-failed-job','provider.sync','{"secret":"must-not-leak"}','failed',5,5,'Provider timeout')`,
+      )
+      .run();
+    result = await request(baseUrl, "/api/platform/jobs?status=failed", {
+      jar: adminJar,
+    });
+    assert(
+      result.response.status === 200 &&
+        result.body.jobs.some(
+          (job) =>
+            job.id === "smoke-failed-job" &&
+            job.lastError === "Provider timeout",
+        ) &&
+        !JSON.stringify(result.body).includes("must-not-leak"),
+      "Application Owner job inspection failed or exposed payload data",
+    );
+    result = await request(
+      baseUrl,
+      "/api/platform/jobs/smoke-failed-job/retry",
+      {
+        method: "POST",
+        body: { reason: "Retry provider sync" },
+        jar: adminJar,
+      },
+    );
+    assert(
+      result.response.status === 202 &&
+        result.body.job.status === "queued" &&
+        application.db
+          .prepare(
+            "SELECT status,attempts,last_error FROM background_jobs WHERE id='smoke-failed-job'",
+          )
+          .get().attempts === 0 &&
+        application.db
+          .prepare(
+            "SELECT COUNT(*) count FROM application_audit_logs WHERE action='application.job_retried' AND target_id='smoke-failed-job'",
+          )
+          .get().count === 1,
+      "Failed job retry was not durable and audited",
+    );
     result = await request(baseUrl, "/api/platform/organizations", {
       method: "POST",
       body: {

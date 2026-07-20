@@ -29,6 +29,7 @@ const root = path.join(__dirname, ".."),
   ],
   entries = [
     "server.cjs",
+    "worker.cjs",
     "package.json",
     "package-lock.json",
     ".env.example",

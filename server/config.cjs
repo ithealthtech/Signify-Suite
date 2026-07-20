@@ -55,9 +55,12 @@ function loadConfig(env = process.env, baseDir = path.join(__dirname, "..")) {
       String(env.SIGNIFY_PUBLIC_URL || "").trim(),
       "SIGNIFY_PUBLIC_URL",
     ),
-    logLevel = String(env.LOG_LEVEL || "info").toLowerCase();
+    logLevel = String(env.LOG_LEVEL || "info").toLowerCase(),
+    jobMode = String(env.SIGNIFY_JOB_MODE || "embedded").toLowerCase();
   if (!["debug", "info", "warn", "error", "silent"].includes(logLevel))
     throw new Error("LOG_LEVEL must be debug, info, warn, error, or silent.");
+  if (!["embedded", "external"].includes(jobMode))
+    throw new Error("SIGNIFY_JOB_MODE must be embedded or external.");
   if (allowDefaultAdmin && !validEmail(bootstrapEmail))
     throw new Error("SIGNIFY_BOOTSTRAP_EMAIL must be a valid email address.");
   if (allowDefaultAdmin && bootstrapPassword.length < 10)
@@ -149,6 +152,7 @@ function loadConfig(env = process.env, baseDir = path.join(__dirname, "..")) {
     host: env.HOST || "127.0.0.1",
     trustProxy: bool(env.TRUST_PROXY, false),
     logLevel,
+    jobMode,
     sourceRoot: baseDir,
     publicRoot: path.join(baseDir, "public"),
     databasePath:

@@ -6,6 +6,19 @@ const os = require("node:os");
 const path = require("node:path");
 const { openDatabase } = require("../server/database.cjs");
 const { createJobQueue } = require("../server/job-queue.cjs");
+const { startWorker } = require("../worker.cjs");
+
+async function waitForCompleted(db, id) {
+  const deadline = Date.now() + 3000;
+  while (Date.now() < deadline) {
+    const row = db
+      .prepare("SELECT status FROM background_jobs WHERE id=?")
+      .get(id);
+    if (row?.status === "completed") return;
+    await new Promise((resolve) => setTimeout(resolve, 20));
+  }
+  throw new Error("External worker did not complete the queued job.");
+}
 
 async function main() {
   const temporaryDirectory = fs.mkdtempSync(
@@ -74,8 +87,34 @@ async function main() {
       db.prepare("PRAGMA integrity_check").get().integrity_check,
       "ok",
     );
+
+    const workerDb = openDatabase(
+        path.join(temporaryDirectory, "external-worker.db"),
+      ),
+      worker = startWorker({
+        db: workerDb,
+        config: {
+          jobMode: "external",
+          publicRoot: path.join(temporaryDirectory, "public"),
+        },
+        signals: false,
+        jobOptions: {
+          pollIntervalMs: 20,
+          handlers: {
+            "tenant.acceptance": async (payload) =>
+              assert.equal(payload.organizationId, "tenant-1"),
+          },
+        },
+      }),
+      externalJob = worker.jobs.queue.enqueue(
+        "tenant.acceptance",
+        { organizationId: "tenant-1" },
+        { dedupeKey: "tenant-1:acceptance" },
+      );
+    await waitForCompleted(workerDb, externalJob.id);
+    await worker.stop("test");
     console.log(
-      "Job tests passed: deduplication, atomic execution, retry, completion, and stale recovery",
+      "Job tests passed: deduplication, atomic execution, retry, completion, stale recovery, external execution, and graceful shutdown",
     );
   } finally {
     db.close();

@@ -8,6 +8,7 @@
   },
   "scripts": {
     "start": "node --env-file-if-exists=.env.local server.cjs",
+    "worker": "node --env-file-if-exists=.env.local worker.cjs",
     "setup": "node scripts/setup.cjs",
     "dev": "node scripts/dev.cjs",
     "build": "node scripts/build.cjs",

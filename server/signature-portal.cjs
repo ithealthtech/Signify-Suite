@@ -29,6 +29,7 @@ const { writeTenantMedia } = require("./media-storage.cjs");
 const {
   createPlatformOperationsRoutes,
 } = require("./routes/platform-operations.cjs");
+const { createPlatformJobRoutes } = require("./routes/platform-jobs.cjs");
 const {
   BRAND_FONT_STACKS,
   campaignInput,
@@ -1320,11 +1321,17 @@ function createSignaturePortal({
   }
 
   const handlePlatformOperations = createPlatformOperationsRoutes({
-    json,
-    operations,
-    readJsonBody,
-    recordAudit: recordApplicationAudit,
-  });
+      json,
+      operations,
+      readJsonBody,
+      recordAudit: recordApplicationAudit,
+    }),
+    handlePlatformJobs = createPlatformJobRoutes({
+      db,
+      json,
+      readJsonBody,
+      recordAudit: recordApplicationAudit,
+    });
   return async function handle(req, res, url, requestId) {
     if (url.pathname === "/webhooks/stripe" && req.method === "POST") {
       const stripeConfiguration = stripeSettings(),
@@ -1769,6 +1776,7 @@ function createSignaturePortal({
       }
       if (await handlePlatformOperations({ req, res, url, requestId, owner }))
         return;
+      if (await handlePlatformJobs({ req, res, url, requestId, owner })) return;
       if (url.pathname === "/api/platform/integrations" && req.method === "GET")
         return json(
           res,

@@ -76,12 +76,17 @@
   background: #9ca3af;
 }
 .status-dot.active::before,
-.status-dot.connected::before {
+.status-dot.connected::before,
+.status-dot.running::before {
   background: #20815a;
 }
 .status-dot.suspended::before,
-.status-dot.error::before {
+.status-dot.error::before,
+.status-dot.failed::before {
   background: #c2413b;
+}
+.status-dot.queued::before {
+  background: #c58a10;
 }
 .pagination {
   justify-content: flex-end;
@@ -288,6 +293,12 @@ hr {
 .operations-note {
   margin: 12px 0 0;
   font-size: 13px;
+}
+
+.job-error {
+  display: block;
+  max-width: 34rem;
+  overflow-wrap: anywhere;
 }
 .setup-progress span {
   margin-top: 4px;

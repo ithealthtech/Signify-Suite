@@ -24,12 +24,19 @@
 
 ## Background Jobs
 
-Jobs are stored in `background_jobs`. The embedded worker atomically claims one
-job at a time, retries transient errors with exponential backoff, and recovers
-stale locks after restart. Do not edit running jobs manually. Diagnose the
-stored `last_error`, correct the root cause, then set a failed job to `queued`
-with `attempts=0`, `locked_at=NULL`, and `available_at` set to the current UTC
-time.
+Jobs are stored in `background_jobs`. The worker atomically claims one job at a
+time, retries transient errors with exponential backoff, and recovers stale
+locks after restart.
+
+Use `SIGNIFY_JOB_MODE=embedded` when the web server is the only supervised
+Node.js process. For a separately supervised worker, configure
+`SIGNIFY_JOB_MODE=external` on the web process and run `npm run worker` with the
+same environment and persistent storage. Stop both processes before replacing
+or restoring the SQLite database. Run exactly one worker for SQLite.
+
+Do not edit running jobs manually. Diagnose the stored `last_error`, correct the
+root cause, then set a failed job to `queued` with `attempts=0`,
+`locked_at=NULL`, and `available_at` set to the current UTC time.
 
 ## Backup And Restore
 

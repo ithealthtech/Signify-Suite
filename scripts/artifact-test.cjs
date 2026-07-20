@@ -41,6 +41,7 @@ if (forbidden.length)
 
 for (const required of [
   "server.cjs",
+  "worker.cjs",
   "package.json",
   ".env.example",
   "scripts/setup.cjs",

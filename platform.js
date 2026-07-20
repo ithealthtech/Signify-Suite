@@ -377,6 +377,49 @@ async function loadAudit() {
         .join("")
     : '<tr><td colspan="5"><div class="empty">No application activity recorded.</div></td></tr>';
 }
+async function loadJobs() {
+  const status = $("#jobStatus").value,
+    result = await api(
+      `/api/platform/jobs?status=${encodeURIComponent(status)}&limit=50`,
+    );
+  $("#jobRows").innerHTML = result.jobs.length
+    ? result.jobs
+        .map(
+          (job) =>
+            `<tr><td><strong>${escapeHtml(job.type)}</strong>${job.lastError ? `<small class="job-error">${escapeHtml(job.lastError)}</small>` : ""}</td><td>${escapeHtml(job.organizationName)}</td><td><span class="status-dot ${escapeHtml(job.status)}">${escapeHtml(job.status)}</span></td><td>${job.attempts} / ${job.maxAttempts}</td><td>${escapeHtml(dateLabel(job.updatedAt))}</td><td><button class="button" type="button" data-retry-job="${escapeHtml(job.id)}" data-job-type="${escapeHtml(job.type)}" ${job.status !== "failed" ? "disabled" : ""}>Retry</button></td></tr>`,
+        )
+        .join("")
+    : '<tr><td colspan="6"><div class="empty">No jobs match this view.</div></td></tr>';
+}
+function openJobRetry(button) {
+  const form = $("#retryJobForm");
+  form.reset();
+  form.elements.jobId.value = button.dataset.retryJob;
+  $("#retryJobMessage").textContent =
+    `Retry ${button.dataset.jobType} after correcting its failure.`;
+  $("#retryJobDialog").showModal();
+}
+async function retryJob(event) {
+  event.preventDefault();
+  const form = event.currentTarget,
+    button = event.submitter,
+    body = Object.fromEntries(new FormData(form)),
+    id = encodeURIComponent(body.jobId);
+  busy(button, true, "Retrying...");
+  try {
+    await api(`/api/platform/jobs/${id}/retry`, {
+      method: "POST",
+      body: JSON.stringify({ reason: body.reason }),
+    });
+    $("#retryJobDialog").close();
+    await loadJobs();
+    toast("Job queued for retry");
+  } catch (error) {
+    toast(error.message);
+  } finally {
+    busy(button, false);
+  }
+}
 async function openTenant(id) {
   const result = await api(
     `/api/platform/organizations/${encodeURIComponent(id)}`,
@@ -551,6 +594,7 @@ function bindEvents() {
       if (button.dataset.section === "owners") await loadOwners();
       if (button.dataset.section === "audit") await loadAudit();
       if (button.dataset.section === "operations") await loadOperations();
+      if (button.dataset.section === "jobs") await loadJobs();
     }),
   );
   $("#openCreateTenant").addEventListener("click", () => {
@@ -641,6 +685,20 @@ function bindEvents() {
   $("#refreshAudit").addEventListener("click", () =>
     loadAudit().catch((error) => toast(error.message)),
   );
+  $("#refreshJobs").addEventListener("click", () =>
+    loadJobs().catch((error) => toast(error.message)),
+  );
+  $("#jobStatus").addEventListener("change", () =>
+    loadJobs().catch((error) => toast(error.message)),
+  );
+  $("#jobRows").addEventListener("click", (event) => {
+    const button = event.target.closest("[data-retry-job]");
+    if (button && !button.disabled) openJobRetry(button);
+  });
+  $$("[data-close-job]").forEach((button) =>
+    button.addEventListener("click", () => $("#retryJobDialog").close()),
+  );
+  $("#retryJobForm").addEventListener("submit", retryJob);
   $("#refreshOperations").addEventListener("click", () =>
     loadOperations().catch((error) => toast(error.message)),
   );

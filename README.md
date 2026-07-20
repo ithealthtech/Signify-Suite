@@ -198,20 +198,21 @@ traffic arrives through a trusted reverse proxy.
 Use this table when filling in `.env.local`. Microsoft 365 and Stripe can be
 configured later from **Application > First-time setup**.
 
-| Setting                             | What to enter                                            | Required                        |
-| ----------------------------------- | -------------------------------------------------------- | ------------------------------- |
-| `NODE_ENV`                          | `production`                                             | Yes                             |
-| `HOST` / `PORT`                     | Private listen address and hosting-provider port         | Yes                             |
-| `DATABASE_PATH`                     | Absolute path on persistent storage                      | Yes                             |
-| `SIGNIFY_PUBLIC_URL`                | Public HTTPS address, with no trailing slash             | Yes                             |
-| `SIGNIFY_ASSET_BASE_URL`            | Usually the same value as `SIGNIFY_PUBLIC_URL`           | Yes                             |
-| `SIGNIFY_MEDIA_BASE_URL`            | Usually the same value as `SIGNIFY_PUBLIC_URL`           | Yes                             |
-| `SIGNIFY_APPLICATION_OWNER_EMAIL`   | Email for the first Application Owner                    | Yes                             |
-| `SIGNIFY_CREDENTIAL_ENCRYPTION_KEY` | One generated 32-byte key; keep it permanently           | Yes for UI-managed integrations |
-| `SIGNATURE_ALLOW_DEFAULT_ADMIN`     | `false` after the first account exists                   | Yes                             |
-| `TRUST_PROXY`                       | `true` only behind a trusted, private reverse proxy      | No                              |
-| `MICROSOFT_*`                       | Leave blank and complete Microsoft setup in the owner UI | No                              |
-| `STRIPE_*`                          | Leave blank and complete Stripe setup in the owner UI    | No                              |
+| Setting                             | What to enter                                            | Required |
+| ----------------------------------- | -------------------------------------------------------- | -------- |
+| `NODE_ENV`                          | `production`                                             | Yes      |
+| `HOST` / `PORT`                     | Private listen address and hosting-provider port         | Yes      |
+| `DATABASE_PATH`                     | Absolute path on persistent storage                      | Yes      |
+| `SIGNIFY_PUBLIC_URL`                | Public HTTPS address, with no trailing slash             | Yes      |
+| `SIGNIFY_ASSET_BASE_URL`            | Usually the same value as `SIGNIFY_PUBLIC_URL`           | Yes      |
+| `SIGNIFY_MEDIA_BASE_URL`            | Usually the same value as `SIGNIFY_PUBLIC_URL`           | Yes      |
+| `SIGNIFY_APPLICATION_OWNER_EMAIL`   | Email for the first Application Owner                    | Yes      |
+| `SIGNIFY_CREDENTIAL_ENCRYPTION_KEY` | One generated 32-byte key; keep it permanently           | Yes      |
+| `SIGNIFY_JOB_MODE`                  | `embedded`, or `external` with a supervised worker       | Yes      |
+| `SIGNATURE_ALLOW_DEFAULT_ADMIN`     | `false` after the first account exists                   | Yes      |
+| `TRUST_PROXY`                       | `true` only behind a trusted, private reverse proxy      | No       |
+| `MICROSOFT_*`                       | Leave blank and complete Microsoft setup in the owner UI | No       |
+| `STRIPE_*`                          | Leave blank and complete Stripe setup in the owner UI    | No       |
 
 Generate the encryption key once:
 
@@ -237,6 +238,18 @@ node --env-file=.env.local server.cjs
 Run the process under a supervisor such as systemd, NSSM, Docker, PM2, or the
 hosting provider's Node.js process manager. The process must receive `SIGTERM`
 or `SIGINT` during shutdown so SQLite can close cleanly.
+
+The default `SIGNIFY_JOB_MODE=embedded` runs the durable queue in the web
+process and is appropriate for a single-process host. When the host can
+supervise a second Node.js process, set `SIGNIFY_JOB_MODE=external` for the web
+and run:
+
+```powershell
+npm run worker
+```
+
+Run exactly one worker for a SQLite deployment. The queue uses atomic claims,
+but additional worker processes do not improve SQLite write throughput.
 
 ### 5. Configure the reverse proxy
 

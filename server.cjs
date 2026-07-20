@@ -464,9 +464,12 @@ function createApplication(options = {}) {
 function startServer(options = {}) {
   const application = createApplication(options);
   const server = http.createServer(application.handler);
-  const jobs = startJobWorker(application.db, {
-    publicRoot: application.config.publicRoot,
-  });
+  const jobs =
+    application.config.jobMode === "embedded"
+      ? startJobWorker(application.db, {
+          publicRoot: application.config.publicRoot,
+        })
+      : { stop: async () => {} };
   server.requestTimeout = 30000;
   server.headersTimeout = 15000;
   server.keepAliveTimeout = 5000;
@@ -491,6 +494,7 @@ function startServer(options = {}) {
         level: "info",
         event: "server.started",
         url: `http://${application.config.host}:${application.config.port}`,
+        jobMode: application.config.jobMode,
       }),
     ),
   );
