@@ -36,6 +36,9 @@ const {
   createPlatformControlRoutes,
 } = require("./routes/platform-control.cjs");
 const {
+  createPublicSignatureRoutes,
+} = require("./routes/public-signature.cjs");
+const {
   BRAND_FONT_STACKS,
   campaignInput,
   canonicalBrandFont,
@@ -575,6 +578,11 @@ function createSignaturePortal({
       )
       .get(organizationId, email);
   }
+  const publicSignatureRoutes = createPublicSignatureRoutes({
+    db,
+    memberById,
+    normalizeSignature,
+  });
   function userWorkspaces(userId) {
     return db
       .prepare(
@@ -2188,46 +2196,7 @@ function createSignaturePortal({
       session.header["Set-Cookie"].push(clearOauthCookie);
       return redirect(res, "/signature.html", session.header);
     }
-    const redirectMatch = url.pathname.match(/^\/r\/([^/]+)$/);
-    if (redirectMatch && req.method === "GET") {
-      const row = db
-        .prepare("SELECT * FROM signature_tracking_links WHERE id=?")
-        .get(redirectMatch[1]);
-      if (!row || !validUrl(row.destination_url)) return redirect(res, "/");
-      db.prepare(
-        `UPDATE signature_tracking_links SET clicks=clicks+1,last_clicked_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE id=?`,
-      ).run(row.id);
-      return redirect(res, row.destination_url);
-    }
-    const vcardMatch = url.pathname.match(/^\/vcard\/([^/]+)\/([^/]+)\.vcf$/);
-    if (vcardMatch && req.method === "GET") {
-      const row = memberById(vcardMatch[1], vcardMatch[2]);
-      if (!row) return textResponse(res, 404, "Contact not found.");
-      const sig = normalizeSignature(row),
-        f = sig.fields,
-        escape = (v) =>
-          String(v || "")
-            .replace(/([,;\\])/g, "\\$1")
-            .replace(/\n/g, "\\n"),
-        card = [
-          "BEGIN:VCARD",
-          "VERSION:3.0",
-          `FN:${escape(f.name)}`,
-          `TITLE:${escape(f.jobTitle)}`,
-          `ORG:${escape(f.company)}`,
-          `EMAIL;TYPE=INTERNET:${escape(f.email)}`,
-          f.phone ? `TEL;TYPE=WORK,VOICE:${escape(f.phone)}` : "",
-          f.mobile ? `TEL;TYPE=CELL:${escape(f.mobile)}` : "",
-          f.website ? `URL:${escape(f.website)}` : "",
-          f.address ? `ADR;TYPE=WORK:;;${escape(f.address)};;;;` : "",
-          "END:VCARD",
-        ]
-          .filter(Boolean)
-          .join("\r\n");
-      return textResponse(res, 200, card, "text/vcard; charset=utf-8", {
-        "Content-Disposition": `attachment; filename="${slug(f.name)}.vcf"`,
-      });
-    }
+    if (publicSignatureRoutes.routes({ req, res, url })) return;
     if (url.pathname.startsWith("/api/platform/")) {
       const owner = requireApplicationSession(req);
       requireApplicationOwner(owner);
