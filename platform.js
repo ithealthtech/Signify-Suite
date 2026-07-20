@@ -6,6 +6,7 @@ const state = {
   organizations: [],
   detail: null,
   stripePrices: [],
+  mfa: null,
 };
 
 function dateLabel(value) {
@@ -44,9 +45,11 @@ function showSection(name) {
   $$("[data-admin-section]").forEach((section) =>
     section.classList.toggle("active", section.dataset.adminSection === name),
   );
+  window.scrollTo({ top: 0, behavior: "instant" });
 }
 async function loadSession() {
   const result = await api("/api/platform/session");
+  state.mfa = result.mfa;
   $("#statOrganizations").textContent = result.stats.organizations;
   $("#statActive").textContent = result.stats.active;
   $("#statSuspended").textContent = result.stats.suspended;
@@ -55,6 +58,85 @@ async function loadSession() {
     ? "Stripe is configured for Application Owner checkout."
     : "Stripe is not configured in this environment.";
   $("#createCheckout").disabled = !result.stripe.configured;
+  $("#ownerMfaStatus").textContent = result.mfa.enabled
+    ? `Enabled. ${result.mfa.recoveryCodesRemaining} recovery codes remain.`
+    : "Not enabled for this Application Owner account.";
+  $("#setupOwnerMfa").textContent = result.mfa.enabled
+    ? "Replace authenticator"
+    : "Set up MFA";
+  $("#disableOwnerMfa").hidden = !result.mfa.enabled;
+}
+function resetMfaDialog(mode = "enroll") {
+  const enroll = mode === "enroll";
+  $("#ownerMfaTitle").textContent = enroll ? "Set up MFA" : "Disable MFA";
+  $("#ownerMfaStartForm").hidden = !enroll;
+  $("#ownerMfaConfirmForm").hidden = true;
+  $("#ownerMfaRecovery").hidden = true;
+  $("#ownerMfaDisableForm").hidden = enroll;
+  $("#ownerMfaStartForm").reset();
+  $("#ownerMfaConfirmForm").reset();
+  $("#ownerMfaDisableForm").reset();
+}
+async function startMfaEnrollment(event) {
+  event.preventDefault();
+  const form = event.currentTarget,
+    button = event.submitter;
+  busy(button, true, "Creating key...");
+  try {
+    const result = await api("/api/platform/mfa/enroll", {
+      method: "POST",
+      body: JSON.stringify(Object.fromEntries(new FormData(form))),
+    });
+    $("#ownerMfaQr").src = result.qrCode;
+    $("#ownerMfaSecret").value = result.secret;
+    form.hidden = true;
+    $("#ownerMfaConfirmForm").hidden = false;
+    $("#ownerMfaConfirmForm").elements.code.focus();
+  } catch (error) {
+    toast(error.message);
+  } finally {
+    busy(button, false);
+  }
+}
+async function confirmMfaEnrollment(event) {
+  event.preventDefault();
+  const form = event.currentTarget,
+    button = event.submitter;
+  busy(button, true, "Verifying...");
+  try {
+    const result = await api("/api/platform/mfa/confirm", {
+      method: "POST",
+      body: JSON.stringify(Object.fromEntries(new FormData(form))),
+    });
+    $("#ownerMfaCodes").value = result.recoveryCodes.join("\n");
+    form.hidden = true;
+    $("#ownerMfaRecovery").hidden = false;
+    await loadSession();
+    toast("Multi-factor authentication enabled");
+  } catch (error) {
+    toast(error.message);
+  } finally {
+    busy(button, false);
+  }
+}
+async function disableMfa(event) {
+  event.preventDefault();
+  const form = event.currentTarget,
+    button = event.submitter;
+  busy(button, true, "Disabling...");
+  try {
+    await api("/api/platform/mfa", {
+      method: "DELETE",
+      body: JSON.stringify(Object.fromEntries(new FormData(form))),
+    });
+    $("#ownerMfaDialog").close();
+    await loadSession();
+    toast("Multi-factor authentication disabled");
+  } catch (error) {
+    toast(error.message);
+  } finally {
+    busy(button, false);
+  }
 }
 function stripePriceLabel(price) {
   const amount = Number.isInteger(price.unitAmount)
@@ -602,6 +684,20 @@ function bindEvents() {
     $("#invitationResult").hidden = true;
     $("#createTenantDialog").showModal();
   });
+  $("#setupOwnerMfa").addEventListener("click", () => {
+    resetMfaDialog("enroll");
+    $("#ownerMfaDialog").showModal();
+  });
+  $("#disableOwnerMfa").addEventListener("click", () => {
+    resetMfaDialog("disable");
+    $("#ownerMfaDialog").showModal();
+  });
+  $$("[data-close-mfa]").forEach((button) =>
+    button.addEventListener("click", () => $("#ownerMfaDialog").close()),
+  );
+  $("#ownerMfaStartForm").addEventListener("submit", startMfaEnrollment);
+  $("#ownerMfaConfirmForm").addEventListener("submit", confirmMfaEnrollment);
+  $("#ownerMfaDisableForm").addEventListener("submit", disableMfa);
   $$("[data-close-create]").forEach((button) =>
     button.addEventListener("click", () => $("#createTenantDialog").close()),
   );

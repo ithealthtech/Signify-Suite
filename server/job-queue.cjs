@@ -144,7 +144,8 @@ function startJobWorker(db, options = {}) {
         db.exec(`DELETE FROM signature_sessions WHERE expires_at<=strftime('%Y-%m-%dT%H:%M:%fZ','now');
           DELETE FROM password_reset_tokens WHERE expires_at<=strftime('%Y-%m-%dT%H:%M:%fZ','now') OR used_at IS NOT NULL;
           DELETE FROM email_verification_tokens WHERE expires_at<=strftime('%Y-%m-%dT%H:%M:%fZ','now') OR used_at IS NOT NULL;
-          DELETE FROM oauth_states WHERE expires_at<=strftime('%Y-%m-%dT%H:%M:%fZ','now');`),
+          DELETE FROM oauth_states WHERE expires_at<=strftime('%Y-%m-%dT%H:%M:%fZ','now');
+          DELETE FROM mfa_login_challenges WHERE expires_at<=strftime('%Y-%m-%dT%H:%M:%fZ','now');`),
       "maintenance.media": () =>
         options.mediaStorage
           ? options.mediaStorage.cleanup(db, 7)

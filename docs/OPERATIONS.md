@@ -56,6 +56,15 @@ control plane, diagnose the stored error, correct its root cause, and requeue a
 dead-lettered job with a required audit reason. Requeueing resets the attempt
 count and terminal timestamp without replacing the original job identity.
 
+## Application Owner MFA
+
+Each Application Owner can enroll a TOTP authenticator from the control plane.
+The authenticator secret is encrypted with `SIGNIFY_CREDENTIAL_ENCRYPTION_KEY`;
+recovery codes are stored only as hashes and are consumed once. Enrollment and
+disablement revoke the owner's other sessions and create application audit
+records. Run `npm run credentials:rotate` while the application is stopped to
+rotate both provider credentials and MFA secrets in one database transaction.
+
 ## Backup And Restore
 
 Application Owners can open **Updates & backups** in the application control

@@ -10,6 +10,7 @@ const {
 } = require("node:crypto");
 const { GIFEncoder, quantize, applyPalette } = require("gifenc");
 const QRCode = require("qrcode");
+const OTPAuth = require("otpauth");
 const Stripe = require("stripe");
 const sharp = require("sharp");
 const { createCredentialVault } = require("./credential-vault.cjs");
@@ -686,7 +687,7 @@ function createSignaturePortal({
     });
     return user;
   }
-  function createSession(req, row) {
+  function createSession(req, row, { mfaVerified = false } = {}) {
     const user = userDto(row),
       settings = workspaceSettings(user),
       hours = Math.max(
@@ -703,9 +704,10 @@ function createSignaturePortal({
     db.exec(`DELETE FROM signature_sessions WHERE expires_at<=strftime('%Y-%m-%dT%H:%M:%fZ','now');
       DELETE FROM password_reset_tokens WHERE expires_at<=strftime('%Y-%m-%dT%H:%M:%fZ','now') OR used_at IS NOT NULL;
       DELETE FROM email_verification_tokens WHERE expires_at<=strftime('%Y-%m-%dT%H:%M:%fZ','now') OR used_at IS NOT NULL;
-      DELETE FROM oauth_states WHERE expires_at<=strftime('%Y-%m-%dT%H:%M:%fZ','now');`);
+      DELETE FROM oauth_states WHERE expires_at<=strftime('%Y-%m-%dT%H:%M:%fZ','now');
+      DELETE FROM mfa_login_challenges WHERE expires_at<=strftime('%Y-%m-%dT%H:%M:%fZ','now');`);
     db.prepare(
-      "INSERT INTO signature_sessions(id,user_id,token_hash,expires_at,organization_id,csrf_token_hash,created_ip,user_agent) VALUES (?,?,?,?,?,?,?,?)",
+      "INSERT INTO signature_sessions(id,user_id,token_hash,expires_at,organization_id,csrf_token_hash,created_ip,user_agent,mfa_verified_at) VALUES (?,?,?,?,?,?,?,?,?)",
     ).run(
       randomUUID(),
       user.id,
@@ -715,6 +717,7 @@ function createSignaturePortal({
       tokenHash(csrf),
       String(req.socket.remoteAddress || "").slice(0, 80),
       String(req.headers["user-agent"] || "").slice(0, 500),
+      mfaVerified ? new Date().toISOString() : null,
     );
     db.prepare(
       `UPDATE signature_users SET last_login_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE id=?`,
@@ -728,6 +731,85 @@ function createSignaturePortal({
         ],
       },
     };
+  }
+  function mfaRow(userId, enabledOnly = false) {
+    return db
+      .prepare(
+        `SELECT * FROM application_owner_mfa WHERE user_id=?${enabledOnly ? " AND status='enabled'" : ""}`,
+      )
+      .get(userId);
+  }
+  function mfaTotp(userId, email, row = mfaRow(userId)) {
+    if (!row) return null;
+    const secret = credentialVault.decrypt(
+      `mfa:${userId}`,
+      row.encrypted_secret,
+    ).secret;
+    return new OTPAuth.TOTP({
+      issuer: "Signify Creator",
+      label: email,
+      algorithm: "SHA1",
+      digits: 6,
+      period: 30,
+      secret: OTPAuth.Secret.fromBase32(secret),
+    });
+  }
+  function normalizedRecoveryCode(value) {
+    return String(value || "")
+      .toUpperCase()
+      .replace(/[^A-F0-9]/g, "");
+  }
+  function verifyMfaCode(userId, email, value, enabledOnly = true) {
+    const code = String(value || "").trim(),
+      row = mfaRow(userId, enabledOnly);
+    if (!row) return false;
+    if (/^\d{6}$/.test(code)) {
+      const totp = mfaTotp(userId, email, row),
+        delta = totp.validate({ token: code, window: 1 });
+      if (delta === null) return false;
+      const counter = totp.counter() + delta;
+      return Boolean(
+        db
+          .prepare(
+            `UPDATE application_owner_mfa SET last_counter=?,updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE user_id=? AND last_counter<?`,
+          )
+          .run(counter, userId, counter).changes,
+      );
+    }
+    const recovery = normalizedRecoveryCode(code);
+    if (recovery.length !== 16 || !enabledOnly) return false;
+    return Boolean(
+      db
+        .prepare(
+          `UPDATE application_owner_mfa_recovery_codes SET used_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE user_id=? AND code_hash=? AND used_at IS NULL`,
+        )
+        .run(userId, tokenHash(recovery)).changes,
+    );
+  }
+  function issueMfaChallenge(req, row) {
+    const token = randomBytes(32).toString("base64url"),
+      expiresAt = new Date(Date.now() + 5 * 60 * 1000).toISOString();
+    db.prepare("DELETE FROM mfa_login_challenges WHERE user_id=?").run(row.id);
+    db.prepare(
+      `INSERT INTO mfa_login_challenges(token_hash,user_id,organization_id,expires_at,created_ip,user_agent) VALUES (?,?,?,?,?,?)`,
+    ).run(
+      tokenHash(token),
+      row.id,
+      row.organization_id || null,
+      expiresAt,
+      String(req.socket.remoteAddress || "").slice(0, 80),
+      String(req.headers["user-agent"] || "").slice(0, 500),
+    );
+    return { challenge: token, expiresAt };
+  }
+  function loginRowForChallenge(challenge) {
+    if (challenge.organization_id)
+      return memberById(challenge.organization_id, challenge.user_id);
+    return db
+      .prepare(
+        `SELECT u.id,u.email,u.password_hash,u.display_name,u.role,u.status,u.created_at,u.updated_at,u.last_login_at,u.email_verified_at,u.signature_json,NULL AS membership_role,NULL AS membership_status,NULL AS organization_id,'' AS organization_name,'' AS organization_slug,'active' AS organization_status,'{}' AS organization_settings FROM signature_users u JOIN application_owners ao ON ao.user_id=u.id AND ao.status='active' WHERE u.id=? AND u.status='active' LIMIT 1`,
+      )
+      .get(challenge.user_id);
   }
   function refreshCsrf(user) {
     const csrf = randomBytes(32).toString("base64url");
@@ -1920,6 +2002,14 @@ function createSignaturePortal({
         photoUrl,
       });
       row = memberById(row.organization_id, row.id);
+      if (isApplicationOwner(row.id) && mfaRow(row.id, true)) {
+        const challenge = issueMfaChallenge(req, row);
+        return redirect(
+          res,
+          `/signature.html#mfa=${encodeURIComponent(challenge.challenge)}`,
+          { "Set-Cookie": clearOauthCookie },
+        );
+      }
       const session = createSession(req, row);
       recordAudit(session.user, "profile.microsoft_synced", "user", row.id, {
         photoImported: Boolean(photoUrl && photoUrl !== current.photoUrl),
@@ -2001,10 +2091,176 @@ function createSignaturePortal({
                 .filter(([, price]) => Boolean(price))
                 .map(([plan]) => plan),
             },
+            mfa: {
+              enabled: Boolean(mfaRow(owner.id, true)),
+              recoveryCodesRemaining: db
+                .prepare(
+                  "SELECT COUNT(*) count FROM application_owner_mfa_recovery_codes WHERE user_id=? AND used_at IS NULL",
+                )
+                .get(owner.id).count,
+            },
           },
           requestId,
           refreshCsrf(owner),
         );
+      }
+      if (
+        url.pathname === "/api/platform/mfa/enroll" &&
+        req.method === "POST"
+      ) {
+        const body = await readJsonBody(req, { limit: 8192 }),
+          account = db
+            .prepare(
+              "SELECT password_hash,email FROM signature_users WHERE id=?",
+            )
+            .get(owner.id);
+        if (!verifyPassword(body.password, account?.password_hash))
+          throw Object.assign(new Error("Current password is incorrect."), {
+            status: 403,
+            code: "PASSWORD_INVALID",
+          });
+        if (!credentialVault.configured)
+          throw Object.assign(
+            new Error("Credential encryption is required before enabling MFA."),
+            { status: 503, code: "CREDENTIAL_VAULT_NOT_CONFIGURED" },
+          );
+        const secret = new OTPAuth.Secret({ size: 20 }),
+          encrypted = credentialVault.encrypt(`mfa:${owner.id}`, {
+            secret: secret.base32,
+          }),
+          totp = new OTPAuth.TOTP({
+            issuer: "Signify Creator",
+            label: account.email,
+            secret,
+          });
+        db.prepare(
+          `INSERT INTO application_owner_mfa(user_id,status,encrypted_secret,credential_key_id,last_counter)
+           VALUES (?,'pending',?,?,-1)
+           ON CONFLICT(user_id) DO UPDATE SET status='pending',encrypted_secret=excluded.encrypted_secret,
+             credential_key_id=excluded.credential_key_id,last_counter=-1,enrolled_at=NULL,
+             updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now')`,
+        ).run(owner.id, encrypted, credentialVault.keyId);
+        db.prepare(
+          "DELETE FROM application_owner_mfa_recovery_codes WHERE user_id=?",
+        ).run(owner.id);
+        recordApplicationAudit(
+          owner,
+          "mfa.enrollment_started",
+          "user",
+          owner.id,
+          null,
+          "Application Owner initiated MFA enrollment",
+          {},
+          requestId,
+        );
+        return json(
+          res,
+          200,
+          {
+            secret: secret.base32,
+            qrCode: await QRCode.toDataURL(totp.toString(), {
+              margin: 1,
+              width: 240,
+            }),
+          },
+          requestId,
+        );
+      }
+      if (
+        url.pathname === "/api/platform/mfa/confirm" &&
+        req.method === "POST"
+      ) {
+        const body = await readJsonBody(req, { limit: 8192 });
+        if (!verifyMfaCode(owner.id, owner.email, body.code, false))
+          throw Object.assign(new Error("Verification code is invalid."), {
+            status: 400,
+            code: "MFA_INVALID",
+          });
+        const recoveryCodes = Array.from({ length: 10 }, () =>
+          randomBytes(8).toString("hex").toUpperCase().match(/.{4}/g).join("-"),
+        );
+        db.exec("BEGIN IMMEDIATE");
+        try {
+          db.prepare(
+            `UPDATE application_owner_mfa SET status='enabled',enrolled_at=strftime('%Y-%m-%dT%H:%M:%fZ','now'),updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE user_id=? AND status='pending'`,
+          ).run(owner.id);
+          db.prepare(
+            "DELETE FROM application_owner_mfa_recovery_codes WHERE user_id=?",
+          ).run(owner.id);
+          const insert = db.prepare(
+            "INSERT INTO application_owner_mfa_recovery_codes(id,user_id,code_hash) VALUES (?,?,?)",
+          );
+          for (const code of recoveryCodes)
+            insert.run(
+              randomUUID(),
+              owner.id,
+              tokenHash(normalizedRecoveryCode(code)),
+            );
+          db.prepare(
+            "DELETE FROM signature_sessions WHERE user_id=? AND id<>?",
+          ).run(owner.id, owner.sessionId);
+          db.prepare(
+            `UPDATE signature_sessions SET mfa_verified_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE id=?`,
+          ).run(owner.sessionId);
+          recordApplicationAudit(
+            owner,
+            "mfa.enabled",
+            "user",
+            owner.id,
+            null,
+            "Application Owner enabled MFA",
+            { recoveryCodes: recoveryCodes.length },
+            requestId,
+          );
+          db.exec("COMMIT");
+        } catch (error) {
+          db.exec("ROLLBACK");
+          throw error;
+        }
+        return json(res, 200, { recoveryCodes }, requestId);
+      }
+      if (url.pathname === "/api/platform/mfa" && req.method === "DELETE") {
+        const body = await readJsonBody(req, { limit: 8192 }),
+          account = db
+            .prepare(
+              "SELECT password_hash,email FROM signature_users WHERE id=?",
+            )
+            .get(owner.id);
+        if (
+          !verifyPassword(body.password, account?.password_hash) ||
+          !verifyMfaCode(owner.id, account.email, body.code)
+        )
+          throw Object.assign(
+            new Error("Password or verification code is invalid."),
+            { status: 403, code: "MFA_DISABLE_DENIED" },
+          );
+        db.exec("BEGIN IMMEDIATE");
+        try {
+          db.prepare(
+            "DELETE FROM application_owner_mfa_recovery_codes WHERE user_id=?",
+          ).run(owner.id);
+          db.prepare("DELETE FROM application_owner_mfa WHERE user_id=?").run(
+            owner.id,
+          );
+          db.prepare(
+            "DELETE FROM signature_sessions WHERE user_id=? AND id<>?",
+          ).run(owner.id, owner.sessionId);
+          recordApplicationAudit(
+            owner,
+            "mfa.disabled",
+            "user",
+            owner.id,
+            null,
+            limited(body.reason || "Application Owner disabled MFA", 500),
+            {},
+            requestId,
+          );
+          db.exec("COMMIT");
+        } catch (error) {
+          db.exec("ROLLBACK");
+          throw error;
+        }
+        return json(res, 200, { ok: true }, requestId);
       }
       if (await handlePlatformOperations({ req, res, url, requestId, owner }))
         return;
@@ -3727,6 +3983,57 @@ function createSignaturePortal({
         requestId,
       );
     }
+    if (url.pathname === "/api/signature/login/mfa" && req.method === "POST") {
+      const body = await readJsonBody(req, { limit: 8192 }),
+        challenge = db
+          .prepare(
+            `SELECT * FROM mfa_login_challenges WHERE token_hash=? AND expires_at>strftime('%Y-%m-%dT%H:%M:%fZ','now') AND attempts<5`,
+          )
+          .get(tokenHash(String(body.challenge || ""))),
+        invalid = () =>
+          json(
+            res,
+            401,
+            {
+              error: {
+                code: "MFA_INVALID",
+                message: "The verification code is invalid or expired.",
+              },
+            },
+            requestId,
+          );
+      if (!challenge) return invalid();
+      const attempts = db
+        .prepare(
+          "UPDATE mfa_login_challenges SET attempts=attempts+1 WHERE token_hash=? RETURNING attempts",
+        )
+        .get(challenge.token_hash).attempts;
+      const row = loginRowForChallenge(challenge);
+      if (!row || !verifyMfaCode(row.id, row.email, body.code)) {
+        if (attempts >= 5)
+          db.prepare("DELETE FROM mfa_login_challenges WHERE token_hash=?").run(
+            challenge.token_hash,
+          );
+        return invalid();
+      }
+      db.prepare("DELETE FROM mfa_login_challenges WHERE token_hash=?").run(
+        challenge.token_hash,
+      );
+      const session = createSession(req, row, { mfaVerified: true });
+      if (session.user.organizationId)
+        recordAudit(session.user, "session.login_mfa", "user", row.id);
+      recordApplicationAudit(
+        session.user,
+        "session.login_mfa",
+        "user",
+        row.id,
+        session.user.organizationId,
+        "Application Owner MFA login",
+        {},
+        requestId,
+      );
+      return json(res, 200, { user: session.user }, requestId, session.header);
+    }
     if (url.pathname === "/api/signature/login" && req.method === "POST") {
       const body = await readJsonBody(req, { limit: 8192 }),
         email = String(body.email || "")
@@ -3771,6 +4078,13 @@ function createSignaturePortal({
               message: "Verify your email before signing in.",
             },
           },
+          requestId,
+        );
+      if (isApplicationOwner(row.id) && mfaRow(row.id, true))
+        return json(
+          res,
+          202,
+          { mfaRequired: true, ...issueMfaChallenge(req, row) },
           requestId,
         );
       const session = createSession(req, row);

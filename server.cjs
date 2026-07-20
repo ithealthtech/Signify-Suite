@@ -305,6 +305,10 @@ function createApplication(options = {}) {
           limit: 10,
           windowMs: 60 * 60 * 1000,
         },
+        "/api/signature/login/mfa": {
+          limit: 10,
+          windowMs: 15 * 60 * 1000,
+        },
       },
       policy = policies[pathname];
     if (req.method !== "POST" || !policy) return null;

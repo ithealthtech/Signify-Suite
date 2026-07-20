@@ -2,7 +2,7 @@
   "$schema": "http://cyclonedx.org/schema/bom-1.5.schema.json",
   "bomFormat": "CycloneDX",
   "specVersion": "1.5",
-  "serialNumber": "urn:uuid:bbd45077-6a12-53a5-ac0f-f9f1e9bc7b03",
+  "serialNumber": "urn:uuid:de75cbc4-6285-5a9e-a994-e0e704f156fe",
   "version": 1,
   "metadata": {
     "timestamp": "1970-01-01T00:00:00.000Z",
@@ -824,6 +824,44 @@
       ]
     },
     {
+      "bom-ref": "@noble/hashes@2.2.0",
+      "type": "library",
+      "name": "@noble/hashes",
+      "version": "2.2.0",
+      "scope": "required",
+      "author": "Paul Miller (https://paulmillr.com)",
+      "description": "Audited & minimal 0-dependency JS implementation of SHA, RIPEMD, BLAKE, HMAC, HKDF, PBKDF & Scrypt",
+      "purl": "pkg:npm/%40noble/hashes@2.2.0",
+      "properties": [],
+      "externalReferences": [
+        {
+          "type": "distribution",
+          "url": "https://registry.npmjs.org/@noble/hashes/-/hashes-2.2.0.tgz"
+        },
+        {
+          "type": "vcs",
+          "url": "git+https://github.com/paulmillr/noble-hashes.git"
+        },
+        {
+          "type": "website",
+          "url": "https://paulmillr.com/noble/"
+        }
+      ],
+      "hashes": [
+        {
+          "alg": "SHA-512",
+          "content": "218a831a24d769be859e20209d2759c2059ba26c69cbd16d62f2cab3bc0252cd9af119084c6f831463b50ccf5cafe137fd18000d1a458eb295689d73eac8ed12"
+        }
+      ],
+      "licenses": [
+        {
+          "license": {
+            "id": "MIT"
+          }
+        }
+      ]
+    },
+    {
       "bom-ref": "@smithy/core@3.29.5",
       "type": "library",
       "name": "@smithy/core",
@@ -1604,6 +1642,48 @@
       ]
     },
     {
+      "bom-ref": "otpauth@9.5.1",
+      "type": "library",
+      "name": "otpauth",
+      "version": "9.5.1",
+      "scope": "required",
+      "author": "Héctor Molinero Fernández <hector@molinero.dev>",
+      "description": "One Time Password (HOTP/TOTP) library for Node.js, Deno, Bun and browsers",
+      "purl": "pkg:npm/otpauth@9.5.1",
+      "properties": [],
+      "externalReferences": [
+        {
+          "type": "distribution",
+          "url": "https://registry.npmjs.org/otpauth/-/otpauth-9.5.1.tgz"
+        },
+        {
+          "type": "vcs",
+          "url": "https://github.com/hectorm/otpauth.git"
+        },
+        {
+          "type": "website",
+          "url": "https://github.com/hectorm/otpauth"
+        },
+        {
+          "type": "issue-tracker",
+          "url": "https://github.com/hectorm/otpauth/issues"
+        }
+      ],
+      "hashes": [
+        {
+          "alg": "SHA-512",
+          "content": "7c998300773cc0899faaaa8e5c8941bd3d5d10aad92b40a66f6544812729353a250b3d0f1e1e84c54646bf8b0bb4eb1635a1c24250fead1a9a3e09e8c45a198d"
+        }
+      ],
+      "licenses": [
+        {
+          "license": {
+            "id": "MIT"
+          }
+        }
+      ]
+    },
+    {
       "bom-ref": "p-limit@2.3.0",
       "type": "library",
       "name": "p-limit",
@@ -2303,6 +2383,7 @@
         "@aws-sdk/client-s3@3.1090.0",
         "@aws-sdk/s3-request-presigner@3.1090.0",
         "gifenc@1.0.3",
+        "otpauth@9.5.1",
         "qrcode@1.5.4",
         "sharp@0.35.3",
         "stripe@22.3.2"
@@ -2529,6 +2610,10 @@
       "dependsOn": []
     },
     {
+      "ref": "@noble/hashes@2.2.0",
+      "dependsOn": []
+    },
+    {
       "ref": "@smithy/core@3.29.5",
       "dependsOn": [
         "@smithy/types@4.16.1",
@@ -2647,6 +2732,12 @@
       "ref": "locate-path@5.0.0",
       "dependsOn": [
         "p-locate@4.1.0"
+      ]
+    },
+    {
+      "ref": "otpauth@9.5.1",
+      "dependsOn": [
+        "@noble/hashes@2.2.0"
       ]
     },
     {

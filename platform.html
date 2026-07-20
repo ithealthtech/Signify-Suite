@@ -328,6 +328,23 @@
               <p>Only these accounts can manage tenants and Stripe.</p>
             </div>
           </div>
+          <div class="control-form" id="ownerMfaPanel">
+            <h2>Multi-factor authentication</h2>
+            <p id="ownerMfaStatus">Loading security status...</p>
+            <div class="integration-actions">
+              <button class="button primary" id="setupOwnerMfa" type="button">
+                Set up MFA
+              </button>
+              <button
+                class="button danger"
+                id="disableOwnerMfa"
+                type="button"
+                hidden
+              >
+                Disable MFA
+              </button>
+            </div>
+          </div>
           <form class="inline-form" id="ownerForm">
             <label
               >Existing account email<input
@@ -550,6 +567,83 @@
           </button>
         </div>
       </form>
+    </dialog>
+
+    <dialog id="ownerMfaDialog">
+      <div class="dialog-form">
+        <div class="dialog-head">
+          <div>
+            <span class="eyebrow">Application Owner security</span>
+            <h2 id="ownerMfaTitle">Set up MFA</h2>
+          </div>
+          <button type="button" data-close-mfa aria-label="Close">
+            &times;
+          </button>
+        </div>
+        <form id="ownerMfaStartForm">
+          <p>Confirm your password before creating a new authenticator key.</p>
+          <label
+            >Current password<input
+              name="password"
+              type="password"
+              autocomplete="current-password"
+              required
+          /></label>
+          <div class="dialog-actions">
+            <button class="button" type="button" data-close-mfa>Cancel</button>
+            <button class="button primary" type="submit">Continue</button>
+          </div>
+        </form>
+        <form id="ownerMfaConfirmForm" hidden>
+          <img id="ownerMfaQr" alt="Authenticator setup QR code" />
+          <label>Manual setup key<input id="ownerMfaSecret" readonly /></label>
+          <label
+            >Six-digit code<input
+              name="code"
+              inputmode="numeric"
+              autocomplete="one-time-code"
+              pattern="[0-9]{6}"
+              required
+          /></label>
+          <div class="dialog-actions">
+            <button class="button" type="button" data-close-mfa>Cancel</button>
+            <button class="button primary" type="submit">Enable MFA</button>
+          </div>
+        </form>
+        <div id="ownerMfaRecovery" hidden>
+          <p>
+            Store these one-time recovery codes now. They will not be shown
+            again.
+          </p>
+          <textarea id="ownerMfaCodes" rows="10" readonly></textarea>
+          <div class="dialog-actions">
+            <button class="button primary" type="button" data-close-mfa>
+              Done
+            </button>
+          </div>
+        </div>
+        <form id="ownerMfaDisableForm" hidden>
+          <p>Disabling MFA revokes your other active sessions.</p>
+          <label
+            >Current password<input
+              name="password"
+              type="password"
+              autocomplete="current-password"
+              required
+          /></label>
+          <label
+            >Authenticator or recovery code<input
+              name="code"
+              autocomplete="one-time-code"
+              required
+          /></label>
+          <label>Reason<input name="reason" required minlength="3" /></label>
+          <div class="dialog-actions">
+            <button class="button" type="button" data-close-mfa>Cancel</button>
+            <button class="button danger" type="submit">Disable MFA</button>
+          </div>
+        </form>
+      </div>
     </dialog>
 
     <dialog id="retryJobDialog">

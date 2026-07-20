@@ -6,6 +6,7 @@ const fs = require("node:fs");
 const { spawnSync } = require("node:child_process");
 const { generateKeyPairSync, sign } = require("node:crypto");
 const Stripe = require("stripe");
+const OTPAuth = require("otpauth");
 const sharp = require("sharp");
 const { createApplication } = require("../server.cjs");
 const { loadConfig } = require("../server/config.cjs");
@@ -1972,11 +1973,115 @@ async function main() {
       result.response.status === 200,
       "tenant-independent Application Owner session failed",
     );
-    for (let attempt = 0; attempt < 7; attempt += 1)
+    result = await request(baseUrl, "/api/platform/mfa/enroll", {
+      method: "POST",
+      body: { password: "wrong" },
+      jar: adminJar,
+    });
+    assert(
+      result.response.status === 403 &&
+        result.body.error.code === "PASSWORD_INVALID",
+      "MFA enrollment accepted an invalid current password",
+    );
+    result = await request(baseUrl, "/api/platform/mfa/enroll", {
+      method: "POST",
+      body: { password: "SignifyDemo123!" },
+      jar: adminJar,
+    });
+    assert(
+      result.response.status === 200 &&
+        result.body.secret &&
+        result.body.qrCode.startsWith("data:image/png"),
+      "MFA enrollment did not return a scannable authenticator secret",
+    );
+    const ownerTotp = new OTPAuth.TOTP({
+      issuer: "Signify Creator",
+      label: "admin@signify.local",
+      secret: OTPAuth.Secret.fromBase32(result.body.secret),
+    });
+    result = await request(baseUrl, "/api/platform/mfa/confirm", {
+      method: "POST",
+      body: { code: ownerTotp.generate() },
+      jar: adminJar,
+    });
+    assert(
+      result.response.status === 200 && result.body.recoveryCodes.length === 10,
+      "MFA confirmation or recovery-code generation failed",
+    );
+    const [firstRecoveryCode, secondRecoveryCode, disableRecoveryCode] =
+      result.body.recoveryCodes;
+    result = await request(baseUrl, "/api/platform/session", { jar: adminJar });
+    assert(
+      result.body.mfa.enabled === true &&
+        result.body.mfa.recoveryCodesRemaining === 10,
+      "MFA status did not reflect enrollment",
+    );
+    adminJar.clear();
+    result = await request(baseUrl, "/api/signature/login", {
+      method: "POST",
+      body: {
+        email: "admin@signify.local",
+        password: "SignifyDemo123!",
+      },
+      jar: adminJar,
+    });
+    assert(
+      result.response.status === 202 && result.body.mfaRequired,
+      "Application Owner login bypassed enabled MFA",
+    );
+    let mfaChallenge = result.body.challenge;
+    result = await request(baseUrl, "/api/signature/login/mfa", {
+      method: "POST",
+      body: { challenge: mfaChallenge, code: firstRecoveryCode },
+      jar: adminJar,
+    });
+    assert(
+      result.response.status === 200 && adminJar.has("sig_session"),
+      "one-time MFA recovery login failed",
+    );
+    adminJar.clear();
+    result = await request(baseUrl, "/api/signature/login", {
+      method: "POST",
+      body: {
+        email: "admin@signify.local",
+        password: "SignifyDemo123!",
+      },
+      jar: adminJar,
+    });
+    mfaChallenge = result.body.challenge;
+    result = await request(baseUrl, "/api/signature/login/mfa", {
+      method: "POST",
+      body: { challenge: mfaChallenge, code: firstRecoveryCode },
+      jar: adminJar,
+    });
+    assert(
+      result.response.status === 401 &&
+        result.body.error.code === "MFA_INVALID",
+      "used MFA recovery code was accepted again",
+    );
+    result = await request(baseUrl, "/api/signature/login/mfa", {
+      method: "POST",
+      body: { challenge: mfaChallenge, code: secondRecoveryCode },
+      jar: adminJar,
+    });
+    assert(result.response.status === 200, "second MFA recovery login failed");
+    result = await request(baseUrl, "/api/platform/mfa", {
+      method: "DELETE",
+      body: {
+        password: "SignifyDemo123!",
+        code: disableRecoveryCode,
+        reason: "Smoke-test MFA lifecycle",
+      },
+      jar: adminJar,
+    });
+    assert(result.response.status === 200, "MFA disable workflow failed");
+    for (let attempt = 0; attempt < 12; attempt += 1) {
       result = await request(baseUrl, "/api/signature/login", {
         method: "POST",
         body: { email: "nobody@example.com", password: "wrong" },
       });
+      if (result.response.status === 429) break;
+    }
     assert(
       result.response.status === 429 &&
         result.body.error.code === "RATE_LIMITED" &&
@@ -2082,7 +2187,7 @@ async function main() {
     }
     assert(retiredKeyRejected, "retired credential key still decrypted data");
     console.log(
-      "Smoke test passed: migrations, three-tier RBAC, Application Owner control plane, tenant lifecycle, owner-only Stripe, tenant Microsoft consent, request validation, auth, browser-bound OAuth state, verification retry, invitations, CSRF, tenant isolation, workspace switching, approval integrity, atomic updates, subscription enforcement, recovery, Microsoft directory pagination, image normalization, templates, rollout, campaigns, brand rendering, Stripe webhooks, rate limiting, database integrity, and reopen",
+      "Smoke test passed: migrations, three-tier RBAC, Application Owner MFA and control plane, tenant lifecycle, owner-only Stripe, tenant Microsoft consent, request validation, auth, browser-bound OAuth state, verification retry, invitations, CSRF, tenant isolation, workspace switching, approval integrity, atomic updates, subscription enforcement, recovery, Microsoft directory pagination, image normalization, templates, rollout, campaigns, brand rendering, Stripe webhooks, rate limiting, database integrity, and reopen",
     );
   } finally {
     if (server.listening) await new Promise((resolve) => server.close(resolve));

@@ -442,7 +442,13 @@ $env:SIGNIFY_OWNER_EMAIL="owner@example.com"
 npm run application:grant-owner
 ```
 
-Rotate the integration credential-encryption key while the app is stopped:
+Application Owners should open **Application > Application Owners** and enable
+multi-factor authentication. Enrollment requires the current password and a
+TOTP authenticator; ten one-time recovery codes are shown once. Enabling or
+disabling MFA revokes the owner's other sessions.
+
+Rotate the integration and MFA credential-encryption key while the app is
+stopped:
 
 ```powershell
 $env:SIGNIFY_OLD_CREDENTIAL_ENCRYPTION_KEY="current-key"
@@ -450,7 +456,8 @@ $env:SIGNIFY_CREDENTIAL_ENCRYPTION_KEY="new-key"
 npm run credentials:rotate
 ```
 
-Update the hosted environment to the new key before restarting.
+The rotation is atomic across provider and MFA secrets. Update the hosted
+environment to the new key before restarting.
 
 ## Updating
 
