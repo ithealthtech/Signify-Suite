@@ -1,5 +1,8 @@
 # Signify Creator
 
+**Current stable release:** [v1.0.0](https://github.com/ithealthtech/Signify-Suite/releases/tag/v1.0.0) ·
+[Download the production Node.js package](https://github.com/ithealthtech/Signify-Suite/releases/download/v1.0.0/signify-creator-v1.0.0.zip)
+
 Signify Creator is a self-hosted, multi-tenant email-signature SaaS for
 Node.js. It provides an Outlook-safe signature studio, reusable templates,
 campaign banners, approvals, bulk rollout, tenant-scoped Microsoft 365
@@ -30,6 +33,8 @@ are available only in the Application Owner control plane.
 - An HTTPS reverse proxy for production
 - Optional: a multi-tenant Microsoft Entra application
 - Optional: a Stripe account
+- Optional: a fine-grained GitHub token with read-only Contents permission for
+  private release detection and application updates
 
 Signify uses Node's built-in HTTP server and SQLite. Express, PostgreSQL, and a
 separate web server are not required inside the application process.
@@ -120,8 +125,9 @@ npm run dev
 ```
 
 Open [http://127.0.0.1:4173](http://127.0.0.1:4173), sign in with the
-configured bootstrap account, and select **Application > First-time setup**.
-Database migrations run automatically when the server starts.
+configured bootstrap account. Database migrations run automatically when the
+server starts. Microsoft 365, Stripe, and GitHub can be connected later from
+**Application > Integrations**.
 
 ## Production Installation
 
@@ -149,7 +155,8 @@ docker compose exec web node scripts/doctor.cjs
 ```
 
 The setup command prints the generated initial password. Sign in at the public
-HTTPS URL, enroll Application Owner MFA, and complete **First-time setup**.
+HTTPS URL and enroll Application Owner MFA. Optional providers are configured
+from **Application > Integrations**.
 Configure nginx, Caddy, or the hosting proxy to forward HTTPS traffic to
 `127.0.0.1:4173` with the original host and `X-Forwarded-Proto` headers.
 
@@ -170,7 +177,14 @@ yet make `DATABASE_URL` the live application database.
 
 ### Install a release package
 
-Extract the GitHub release, open a terminal in that directory, and run:
+Download
+[`signify-creator-v1.0.0.zip`](https://github.com/ithealthtech/Signify-Suite/releases/download/v1.0.0/signify-creator-v1.0.0.zip),
+verify its SHA-256 digest, extract it, open a terminal in that directory, and
+run:
+
+```text
+ed2fd44674689354eba599cd0f5bb6ac608395360c3ddf12138a9d20db20df35
+```
 
 ```powershell
 npm ci --omit=dev
@@ -189,7 +203,7 @@ making changes. It then:
 - writes `.env.local` with bootstrap disabled
 - initializes SQLite and applies every migration
 - creates the first Application Owner
-- prints the login password and First-time setup URL
+- prints the login password and application URL
 
 Store the displayed password immediately; it is shown only for a fresh
 installation. If `.env.local` already exists, the installer backs it up before
@@ -340,8 +354,8 @@ traffic arrives through a trusted reverse proxy.
 
 #### Configuration checklist
 
-Use this table when filling in `.env.local`. Microsoft 365 and Stripe can be
-configured later from **Application > First-time setup**.
+Use this table when filling in `.env.local`. Microsoft 365, Stripe, and GitHub
+can be configured later from **Application > Integrations**.
 
 | Setting                              | What to enter                                            | Required          |
 | ------------------------------------ | -------------------------------------------------------- | ----------------- |
@@ -450,18 +464,26 @@ Do not deploy Signify to an ephemeral serverless filesystem.
 
 ## First-Time Application Setup
 
-After the first Application Owner signs in, open
-`https://your-domain.example/platform.html` and select **First-time setup**.
+Fresh deployments use the standalone page at
+`https://your-domain.example/setup.html`. Before installation completes, all
+normal application pages redirect to this installer and protected APIs fail
+closed.
 
-The wizard verifies:
+The progress tracker has three stages:
 
-1. Company identity and public URL
-2. Credential-vault availability
-3. Microsoft 365 application credentials and Graph permissions
-4. Stripe configuration or an explicit billing deferral
+1. **Setup** verifies Node.js, storage, migrations, HTTPS, credential-vault
+   configuration, the one-time setup token, company name, and public URL.
+2. **Configure** creates the first Application Owner with a strong password.
+3. **Sign in** unlocks the application only after the installation transaction
+   commits successfully.
 
-Provider credentials entered in the UI are encrypted with AES-256-GCM before
-storage and are never returned by the API or written to audit metadata.
+After installation, remove `SIGNIFY_SETUP_TOKEN` from the host and restart the
+application. The installer remains locked by database state. Microsoft 365,
+Stripe, and GitHub are optional and can be connected later from
+**Application > Integrations**.
+
+Provider credentials entered in the owner UI are encrypted with AES-256-GCM
+before storage and are never returned by the API or written to audit metadata.
 
 ### Microsoft 365
 
@@ -498,6 +520,25 @@ can then:
 Move to a live key only after sandbox verification succeeds. Stripe remains an
 Application Owner integration; tenant users never receive Stripe credentials or
 provider controls.
+
+### Private GitHub releases
+
+Open **Application > Integrations**, select **GitHub**, and enter:
+
+- repository name in `owner/repository` format
+- a fine-grained personal access token restricted to that repository
+- repository permission **Contents: Read-only**; no write or organization
+  permissions are required
+
+Signify verifies private repository access before encrypting the token. Update
+checks use the stored credential server-side to read the latest release and its
+download assets. The token is never returned to the browser. Configure
+`SIGNIFY_UPDATE_REPOSITORY` and `SIGNIFY_UPDATE_GITHUB_TOKEN` instead when an
+unattended environment-based integration is preferred.
+
+The host must allow outbound HTTPS access to `api.github.com` and GitHub release
+asset endpoints. Revoke and replace any token that appears in a URL, log, or
+support transcript.
 
 ## Hostinger Node.js Web Apps
 
