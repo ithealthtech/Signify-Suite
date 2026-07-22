@@ -5,7 +5,9 @@ const path = require("node:path");
 const { createHash } = require("node:crypto");
 
 const root = path.join(__dirname, ".."),
-  artifact = path.join(root, "dist");
+  artifact = process.env.SIGNIFY_BUILD_DIR
+    ? path.resolve(root, process.env.SIGNIFY_BUILD_DIR)
+    : path.join(root, "dist");
 
 function files(directory) {
   return fs.readdirSync(directory, { withFileTypes: true }).flatMap((entry) => {
@@ -58,6 +60,9 @@ for (const required of [
   "manifest.json",
   "checksums.txt",
   "public/signature-it-banner.png",
+  "setup.html",
+  "setup.css",
+  "setup.js",
   "scripts/access-review.cjs",
   "scripts/migrate.cjs",
   "scripts/doctor.cjs",

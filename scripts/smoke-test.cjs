@@ -12,6 +12,7 @@ const { createApplication } = require("../server.cjs");
 const { loadConfig } = require("../server/config.cjs");
 const { createCredentialVault } = require("../server/credential-vault.cjs");
 const { buildSignatureHtml } = require("../server/templates.cjs");
+const packageMetadata = require("../package.json");
 
 function assert(condition, message) {
   if (!condition) throw new Error(message);
@@ -149,10 +150,24 @@ async function main() {
         unsigned = `${header}.${payload}`;
       return `${unsigned}.${sign("RSA-SHA256", Buffer.from(unsigned), microsoftPrivateKey).toString("base64url")}`;
     };
-  let microsoftLoginNonce = "";
-  const fetchImpl = async (input) => {
+  let microsoftLoginNonce = "",
+    githubAuthorization = "";
+  const fetchImpl = async (input, options = {}) => {
     const url = String(input);
     graphRequests.push(url);
+    if (
+      url ===
+      "https://api.github.com/repos/ithealthtech/Signify-Suite/releases/latest"
+    ) {
+      githubAuthorization = options.headers?.Authorization || "";
+      return graphResponse({
+        tag_name: "v1.0.0",
+        published_at: "2026-07-22T00:00:00Z",
+        html_url:
+          "https://github.com/ithealthtech/Signify-Suite/releases/tag/v1.0.0",
+        body: "Private release",
+      });
+    }
     if (url.endsWith("/common/discovery/v2.0/keys"))
       return graphResponse({ keys: [microsoftJwk] });
     if (url.includes("login.microsoftonline.com"))
@@ -478,8 +493,13 @@ async function main() {
     );
     result = await request(baseUrl, "/setup.html");
     assert(
-      result.response.status === 404,
-      "removed installer is still reachable",
+      result.response.status === 200 && result.text.includes("installerForm"),
+      "locked installer page is unavailable",
+    );
+    result = await request(baseUrl, "/api/setup/status");
+    assert(
+      result.response.status === 200 && result.body.required === false,
+      "existing installation was not locked",
     );
     result = await request(baseUrl, "/api/signature/login", {
       method: "POST",
@@ -1016,13 +1036,32 @@ async function main() {
       "uploaded logo was not normalized",
     );
     fs.unlinkSync(normalizedLogoPath);
-    const animationFrames = [
-      Buffer.from([0, 0, 0, 255, 255, 255, 255, 255]).toString("base64"),
-      Buffer.from([37, 99, 235, 255, 95, 229, 255, 255]).toString("base64"),
-    ];
+    const animatedBannerWidth = 440,
+      animatedBannerHeight = 100,
+      animationFrame = (red, green, blue) => {
+        const frame = Buffer.alloc(
+          animatedBannerWidth * animatedBannerHeight * 4,
+        );
+        for (let index = 0; index < frame.length; index += 4) {
+          frame[index] = red;
+          frame[index + 1] = green;
+          frame[index + 2] = blue;
+          frame[index + 3] = 255;
+        }
+        return frame.toString("base64");
+      },
+      animationFrames = [
+        animationFrame(37, 99, 235),
+        animationFrame(95, 229, 255),
+      ];
     result = await request(baseUrl, "/api/signature/generated-banners", {
       method: "POST",
-      body: { width: 2, height: 1, delay: 80, frames: animationFrames },
+      body: {
+        width: animatedBannerWidth,
+        height: animatedBannerHeight,
+        delay: 80,
+        frames: animationFrames,
+      },
       jar: editorJar,
     });
     assert(
@@ -1041,6 +1080,12 @@ async function main() {
     assert(
       fs.statSync(generatedBannerPath).size > 0,
       "generated GIF was empty",
+    );
+    const generatedBannerMetadata = await sharp(generatedBannerPath).metadata();
+    assert(
+      generatedBannerMetadata.width === animatedBannerWidth &&
+        generatedBannerMetadata.height === animatedBannerHeight,
+      "generated GIF dimensions did not match the email banner contract",
     );
     fs.unlinkSync(generatedBannerPath);
     result = await request(baseUrl, "/api/signature/register", {
@@ -1771,8 +1816,36 @@ async function main() {
     assert(
       result.response.status === 200 &&
         result.body.vault.configured === true &&
-        result.body.stripe.source === "environment",
+        result.body.stripe.source === "environment" &&
+        result.body.github.configured === false,
       "integration readiness did not expose the environment fallback",
+    );
+    result = await request(
+      baseUrl,
+      "/api/platform/integrations/github/connect",
+      {
+        method: "POST",
+        body: {
+          repository: "ithealthtech/Signify-Suite",
+          token: "github-private-release-token",
+          reason: "Enable private release updates",
+        },
+        jar: adminJar,
+      },
+    );
+    assert(
+      result.response.status === 200 &&
+        result.body.repository === "ithealthtech/Signify-Suite" &&
+        !JSON.stringify(result.body).includes("github-private-release-token"),
+      "private GitHub integration was not connected securely",
+    );
+    result = await request(baseUrl, "/api/platform/operations/updates", {
+      jar: adminJar,
+    });
+    assert(
+      result.response.status === 200 &&
+        githubAuthorization === "Bearer github-private-release-token",
+      "update checks did not use the encrypted GitHub integration token",
     );
     result = await request(
       baseUrl,
@@ -2042,7 +2115,7 @@ async function main() {
     });
     assert(
       result.response.status === 200 &&
-        result.body.fleet.version === "0.4.0" &&
+        result.body.fleet.version === packageMetadata.version &&
         result.body.fleet.migrations >= 22 &&
         result.body.tenants.some(
           (tenant) => tenant.id === controlPlaneOrganizationId,
@@ -2619,7 +2692,7 @@ async function main() {
         },
       );
     assert(
-      rotation.status === 0 && rotation.stdout.includes("Rotated 1"),
+      rotation.status === 0 && /Rotated [1-9]\d*/.test(rotation.stdout),
       `credential rotation failed: ${rotation.stderr || rotation.stdout}`,
     );
     env.SIGNIFY_CREDENTIAL_ENCRYPTION_KEY = newEncryptionKey;
@@ -2650,8 +2723,52 @@ async function main() {
       retiredKeyRejected = error.code === "CREDENTIAL_DECRYPT_FAILED";
     }
     assert(retiredKeyRejected, "retired credential key still decrypted data");
+    result = await request(reopened, "/api/signature/users", {
+      method: "POST",
+      body: {
+        email: "direct-user@example.com",
+        displayName: "Direct User",
+        jobTitle: "Support Specialist",
+        department: "Service",
+        role: "viewer",
+      },
+      jar: adminJar,
+    });
+    assert(
+      result.response.status === 201 &&
+        result.body.user?.email === "direct-user@example.com" &&
+        result.body.user?.role === "viewer" &&
+        result.body.temporaryPassword?.length >= 10,
+      "Tenant Admin could not create a direct user",
+    );
+    const directUserId = result.body.user.id,
+      directPassword = result.body.temporaryPassword,
+      directJar = new Map();
+    result = await request(reopened, "/api/signature/login", {
+      method: "POST",
+      body: {
+        email: "direct-user@example.com",
+        password: directPassword,
+      },
+      jar: directJar,
+    });
+    assert(
+      result.response.status === 200 &&
+        result.body.user?.organizationId &&
+        result.body.user?.role === "viewer",
+      "Direct user could not authenticate into the tenant",
+    );
+    result = await request(
+      reopened,
+      `/api/signature/users/${encodeURIComponent(directUserId)}`,
+      { method: "DELETE", jar: adminJar },
+    );
+    assert(
+      result.response.status === 200 && result.body.ok,
+      "Direct user cleanup failed",
+    );
     console.log(
-      "Smoke test passed: migrations, three-tier RBAC, Application Owner MFA and control plane, tenant lifecycle, owner-only Stripe, tenant Microsoft consent, request validation, auth, browser-bound OAuth state, verification retry, invitations, CSRF, tenant isolation, workspace switching, approval integrity, atomic updates, subscription enforcement, recovery, Microsoft directory pagination, image normalization, templates, rollout, campaigns, brand rendering, Stripe webhooks, rate limiting, database integrity, and reopen",
+      "Smoke test passed: migrations, three-tier RBAC, Application Owner MFA and control plane, tenant lifecycle, owner-only Stripe, tenant Microsoft consent, request validation, auth, browser-bound OAuth state, verification retry, invitations, direct users, CSRF, tenant isolation, workspace switching, approval integrity, atomic updates, subscription enforcement, recovery, Microsoft directory pagination, image normalization, templates, rollout, campaigns, brand rendering, Stripe webhooks, rate limiting, database integrity, and reopen",
     );
   } finally {
     if (server.listening) await new Promise((resolve) => server.close(resolve));

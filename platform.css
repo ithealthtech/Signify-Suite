@@ -118,9 +118,11 @@
   flex: 1;
 }
 .tenant-detail {
-  width: min(900px, calc(100vw - 32px));
-  max-height: calc(100vh - 40px);
-  overflow: auto;
+  width: 100%;
+  max-height: calc(100dvh - 30px);
+}
+#tenantDialog {
+  width: min(920px, calc(100vw - 30px));
 }
 .detail-summary {
   display: grid;
@@ -205,6 +207,12 @@ hr {
   margin: 18px 0;
 }
 @media (max-width: 760px) {
+  #tenantDialog {
+    width: calc(100vw - 20px);
+  }
+  .tenant-detail {
+    max-height: calc(100dvh - 20px);
+  }
   .table-tools,
   .inline-form,
   .form-grid {
@@ -232,6 +240,162 @@ hr {
   margin-bottom: 20px;
   border: 1px solid var(--line);
   background: var(--line);
+}
+.integration-catalog {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+  max-width: 900px;
+}
+.integration-tile {
+  display: grid;
+  grid-template-columns: 56px minmax(0, 1fr) auto 20px;
+  align-items: center;
+  gap: 14px;
+  min-width: 0;
+  min-height: 104px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #fff;
+  padding: 18px;
+  color: var(--ink);
+  box-shadow: 0 4px 16px rgba(20, 22, 28, 0.05);
+  cursor: pointer;
+  text-align: left;
+  transition:
+    border-color 0.15s,
+    box-shadow 0.15s,
+    transform 0.15s;
+}
+.integration-tile:hover {
+  transform: translateY(-1px);
+  border-color: #c8c5bc;
+  box-shadow: 0 8px 24px rgba(20, 22, 28, 0.09);
+}
+.integration-tile:focus-visible {
+  border-color: var(--accent);
+  outline: 3px solid #eeeeff;
+  outline-offset: 1px;
+}
+.provider-logo {
+  display: grid;
+  flex: 0 0 auto;
+  place-items: center;
+  width: 54px;
+  height: 54px;
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #fff;
+}
+.microsoft-logo {
+  grid-template-columns: repeat(2, 17px);
+  grid-template-rows: repeat(2, 17px);
+  gap: 3px;
+}
+.microsoft-logo i {
+  width: 17px;
+  height: 17px;
+}
+.microsoft-logo i:nth-child(1) {
+  background: #f35325;
+}
+.microsoft-logo i:nth-child(2) {
+  background: #81bc06;
+}
+.microsoft-logo i:nth-child(3) {
+  background: #05a6f0;
+}
+.microsoft-logo i:nth-child(4) {
+  background: #ffba08;
+}
+.stripe-logo {
+  border-color: #d9d4ff;
+  background: #635bff;
+  color: #fff;
+  font-size: 14px;
+  font-weight: 700;
+  letter-spacing: 0;
+}
+
+.github-logo {
+  color: #fff;
+  background: #24292f;
+  border-radius: 50%;
+  font-size: 12px;
+  font-weight: 850;
+}
+.integration-tile-copy {
+  display: grid;
+  gap: 5px;
+  min-width: 0;
+}
+.integration-tile-copy strong {
+  font-size: 15px;
+}
+.integration-tile-copy small {
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.4;
+}
+.integration-tile-state {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  border-radius: 10px;
+  background: #f0f1f3;
+  padding: 5px 8px;
+  color: var(--muted);
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: capitalize;
+  white-space: nowrap;
+}
+.integration-tile-state::before {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #9298a3;
+  content: "";
+}
+.integration-tile-state.connected {
+  background: #e9f7f0;
+  color: #176b50;
+}
+.integration-tile-state.connected::before {
+  background: #20815a;
+}
+.integration-chevron {
+  color: #8a9099;
+  font-size: 26px;
+  line-height: 1;
+}
+.integration-dialog {
+  width: min(780px, calc(100vw - 30px));
+}
+.provider-dialog-intro {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  margin-bottom: 20px;
+}
+.provider-dialog-intro > div {
+  display: grid;
+  gap: 3px;
+}
+.provider-dialog-intro strong {
+  font-size: 17px;
+}
+.provider-dialog-intro p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 12px;
+}
+.integration-dialog .integration-form {
+  max-width: none;
+}
+.integration-dialog .integration-form:last-child {
+  border-bottom: 0;
 }
 .integration-status > div {
   min-width: 0;
@@ -340,6 +504,29 @@ hr {
   font-size: 12px;
 }
 @media (max-width: 760px) {
+  .integration-catalog {
+    grid-template-columns: 1fr;
+  }
+  .integration-tile {
+    grid-template-columns: 48px minmax(0, 1fr) 18px;
+    min-height: 94px;
+    padding: 14px;
+  }
+  .integration-tile .provider-logo {
+    width: 46px;
+    height: 46px;
+  }
+  .integration-tile-state {
+    grid-column: 2;
+    justify-self: start;
+  }
+  .integration-chevron {
+    grid-column: 3;
+    grid-row: 1 / span 2;
+  }
+  .integration-dialog {
+    width: calc(100vw - 20px);
+  }
   .integration-status,
   .setup-progress,
   .operations-grid {

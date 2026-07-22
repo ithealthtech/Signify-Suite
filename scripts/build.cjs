@@ -5,9 +5,12 @@ const { createHash } = require("node:crypto");
 const { execFileSync } = require("node:child_process");
 
 const root = path.join(__dirname, ".."),
-  destination = path.join(root, "dist"),
+  destination = process.env.SIGNIFY_BUILD_DIR
+    ? path.resolve(root, process.env.SIGNIFY_BUILD_DIR)
+    : path.join(root, "dist"),
   publicFiles = [
     "public/signature-it-banner.png",
+    "public/ithtfavicon.png",
     "public/event-banners/backup-disaster-recovery-webinar.png",
     "public/event-banners/cloud-services-modernization.png",
     "public/event-banners/cybersecurity-readiness-event.png",
@@ -58,6 +61,9 @@ const root = path.join(__dirname, ".."),
     "platform.js",
     "signify-shared.js",
     "signify-shared.css",
+    "setup.html",
+    "setup.css",
+    "setup.js",
     "server",
     ...publicFiles,
     "scripts/backup.cjs",
@@ -79,17 +85,38 @@ const root = path.join(__dirname, ".."),
     "start-production.cmd",
   ];
 
+function resetDestination(directory) {
+  try {
+    fs.rmSync(directory, {
+      recursive: true,
+      force: true,
+      maxRetries: 10,
+      retryDelay: 500,
+    });
+  } catch (error) {
+    const archived = `${directory}.stale-${process.pid}-${Date.now()}`;
+    try {
+      fs.renameSync(directory, archived);
+      fs.rmSync(archived, {
+        recursive: true,
+        force: true,
+        maxRetries: 10,
+        retryDelay: 500,
+      });
+    } catch (fallbackError) {
+      throw new Error(
+        `Unable to reset ${directory}. Close file watchers or OneDrive sync handles and retry. Original error: ${error.message}; fallback error: ${fallbackError.message}`,
+      );
+    }
+  }
+  fs.mkdirSync(directory, { recursive: true });
+}
+
 for (const entry of entries) {
   if (!fs.existsSync(path.join(root, entry)))
     throw new Error(`Required release file is missing: ${entry}`);
 }
-fs.rmSync(destination, {
-  recursive: true,
-  force: true,
-  maxRetries: 5,
-  retryDelay: 250,
-});
-fs.mkdirSync(destination, { recursive: true });
+resetDestination(destination);
 for (const entry of entries) {
   const source = path.join(root, entry),
     target = path.join(destination, entry);

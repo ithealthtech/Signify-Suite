@@ -5,8 +5,16 @@ backups/
 tmp/
 .env
 .env.local
+.env.*.local
+!.env.example
+!.env.container.example
 public/generated-banners/*
 !public/generated-banners/.gitkeep
 public/uploads/
 *.log
 *.zip
+*.tgz
+*.tar.gz
+*.bak
+.sandbox-*/
+.release-validation/

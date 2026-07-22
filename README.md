@@ -214,6 +214,46 @@ After that command, set `SIGNATURE_ALLOW_DEFAULT_ADMIN=false`, remove
 `SIGNIFY_BOOTSTRAP_PASSWORD` from the panel, and restart the application. Run
 `npm run setup -- --help` for all installer options.
 
+### Browser installer for managed Node.js hosting
+
+When the host provides a deployment panel but no interactive terminal, configure
+these values in the hosting environment before the first start:
+
+```env
+NODE_ENV=production
+HOST=0.0.0.0
+PORT=4173
+TRUST_PROXY=true
+DATABASE_PATH=/persistent/signify/data/signify-creator.db
+BACKUP_DIR=/persistent/signify/backups
+SIGNATURE_ALLOW_DEFAULT_ADMIN=false
+SIGNIFY_APPLICATION_OWNER_EMAIL=owner@example.com
+SIGNIFY_PUBLIC_URL=https://signatures.example.com
+SIGNIFY_ASSET_BASE_URL=https://signatures.example.com
+SIGNIFY_MEDIA_BASE_URL=https://signatures.example.com
+SIGNIFY_CREDENTIAL_ENCRYPTION_KEY=<generated-base64-key>
+SIGNIFY_SETUP_TOKEN=<generated-one-time-token>
+```
+
+Generate the credential key and one-time setup token locally:
+
+```bash
+node -e "console.log(require('node:crypto').randomBytes(32).toString('base64'))"
+node -e "console.log(require('node:crypto').randomBytes(32).toString('base64url'))"
+```
+
+Deploy and start `server.cjs`, then open
+`https://your-domain.example/setup.html`. Until installation completes, normal
+pages redirect to the installer and application APIs remain unavailable. Enter
+the setup token, company identity, and first Application Owner credentials. The
+operation is transactional and permanently locks the installer in the database.
+Remove `SIGNIFY_SETUP_TOKEN` from the hosting panel and restart after success.
+
+The browser installer does not invent persistent paths. Confirm the host keeps
+the database, uploads, generated banners, and backups across redeployments. Use
+the CLI installer when shell access is available because it can detect and
+validate those paths directly.
+
 ### 1. Build the release
 
 From a clean source checkout:

@@ -4,10 +4,10 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width,initial-scale=1" />
     <title>Application | Signify Creator</title>
-    <link rel="icon" href="/icons/email.png" />
+    <link rel="icon" type="image/png" href="/ithtfavicon.png" />
     <link rel="stylesheet" href="signify-shared.css?v=20260718" />
-    <link rel="stylesheet" href="admin.css" />
-    <link rel="stylesheet" href="platform.css" />
+    <link rel="stylesheet" href="admin.css?v=20260722" />
+    <link rel="stylesheet" href="platform.css?v=2026072204" />
   </head>
   <body>
     <header class="app-header">
@@ -28,7 +28,6 @@
         <div>
           <span class="eyebrow">Control plane</span><strong>Signify</strong>
         </div>
-        <button data-section="setup" type="button">First-time setup</button>
         <button class="active" data-section="tenants" type="button">
           Tenants
         </button>
@@ -42,112 +41,6 @@
         <button data-section="audit" type="button">Application audit</button>
       </aside>
       <section class="admin-content">
-        <section class="admin-section" data-admin-section="setup">
-          <div class="page-head">
-            <div>
-              <span class="eyebrow">Application readiness</span>
-              <h1>First-time setup</h1>
-              <p>
-                Complete the required application services before onboarding
-                tenants.
-              </p>
-            </div>
-            <strong id="setupCompletion">Not ready</strong>
-          </div>
-          <div class="setup-progress" id="setupProgress"></div>
-          <form class="control-form integration-form" id="applicationSetupForm">
-            <h2>1. Application identity</h2>
-            <div class="form-grid">
-              <label
-                >Company name<input name="companyName" required minlength="2"
-              /></label>
-              <label
-                >Public application URL<input
-                  name="publicUrl"
-                  type="url"
-                  required
-              /></label>
-            </div>
-            <label
-              >Reason<input
-                name="reason"
-                value="Configure application identity"
-                required
-            /></label>
-            <button class="button primary" type="submit">Save identity</button>
-          </form>
-          <form
-            class="control-form integration-form"
-            id="microsoftSetupForm"
-            autocomplete="off"
-            data-form-type="other"
-          >
-            <h2>2. Microsoft 365 application</h2>
-            <div class="form-grid">
-              <label
-                >Application (client) ID<input
-                  name="clientId"
-                  required
-                  autocomplete="off"
-                  data-1p-ignore
-                  data-lpignore="true"
-              /></label>
-              <label
-                >Home tenant ID<input
-                  name="homeTenantId"
-                  required
-                  autocomplete="off"
-                  data-1p-ignore
-                  data-lpignore="true"
-              /></label>
-            </div>
-            <label
-              >Client credential<input
-                name="clientSecret"
-                type="password"
-                required
-                autocomplete="new-password"
-                data-1p-ignore
-                data-lpignore="true"
-            /></label>
-            <label
-              >Reason<input
-                name="reason"
-                value="Configure Microsoft application"
-                required
-            /></label>
-            <button class="button primary" type="submit">
-              Verify Microsoft
-            </button>
-          </form>
-          <div class="control-form integration-form">
-            <h2>3. Stripe billing</h2>
-            <p>
-              Configure Stripe in Integrations, or defer billing for this
-              installation.
-            </p>
-            <div class="integration-actions">
-              <button class="button primary" id="openStripeSetup" type="button">
-                Configure Stripe
-              </button>
-              <button class="button" id="skipStripeSetup" type="button">
-                Skip for now
-              </button>
-            </div>
-          </div>
-          <div class="control-form integration-form">
-            <h2>4. Readiness</h2>
-            <p id="setupReadinessMessage">Complete the required steps above.</p>
-            <button
-              class="button primary"
-              id="finishSetup"
-              type="button"
-              disabled
-            >
-              Continue to tenants
-            </button>
-          </div>
-        </section>
         <section class="admin-section active" data-admin-section="tenants">
           <div class="page-head">
             <div>
@@ -224,123 +117,65 @@
               Refresh
             </button>
           </div>
-          <div class="integration-status" id="microsoftIntegrationStatus"></div>
-          <div
-            class="control-form integration-form"
-            id="microsoftIntegrationActions"
-          >
-            <h2>Microsoft 365 application</h2>
-            <p id="microsoftPermissions">
-              Configure Microsoft in First-time setup.
-            </p>
-            <div class="integration-actions">
-              <button class="button" id="openMicrosoftSetup" type="button">
-                Configure Microsoft
-              </button>
-              <button
-                class="button danger"
-                id="disconnectMicrosoft"
-                type="button"
+          <div class="integration-catalog" aria-label="Available integrations">
+            <button
+              class="integration-tile"
+              data-open-integration="microsoft"
+              type="button"
+            >
+              <span class="provider-logo microsoft-logo" aria-hidden="true">
+                <i></i><i></i><i></i><i></i>
+              </span>
+              <span class="integration-tile-copy">
+                <strong>Microsoft 365</strong>
+                <small>Identity, tenant consent, directory, and mail</small>
+              </span>
+              <span class="integration-tile-state" id="microsoftTileState">
+                Loading
+              </span>
+              <span class="integration-chevron" aria-hidden="true"
+                >&rsaquo;</span
               >
-                Disconnect Microsoft
-              </button>
-            </div>
-          </div>
-          <div class="integration-status" id="stripeIntegrationStatus"></div>
-          <form
-            class="control-form integration-form"
-            id="stripeConnectForm"
-            autocomplete="off"
-            data-form-type="other"
-          >
-            <h2>Stripe account</h2>
-            <p>
-              Use a test secret key during setup. The key is encrypted before it
-              is stored and is never returned to the browser.
-            </p>
-            <label
-              >Stripe secret key<input
-                name="secretKey"
-                type="password"
-                autocomplete="new-password"
-                data-1p-ignore
-                data-lpignore="true"
-                spellcheck="false"
-                required
-            /></label>
-            <label
-              >Reason<input
-                name="reason"
-                value="Connect Stripe account"
-                required
-                minlength="3"
-            /></label>
-            <button class="button primary" type="submit">Verify account</button>
-          </form>
-          <form
-            class="control-form integration-form"
-            id="stripePlanForm"
-            hidden
-          >
-            <h2>Plan mapping</h2>
-            <p>
-              Map active recurring Stripe prices, then create the signed webhook
-              destination automatically.
-            </p>
-            <div class="form-grid three">
-              <label>Starter<select name="starter"></select></label>
-              <label>Team<select name="team"></select></label>
-              <label>Business<select name="business"></select></label>
-            </div>
-            <label
-              >Reason<input
-                name="reason"
-                value="Configure Stripe plans and webhook"
-                required
-                minlength="3"
-            /></label>
-            <div class="integration-actions">
-              <button class="button primary" type="submit">
-                Save and create webhook
-              </button>
-              <button class="button" id="reconcileStripe" type="button">
-                Reconcile subscriptions
-              </button>
-              <button class="button danger" id="disconnectStripe" type="button">
-                Disconnect Stripe
-              </button>
-            </div>
-          </form>
-          <form
-            class="control-form integration-form"
-            id="stripeTestForm"
-            hidden
-          >
-            <h2>Sandbox Checkout test</h2>
-            <div class="form-grid">
-              <label
-                >Plan<select name="plan">
-                  <option value="starter">Starter</option>
-                  <option value="team">Team</option>
-                  <option value="business">Business</option>
-                </select></label
-              >
-              <label
-                >Test customer email<input
-                  name="customerEmail"
-                  type="email"
-                  required
-              /></label>
-            </div>
-            <input
-              name="reason"
-              type="hidden"
-              value="Stripe sandbox Checkout test"
-            />
-            <button class="button primary" type="submit">
-              Open test Checkout
             </button>
-          </form>
+            <button
+              class="integration-tile"
+              data-open-integration="stripe"
+              type="button"
+            >
+              <span class="provider-logo stripe-logo" aria-hidden="true"
+                >stripe</span
+              >
+              <span class="integration-tile-copy">
+                <strong>Stripe</strong>
+                <small>Plans, checkout, webhooks, and reconciliation</small>
+              </span>
+              <span class="integration-tile-state" id="stripeTileState">
+                Loading
+              </span>
+              <span class="integration-chevron" aria-hidden="true"
+                >&rsaquo;</span
+              >
+            </button>
+            <button
+              class="integration-tile"
+              data-open-integration="github"
+              type="button"
+            >
+              <span class="provider-logo github-logo" aria-hidden="true"
+                >GH</span
+              >
+              <span class="integration-tile-copy">
+                <strong>GitHub</strong>
+                <small>Private releases and application updates</small>
+              </span>
+              <span class="integration-tile-state" id="githubTileState">
+                Loading
+              </span>
+              <span class="integration-chevron" aria-hidden="true"
+                >&rsaquo;</span
+              >
+            </button>
+          </div>
         </section>
         <section class="admin-section" data-admin-section="owners">
           <div class="page-head">
@@ -599,6 +434,253 @@
       </section>
     </main>
 
+    <dialog class="integration-dialog" id="integrationDialog">
+      <div class="dialog-form">
+        <div class="dialog-head">
+          <div>
+            <span class="eyebrow">Application integration</span>
+            <h2 id="integrationDialogTitle">Provider</h2>
+          </div>
+          <button type="button" data-close-integration aria-label="Close">
+            &times;
+          </button>
+        </div>
+        <section data-integration-panel="microsoft" hidden>
+          <div class="provider-dialog-intro">
+            <span class="provider-logo microsoft-logo" aria-hidden="true">
+              <i></i><i></i><i></i><i></i>
+            </span>
+            <div>
+              <strong>Microsoft 365</strong>
+              <p>Application identity, tenant consent, directory, and mail.</p>
+            </div>
+          </div>
+          <div class="integration-status" id="microsoftIntegrationStatus"></div>
+          <form
+            class="control-form integration-form"
+            id="microsoftIntegrationActions"
+            autocomplete="off"
+            data-form-type="other"
+          >
+            <h3>Application connection</h3>
+            <p id="microsoftPermissions">
+              Connect the multitenant Microsoft application used for sign-in,
+              tenant consent, directory sync, and mail.
+            </p>
+            <div class="form-grid">
+              <label
+                >Application (client) ID<input
+                  name="clientId"
+                  required
+                  autocomplete="off"
+                  data-1p-ignore
+                  data-lpignore="true"
+              /></label>
+              <label
+                >Home tenant ID<input
+                  name="homeTenantId"
+                  required
+                  autocomplete="off"
+                  data-1p-ignore
+                  data-lpignore="true"
+              /></label>
+            </div>
+            <label
+              >Client credential<input
+                name="clientSecret"
+                type="password"
+                required
+                autocomplete="new-password"
+                data-1p-ignore
+                data-lpignore="true"
+            /></label>
+            <label
+              >Reason<input
+                name="reason"
+                value="Configure Microsoft application"
+                required
+                minlength="3"
+            /></label>
+            <div class="integration-actions">
+              <button class="button primary" type="submit">
+                Verify application
+              </button>
+              <button
+                class="button danger"
+                id="disconnectMicrosoft"
+                type="button"
+              >
+                Disconnect
+              </button>
+            </div>
+          </form>
+        </section>
+        <section data-integration-panel="stripe" hidden>
+          <div class="provider-dialog-intro">
+            <span class="provider-logo stripe-logo" aria-hidden="true"
+              >stripe</span
+            >
+            <div>
+              <strong>Stripe</strong>
+              <p>Plans, checkout, signed webhooks, and reconciliation.</p>
+            </div>
+          </div>
+          <div class="integration-status" id="stripeIntegrationStatus"></div>
+          <form
+            class="control-form integration-form"
+            id="stripeConnectForm"
+            autocomplete="off"
+            data-form-type="other"
+          >
+            <h3>Connect account</h3>
+            <p>
+              Use a test secret key during setup. It is encrypted before storage
+              and is never returned to the browser.
+            </p>
+            <label
+              >Stripe secret key<input
+                name="secretKey"
+                type="password"
+                autocomplete="new-password"
+                data-1p-ignore
+                data-lpignore="true"
+                spellcheck="false"
+                required
+            /></label>
+            <label
+              >Reason<input
+                name="reason"
+                value="Connect Stripe account"
+                required
+                minlength="3"
+            /></label>
+            <button class="button primary" type="submit">Verify account</button>
+          </form>
+          <form
+            class="control-form integration-form"
+            id="stripePlanForm"
+            hidden
+          >
+            <h3>Plan mapping</h3>
+            <p>
+              Map active recurring prices, then create the signed webhook
+              destination automatically.
+            </p>
+            <div class="form-grid three">
+              <label>Starter<select name="starter"></select></label>
+              <label>Team<select name="team"></select></label>
+              <label>Business<select name="business"></select></label>
+            </div>
+            <label
+              >Reason<input
+                name="reason"
+                value="Configure Stripe plans and webhook"
+                required
+                minlength="3"
+            /></label>
+            <div class="integration-actions">
+              <button class="button primary" type="submit">
+                Save and create webhook
+              </button>
+              <button class="button" id="reconcileStripe" type="button">
+                Reconcile subscriptions
+              </button>
+              <button class="button danger" id="disconnectStripe" type="button">
+                Disconnect
+              </button>
+            </div>
+          </form>
+          <form
+            class="control-form integration-form"
+            id="stripeTestForm"
+            hidden
+          >
+            <h3>Sandbox Checkout test</h3>
+            <div class="form-grid">
+              <label
+                >Plan<select name="plan">
+                  <option value="starter">Starter</option>
+                  <option value="team">Team</option>
+                  <option value="business">Business</option>
+                </select></label
+              >
+              <label
+                >Test customer email<input
+                  name="customerEmail"
+                  type="email"
+                  required
+              /></label>
+            </div>
+            <input
+              name="reason"
+              type="hidden"
+              value="Stripe sandbox Checkout test"
+            />
+            <button class="button primary" type="submit">
+              Open test Checkout
+            </button>
+          </form>
+        </section>
+        <section data-integration-panel="github" hidden>
+          <div class="provider-dialog-intro">
+            <span class="provider-logo github-logo" aria-hidden="true">GH</span>
+            <div>
+              <strong>GitHub</strong>
+              <p>Private release discovery and secure application updates.</p>
+            </div>
+          </div>
+          <div class="integration-status" id="githubIntegrationStatus"></div>
+          <form
+            class="control-form integration-form"
+            id="githubConnectForm"
+            method="post"
+            autocomplete="off"
+            data-form-type="other"
+          >
+            <h3>Connect private repository</h3>
+            <p>
+              Use a fine-grained token limited to this repository with read-only
+              Contents access. The token is encrypted and never returned to the
+              browser.
+            </p>
+            <label
+              >Repository<input
+                name="repository"
+                placeholder="owner/repository"
+                required
+                autocomplete="off"
+                spellcheck="false"
+            /></label>
+            <label
+              >GitHub access token<input
+                name="token"
+                type="password"
+                required
+                autocomplete="new-password"
+                data-1p-ignore
+                data-lpignore="true"
+                spellcheck="false"
+            /></label>
+            <label
+              >Reason<input
+                name="reason"
+                value="Connect private GitHub releases"
+                required
+                minlength="3"
+            /></label>
+            <div class="integration-actions">
+              <button class="button primary" type="submit">
+                Verify repository
+              </button>
+              <button class="button danger" id="disconnectGithub" type="button">
+                Disconnect
+              </button>
+            </div>
+          </form>
+        </section>
+      </div>
+    </dialog>
+
     <dialog id="createTenantDialog">
       <form class="dialog-form" id="createTenantForm">
         <div class="dialog-head">
@@ -606,7 +688,9 @@
             <span class="eyebrow">Customer onboarding</span>
             <h2>Create tenant</h2>
           </div>
-          <button type="button" data-close-create aria-label="Close">×</button>
+          <button type="button" data-close-create aria-label="Close">
+            &times;
+          </button>
         </div>
         <label>Tenant name<input name="name" required minlength="2" /></label>
         <label
@@ -805,7 +889,9 @@
             <span class="eyebrow">Queue recovery</span>
             <h2>Retry dead-lettered job</h2>
           </div>
-          <button type="button" data-close-job aria-label="Close">Ã—</button>
+          <button type="button" data-close-job aria-label="Close">
+            &times;
+          </button>
         </div>
         <p id="retryJobMessage"></p>
         <input name="jobId" type="hidden" />
@@ -827,7 +913,9 @@
             <h2 id="detailName">Tenant</h2>
             <p id="detailSlug"></p>
           </div>
-          <button type="button" data-close-detail aria-label="Close">×</button>
+          <button type="button" data-close-detail aria-label="Close">
+            &times;
+          </button>
         </div>
         <div class="detail-summary" id="detailSummary"></div>
         <form class="control-form" id="tenantStatusForm">
@@ -1072,6 +1160,6 @@
     </dialog>
     <div class="toast" id="toast" role="status" aria-live="polite"></div>
     <script src="signify-shared.js?v=20260718"></script>
-    <script src="platform.js?v=20260718"></script>
+    <script src="platform.js?v=2026072204"></script>
   </body>
 </html>

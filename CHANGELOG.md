@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 1.0.0 - 2026-07-22
 
 ### Added
 
@@ -11,6 +11,14 @@
 - Durable worker heartbeat health checks and transactional SQLite web-instance
   ownership leases.
 - Optional authenticated GitHub release checks for private release channels.
+- Standalone three-stage browser installer with Setup, Configure, and Sign-in
+  progress, atomic Application Owner creation, and pre-install application lock.
+- Application-level GitHub integration for encrypted private-release access and
+  update authentication.
+- Clickable Microsoft 365, Stripe, and GitHub integration catalog with focused
+  provider dialogs.
+- Direct tenant user provisioning and improved campaign banner overlay controls,
+  typography, animation effects, and stable preview dimensions.
 
 ### Changed
 
@@ -19,11 +27,15 @@
 - Provider credential forms opt out of login autofill and identify secrets as
   new credentials.
 - Readiness reports runtime lease health and fails closed when ownership is lost.
+- Microsoft 365 and Stripe configuration are optional after installation rather
+  than blockers inside the Application Owner console.
+- Integration credentials use POST-only forms, encrypted vault storage, URL
+  credential stripping, and actionable private-repository errors.
 
 ### Verified
 
 - Full lint, security, unit, integration, smoke, SBOM, build, artifact, and
-  production-startup gates pass with 22 SQLite migrations.
+  production-startup gates pass with 23 SQLite migrations.
 - HTTPS production-loopback browser checks pass for MFA enforcement, setup,
   signature preview, backup creation, and mobile/tablet overflow.
 

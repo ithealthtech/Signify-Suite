@@ -845,6 +845,32 @@ button {
 .effect-option.clean > span {
   background: linear-gradient(110deg, #17191f 28%, #e3e6ef 48%, #17191f 68%);
 }
+.effect-option.scan-line > span {
+  background: linear-gradient(
+    90deg,
+    #17191f 0 38%,
+    #77dff2 48% 52%,
+    #17191f 62% 100%
+  );
+}
+.effect-option.digital-grid > span {
+  background-color: #17191f;
+  background-image:
+    linear-gradient(rgba(126, 145, 225, 0.5) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(126, 145, 225, 0.5) 1px, transparent 1px);
+  background-size: 8px 8px;
+}
+.effect-option.spotlight > span {
+  background: radial-gradient(
+    circle at 65% 50%,
+    #f2f4ff 0,
+    #596392 24%,
+    #17191f 58%
+  );
+}
+.effect-option.soft-pulse > span {
+  background: radial-gradient(circle, #596392 0, #2c3045 42%, #17191f 75%);
+}
 .preview-workspace {
   display: flex;
   flex-direction: column;

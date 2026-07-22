@@ -202,11 +202,7 @@ async function confirmMfaEnrollment(event) {
     form.hidden = true;
     $("#ownerMfaRecovery").hidden = false;
     await loadSession();
-    await Promise.all([
-      loadOwnerSessions(),
-      loadTenants(),
-      loadSetup({ navigate: true }),
-    ]);
+    await Promise.all([loadOwnerSessions(), loadTenants()]);
     toast("Multi-factor authentication enabled");
   } catch (error) {
     toast(error.message);
@@ -256,10 +252,51 @@ function renderStripePrices(selected = {}) {
     select.value = selected[plan] || "";
   }
 }
+function renderIntegrationTile(
+  provider,
+  status,
+  accountName = "",
+  configured = false,
+) {
+  const tile = $(`[data-open-integration="${provider}"]`),
+    stateLabel = $(`#${provider}TileState`),
+    displayStatus = configured
+      ? status === "connected"
+        ? "Connected"
+        : "Configured"
+      : "Not connected";
+  stateLabel.textContent = displayStatus;
+  stateLabel.classList.toggle("connected", configured);
+  const names = {
+    microsoft: "Microsoft 365",
+    stripe: "Stripe",
+    github: "GitHub",
+  };
+  tile.setAttribute(
+    "aria-label",
+    `${names[provider] || provider}: ${displayStatus}${accountName ? `, ${accountName}` : ""}. Open settings.`,
+  );
+}
+function openIntegration(provider) {
+  const names = {
+    microsoft: "Microsoft 365",
+    stripe: "Stripe",
+    github: "GitHub",
+  };
+  $$(`[data-integration-panel]`).forEach(
+    (panel) => (panel.hidden = panel.dataset.integrationPanel !== provider),
+  );
+  $("#integrationDialogTitle").textContent = names[provider] || "Integration";
+  $("#integrationDialog").showModal();
+}
+function closeIntegration() {
+  $("#integrationDialog").close();
+}
 async function loadIntegrations() {
   const result = await api("/api/platform/integrations"),
     stripe = result.stripe,
-    microsoft = result.microsoft;
+    microsoft = result.microsoft,
+    github = result.github;
   state.stripePrices = stripe.catalog || state.stripePrices;
   $("#microsoftIntegrationStatus").innerHTML =
     `<div><span>Status</span><strong>${escapeHtml(microsoft.status)}</strong></div>` +
@@ -268,8 +305,14 @@ async function loadIntegrations() {
     `<div><span>Verified</span><strong>${escapeHtml(dateLabel(microsoft.lastVerifiedAt))}</strong></div>`;
   $("#microsoftPermissions").textContent = microsoft.permissions?.length
     ? `Granted application permissions: ${microsoft.permissions.join(", ")}`
-    : "Connect and verify the Microsoft application from First-time setup.";
+    : "Connect and verify the Microsoft application here when needed.";
   $("#disconnectMicrosoft").disabled = microsoft.source !== "vault";
+  renderIntegrationTile(
+    "microsoft",
+    microsoft.status,
+    microsoft.accountName,
+    microsoft.configured,
+  );
   $("#stripeIntegrationStatus").innerHTML =
     `<div><span>Status</span><strong>${escapeHtml(stripe.status)}</strong></div>` +
     `<div><span>Account</span><strong>${escapeHtml(stripe.accountName || "Not connected")}</strong></div>` +
@@ -278,38 +321,48 @@ async function loadIntegrations() {
   $("#stripeConnectForm").hidden = stripe.source === "vault";
   $("#stripePlanForm").hidden = stripe.source !== "vault";
   $("#stripeTestForm").hidden = !stripe.configured || stripe.mode !== "test";
+  renderIntegrationTile(
+    "stripe",
+    stripe.status,
+    stripe.accountName,
+    stripe.configured,
+  );
+  $("#githubIntegrationStatus").innerHTML =
+    `<div><span>Status</span><strong>${escapeHtml(github.status)}</strong></div>` +
+    `<div><span>Repository</span><strong>${escapeHtml(github.repository || "Not configured")}</strong></div>` +
+    `<div><span>Access</span><strong>${github.configured ? "Private releases enabled" : "Not connected"}</strong></div>` +
+    `<div><span>Verified</span><strong>${escapeHtml(dateLabel(github.lastVerifiedAt))}</strong></div>`;
+  const githubForm = $("#githubConnectForm");
+  githubForm.elements.repository.value = github.repository || "";
+  $("#disconnectGithub").disabled = github.source !== "vault";
+  renderIntegrationTile(
+    "github",
+    github.status,
+    github.repository,
+    github.configured,
+  );
   renderStripePrices(stripe.prices || {});
 }
-async function loadSetup({ navigate = false } = {}) {
-  const result = await api("/api/platform/setup"),
-    steps = [
-      ["Identity", result.company.ready],
-      ["Credential vault", result.vault.configured],
-      ["Microsoft 365", result.microsoft.configured],
-      ["Stripe", result.stripe.configured || result.stripe.skipped],
-    ];
-  $("#setupProgress").innerHTML = steps
-    .map(
-      ([label, ready], index) =>
-        `<div><strong>${index + 1}. ${escapeHtml(label)}</strong><span>${ready ? "Ready" : "Action required"}</span></div>`,
-    )
-    .join("");
-  $("#setupCompletion").textContent = result.complete ? "Ready" : "Not ready";
-  $("#setupReadinessMessage").textContent = result.complete
-    ? "Application services are ready for tenant onboarding."
-    : "Complete identity, credential vault, Microsoft 365, and Stripe setup or deferral.";
-  $("#finishSetup").disabled = !result.complete;
-  const identity = $("#applicationSetupForm").elements;
-  identity.companyName.value = result.company.name || "";
-  identity.publicUrl.value = result.company.publicUrl || "";
-  $("#skipStripeSetup").textContent = result.stripe.skipped
-    ? "Require Stripe"
-    : "Skip for now";
-  $("#skipStripeSetup").dataset.skipped = result.stripe.skipped
-    ? "true"
-    : "false";
-  if (navigate && !result.complete) showSection("setup");
-  return result;
+
+async function connectGithub(event) {
+  event.preventDefault();
+  const form = event.currentTarget,
+    button = event.submitter,
+    body = Object.fromEntries(new FormData(form));
+  busy(button, true, "Verifying...");
+  try {
+    await api("/api/platform/integrations/github/connect", {
+      method: "POST",
+      body: JSON.stringify(body),
+    });
+    form.elements.token.value = "";
+    await loadIntegrations();
+    toast("Private GitHub releases connected");
+  } catch (error) {
+    toast(error.message);
+  } finally {
+    busy(button, false);
+  }
 }
 async function loadOperations() {
   const result = await api("/api/platform/operations"),
@@ -404,24 +457,6 @@ async function checkUpdates(event) {
     busy(button, false);
   }
 }
-async function saveApplicationSetup(event) {
-  event.preventDefault();
-  const button = event.submitter,
-    body = Object.fromEntries(new FormData(event.currentTarget));
-  busy(button, true, "Saving...");
-  try {
-    await api("/api/platform/setup/application", {
-      method: "PUT",
-      body: JSON.stringify(body),
-    });
-    await loadSetup();
-    toast("Application identity saved");
-  } catch (error) {
-    toast(error.message);
-  } finally {
-    busy(button, false);
-  }
-}
 async function saveMicrosoftSetup(event) {
   event.preventDefault();
   const form = event.currentTarget,
@@ -434,7 +469,7 @@ async function saveMicrosoftSetup(event) {
       body: JSON.stringify(body),
     });
     form.elements.clientSecret.value = "";
-    await loadSetup();
+    await loadIntegrations();
     toast("Microsoft application verified");
   } catch (error) {
     toast(error.message);
@@ -1226,9 +1261,18 @@ function bindEvents() {
   $("#refreshIntegrations").addEventListener("click", () =>
     loadIntegrations().catch((error) => toast(error.message)),
   );
-  $("#openMicrosoftSetup").addEventListener("click", () =>
-    showSection("setup"),
+  $$(`[data-open-integration]`).forEach((tile) =>
+    tile.addEventListener("click", () =>
+      openIntegration(tile.dataset.openIntegration),
+    ),
   );
+  $$(`[data-close-integration]`).forEach((button) =>
+    button.addEventListener("click", closeIntegration),
+  );
+  $("#integrationDialog").addEventListener("cancel", (event) => {
+    event.preventDefault();
+    closeIntegration();
+  });
   $("#disconnectMicrosoft").addEventListener("click", async () => {
     const reason = prompt("Reason for disconnecting Microsoft 365:");
     if (!reason) return;
@@ -1237,38 +1281,32 @@ function bindEvents() {
         method: "DELETE",
         body: JSON.stringify({ reason }),
       });
-      await Promise.all([loadIntegrations(), loadSetup()]);
+      await loadIntegrations();
       toast("Microsoft application disconnected");
     } catch (error) {
       toast(error.message);
     }
   });
-  $("#applicationSetupForm").addEventListener("submit", saveApplicationSetup);
-  $("#microsoftSetupForm").addEventListener("submit", saveMicrosoftSetup);
-  $("#openStripeSetup").addEventListener("click", async () => {
-    showSection("integrations");
-    await loadIntegrations();
-  });
-  $("#skipStripeSetup").addEventListener("click", async (event) => {
-    const skipped = event.currentTarget.dataset.skipped !== "true";
+  $("#microsoftIntegrationActions").addEventListener(
+    "submit",
+    saveMicrosoftSetup,
+  );
+  $("#stripeConnectForm").addEventListener("submit", connectStripe);
+  $("#githubConnectForm").addEventListener("submit", connectGithub);
+  $("#disconnectGithub").addEventListener("click", async () => {
+    const reason = prompt("Reason for disconnecting GitHub releases:");
+    if (!reason) return;
     try {
-      await api("/api/platform/setup/stripe-skip", {
-        method: "PUT",
-        body: JSON.stringify({
-          skipped,
-          reason: skipped
-            ? "Defer Stripe during setup"
-            : "Require Stripe setup",
-        }),
+      await api("/api/platform/integrations/github", {
+        method: "DELETE",
+        body: JSON.stringify({ reason }),
       });
-      await loadSetup();
-      toast(skipped ? "Stripe deferred" : "Stripe is now required");
+      await loadIntegrations();
+      toast("GitHub releases disconnected");
     } catch (error) {
       toast(error.message);
     }
   });
-  $("#finishSetup").addEventListener("click", () => showSection("tenants"));
-  $("#stripeConnectForm").addEventListener("submit", connectStripe);
   $("#stripePlanForm").addEventListener("submit", configureStripe);
   $("#stripeTestForm").addEventListener("submit", testStripeCheckout);
   $("#reconcileStripe").addEventListener("click", reconcileStripe);
@@ -1300,7 +1338,7 @@ async function boot() {
     showSection("owners");
     return;
   }
-  await Promise.all([loadTenants(), loadSetup({ navigate: true })]);
+  await loadTenants();
   const billing = new URLSearchParams(location.search).get("billing");
   if (billing)
     toast(

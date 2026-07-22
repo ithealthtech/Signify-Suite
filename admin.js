@@ -323,12 +323,23 @@ function bindEvents() {
     $("#createUserForm").reset();
     $("#inviteLinkField").hidden = true;
     $("#inviteLink").value = "";
+    $("#temporaryPasswordField").hidden = true;
+    $("#temporaryPassword").value = "";
+    $("#copyTemporaryPassword").hidden = true;
+    updateCreateUserMode();
     $("#createUserDialog").showModal();
   });
   $$("[data-close-user]").forEach((button) =>
     button.addEventListener("click", () => $("#createUserDialog").close()),
   );
+  $("#createUserMode").addEventListener("change", updateCreateUserMode);
   $("#createUser").addEventListener("click", createUser);
+  $("#copyTemporaryPassword").addEventListener("click", async () => {
+    const password = $("#temporaryPassword").value;
+    await navigator.clipboard?.writeText(password).catch(() => {});
+    $("#temporaryPassword").select();
+    toast("Temporary password copied");
+  });
   $("#userRows").addEventListener("change", updateMembership);
   $("#userRows").addEventListener("click", handleUserAction);
   $("#syncDirectory").addEventListener("click", syncDirectory);
@@ -402,18 +413,52 @@ function bindEvents() {
     history.replaceState(null, "", `${location.pathname}#settings`);
   }
 }
+function updateCreateUserMode() {
+  const form = $("#createUserForm"),
+    direct = form.elements.mode.value === "direct";
+  $$("[data-direct-user-field]").forEach((field) => (field.hidden = !direct));
+  form.elements.displayName.required = direct;
+  $("#createUserTitle").textContent = direct
+    ? "Add a workspace member"
+    : "Invite a workspace member";
+  $("#createUser").textContent = direct ? "Add person" : "Send invitation";
+  $("#temporaryPasswordField").hidden = true;
+  $("#copyTemporaryPassword").hidden = true;
+  $("#inviteLinkField").hidden = true;
+}
 async function createUser() {
   const form = $("#createUserForm");
   if (!form.reportValidity()) return;
   const button = $("#createUser"),
-    body = Object.fromEntries(new FormData(form));
+    body = Object.fromEntries(new FormData(form)),
+    direct = body.mode === "direct";
+  delete body.mode;
+  if (!body.password) delete body.password;
   busy(button, true, "Adding…");
   try {
-    const result = await api("/api/signature/invitations", {
-      method: "POST",
-      body: JSON.stringify(body),
-    });
-    if (result.developmentToken) {
+    const result = await api(
+      direct ? "/api/signature/users" : "/api/signature/invitations",
+      {
+        method: "POST",
+        body: JSON.stringify(body),
+      },
+    );
+    if (direct) {
+      await refreshAll();
+      if (result.temporaryPassword) {
+        $("#temporaryPassword").value = result.temporaryPassword;
+        $("#temporaryPasswordField").hidden = false;
+        $("#copyTemporaryPassword").hidden = false;
+        $("#temporaryPassword").select();
+        await navigator.clipboard
+          ?.writeText(result.temporaryPassword)
+          .catch(() => {});
+        toast("Person added. Temporary password ready");
+      } else {
+        $("#createUserDialog").close();
+        toast("Existing account added to workspace");
+      }
+    } else if (result.developmentToken) {
       const link = `${location.origin}/signature.html?invite=${encodeURIComponent(result.developmentToken)}`;
       $("#inviteLink").value = link;
       $("#inviteLinkField").hidden = false;

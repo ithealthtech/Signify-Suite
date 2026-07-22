@@ -373,6 +373,8 @@ function createSignaturePortal({
   enqueueJob,
   deletionGraceDays = 7,
   packageVersion = "unknown",
+  updateRepository = "",
+  updateGithubToken = "",
 }) {
   seed(db, signature);
   const credentialVault = createCredentialVault(
@@ -453,6 +455,22 @@ function createSignaturePortal({
     const settings = microsoftSettings();
     return Boolean(settings.clientId && settings.clientSecret);
   }
+  function githubSettings() {
+    const row = integrationRow("github"),
+      credentials = integrationCredentials("github"),
+      configuration = safeJson(row?.configuration_json);
+    return credentials
+      ? {
+          token: credentials.token || "",
+          repository: configuration.repository || updateRepository,
+          source: "vault",
+        }
+      : {
+          token: updateGithubToken,
+          repository: updateRepository,
+          source: updateGithubToken ? "environment" : "none",
+        };
+  }
   function applicationSetting(key, fallback = "") {
     return (
       db
@@ -473,13 +491,7 @@ function createSignaturePortal({
       companyName,
       publicUrl,
       stripeSkipped,
-      complete: Boolean(
-        companyName &&
-        publicUrl &&
-        credentialVault.configured &&
-        microsoftAvailable() &&
-        (billingAvailable() || stripeSkipped),
-      ),
+      complete: Boolean(companyName && publicUrl && credentialVault.configured),
     };
   }
   function applicationPublicBase(req) {
@@ -512,7 +524,12 @@ function createSignaturePortal({
         accountName: "",
         lastVerifiedAt: null,
         lastError: "",
-        source: provider === "stripe" ? stripeSettings().source : "environment",
+        source:
+          provider === "stripe"
+            ? stripeSettings().source
+            : provider === "github"
+              ? githubSettings().source
+              : microsoftSettings().source,
       };
     return {
       provider,
@@ -2603,6 +2620,11 @@ function createSignaturePortal({
               ...safeJson(integrationRow("microsoft")?.configuration_json),
               configured: microsoftAvailable(),
             },
+            github: {
+              ...integrationSummary("github"),
+              configured: Boolean(githubSettings().token),
+              repository: githubSettings().repository,
+            },
           },
           requestId,
         );
@@ -2699,6 +2721,97 @@ function createSignaturePortal({
           requestId,
         );
         return json(res, 200, { skipped }, requestId);
+      }
+      if (
+        url.pathname === "/api/platform/integrations/github/connect" &&
+        req.method === "POST"
+      ) {
+        const body = await readJsonBody(req, { limit: 16384 }),
+          token = String(body.token || "").trim(),
+          repository = limited(body.repository || updateRepository, 200);
+        if (
+          !token ||
+          token.length > 1000 ||
+          !/^[\w.-]+\/[\w.-]+$/.test(repository)
+        )
+          throw Object.assign(
+            new Error(
+              "Enter a valid private GitHub repository and access token.",
+            ),
+            { status: 400, code: "GITHUB_CONFIGURATION_INVALID" },
+          );
+        let response;
+        try {
+          response = await fetchImpl(
+            `https://api.github.com/repos/${repository}/releases/latest`,
+            {
+              headers: {
+                Accept: "application/vnd.github+json",
+                Authorization: `Bearer ${token}`,
+                "User-Agent": "Signify-Creator",
+                "X-GitHub-Api-Version": "2022-11-28",
+              },
+              signal: AbortSignal.timeout(10000),
+            },
+          );
+        } catch {
+          throw Object.assign(new Error("GitHub could not be reached."), {
+            status: 502,
+            code: "GITHUB_API_FAILED",
+          });
+        }
+        if (!response.ok)
+          throw Object.assign(
+            new Error("GitHub denied access to that private repository."),
+            { status: 400, code: "GITHUB_ACCESS_DENIED" },
+          );
+        const encrypted = credentialVault.encrypt("github", { token });
+        db.prepare(
+          `INSERT INTO application_integrations(provider,status,mode,account_id,account_name,configuration_json,encrypted_credentials,credential_key_id,last_verified_at,last_error,updated_by) VALUES ('github','connected','private',?,?,?,?,?,strftime('%Y-%m-%dT%H:%M:%fZ','now'),'',?) ON CONFLICT(provider) DO UPDATE SET status='connected',mode='private',account_id=excluded.account_id,account_name=excluded.account_name,configuration_json=excluded.configuration_json,encrypted_credentials=excluded.encrypted_credentials,credential_key_id=excluded.credential_key_id,last_verified_at=excluded.last_verified_at,last_error='',updated_by=excluded.updated_by,updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now')`,
+        ).run(
+          repository,
+          repository,
+          JSON.stringify({ repository }),
+          encrypted,
+          credentialVault.keyId,
+          owner.id,
+        );
+        recordApplicationAudit(
+          owner,
+          "github.repository_connected",
+          "application_integration",
+          "github",
+          null,
+          limited(body.reason || "Connect private GitHub releases", 500),
+          { repository },
+          requestId,
+        );
+        return json(
+          res,
+          200,
+          { integration: integrationSummary("github"), repository },
+          requestId,
+        );
+      }
+      if (
+        url.pathname === "/api/platform/integrations/github" &&
+        req.method === "DELETE"
+      ) {
+        const body = await readJsonBody(req, { limit: 8192 });
+        db.prepare(
+          "DELETE FROM application_integrations WHERE provider='github'",
+        ).run();
+        recordApplicationAudit(
+          owner,
+          "github.repository_disconnected",
+          "application_integration",
+          "github",
+          null,
+          limited(body.reason || "Disconnect private GitHub releases", 500),
+          {},
+          requestId,
+        );
+        return json(res, 200, { disconnected: true }, requestId);
       }
       if (
         url.pathname === "/api/platform/integrations/microsoft/connect" &&

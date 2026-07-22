@@ -108,6 +108,30 @@ async function main() {
     platformHtml = fs.readFileSync(
       path.join(__dirname, "..", "platform.html"),
       "utf8",
+    ),
+    adminSource = fs.readFileSync(
+      path.join(__dirname, "..", "admin.js"),
+      "utf8",
+    ),
+    adminHtml = fs.readFileSync(
+      path.join(__dirname, "..", "admin.html"),
+      "utf8",
+    ),
+    setupSource = fs.readFileSync(
+      path.join(__dirname, "..", "setup.js"),
+      "utf8",
+    ),
+    setupHtml = fs.readFileSync(
+      path.join(__dirname, "..", "setup.html"),
+      "utf8",
+    ),
+    adminStyles = fs.readFileSync(
+      path.join(__dirname, "..", "admin.css"),
+      "utf8",
+    ),
+    platformStyles = fs.readFileSync(
+      path.join(__dirname, "..", "platform.css"),
+      "utf8",
     );
   for (const unsafeAccess of [
     "busy(event.currentTarget, false)",
@@ -129,11 +153,75 @@ async function main() {
     "Existing sessions, password logins, and MFA logins must route owners to the control plane",
   );
   assert.match(
-    platformSource,
-    /loadSetup\(\{ navigate: true \}\)/,
-    "MFA completion must resume first-time setup discovery",
+    signatureSource,
+    /ANIMATED_BANNER_WIDTH = 440,\s*ANIMATED_BANNER_HEIGHT = 100/,
+    "Animated banners must use the same 440 by 100 dimensions as email templates",
   );
-  for (const formId of ["microsoftSetupForm", "stripeConnectForm"])
+  const signatureHtml = fs.readFileSync(
+      path.join(__dirname, "..", "signature.html"),
+      "utf8",
+    ),
+    animationEffects = [
+      "tech-pulse",
+      "signal-rings",
+      "starfield",
+      "clean",
+      "scan-line",
+      "digital-grid",
+      "spotlight",
+      "soft-pulse",
+    ];
+  for (const effect of animationEffects)
+    assert.match(
+      signatureHtml,
+      new RegExp(`value="${effect}"`),
+      `Animation selector is missing ${effect}`,
+    );
+  for (const effect of animationEffects
+    .slice(1)
+    .filter((item) => item !== "clean"))
+    assert.match(
+      signatureSource,
+      new RegExp(`effect === "${effect}"`),
+      `Animation renderer is missing ${effect}`,
+    );
+  assert.match(
+    signatureHtml,
+    /signature\.js\?v=\d+/,
+    "Studio script must be cache-versioned",
+  );
+  assert.doesNotMatch(
+    platformHtml,
+    /data-admin-section="setup"/,
+    "First-time setup must not be embedded in the owner console",
+  );
+  for (const label of ["Setup", "Configure", "Sign in"])
+    assert.match(
+      setupHtml,
+      new RegExp(`<strong>${label}</strong>`),
+      `Standalone installer is missing the ${label} stage`,
+    );
+  for (const provider of ["microsoft", "stripe", "github"])
+    assert.match(
+      platformHtml,
+      new RegExp(`data-open-integration="${provider}"`),
+      `Integration catalog is missing ${provider}`,
+    );
+  assert.match(
+    platformHtml,
+    /<dialog class="integration-dialog" id="integrationDialog">/,
+    "Integration details must open in a focused dialog",
+  );
+  assert.match(
+    platformSource,
+    /function openIntegration\(provider\)/,
+    "Integration tiles must open their provider settings",
+  );
+  for (const formId of [
+    "microsoftIntegrationActions",
+    "stripeConnectForm",
+    "githubConnectForm",
+  ])
     assert.match(
       platformHtml,
       new RegExp(
@@ -141,15 +229,70 @@ async function main() {
       ),
       `${formId} must opt out of login autofill`,
     );
+  assert.match(
+    platformHtml,
+    /<form[^>]+id="githubConnectForm"[^>]+method="post"/,
+    "GitHub credentials must never fall back to query-string submission",
+  );
   assert.equal(
     (platformHtml.match(/autocomplete="new-password"/g) || []).length,
-    2,
+    3,
     "Provider secrets must be marked as new credentials",
   );
   assert.equal(
     (platformHtml.match(/data-1p-ignore/g) || []).length,
-    4,
+    5,
     "Provider identifiers and secrets must opt out of password-manager autofill",
+  );
+  assert.match(
+    adminHtml,
+    /<option value="direct">Create directly<\/option>/,
+    "Tenant Admin user dialog must expose direct account creation",
+  );
+  assert.match(
+    adminSource,
+    /direct \? "\/api\/signature\/users" : "\/api\/signature\/invitations"/,
+    "User creation mode must select the correct backend endpoint",
+  );
+  assert.match(
+    adminSource,
+    /result\.temporaryPassword/,
+    "Generated temporary credentials must be handed to the administrator",
+  );
+  assert.ok(
+    !setupSource.includes("localStorage") &&
+      !setupSource.includes("sessionStorage"),
+    "Installer secrets must not be persisted in browser storage",
+  );
+  assert.match(
+    adminStyles,
+    /dialog \{[\s\S]*max-height: calc\(100dvh - 30px\);[\s\S]*overflow: hidden;/,
+    "Dialogs must remain bounded by the visible viewport",
+  );
+  assert.match(
+    adminStyles,
+    /\.dialog-form \{[\s\S]*overflow-y: auto;[\s\S]*overscroll-behavior: contain;/,
+    "Long dialog content must scroll inside the modal",
+  );
+  assert.match(
+    platformStyles,
+    /#tenantDialog \{\s*width: min\(920px, calc\(100vw - 30px\)\);/,
+    "Tenant detail width must be applied to the dialog container",
+  );
+  assert.match(
+    adminHtml,
+    /admin\.css\?v=\d+/,
+    "Workspace stylesheet must be cache-versioned",
+  );
+  assert.match(
+    platformHtml,
+    /platform\.css\?v=\d+/,
+    "Application stylesheet must be cache-versioned",
+  );
+  assert.match(
+    platformHtml,
+    /platform\.js\?v=\d+/,
+    "Application script must be cache-versioned",
   );
   console.log(
     "Frontend tests passed: GET deduplication, write isolation, structured errors, timeouts, and provider credential autofill isolation",

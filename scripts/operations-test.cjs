@@ -92,6 +92,24 @@ async function main() {
       updateFailure?.code === "UPDATE_CHECK_FAILED",
     "Update network failure was not normalized.",
   );
+  const privateRepositoryOperations = createApplicationOperations({
+    config: { ...config, updateGithubToken: "" },
+    db,
+    version: "0.4.0",
+    fetchImpl: async () => ({ ok: false, status: 404 }),
+  });
+  let privateRepositoryFailure;
+  try {
+    await privateRepositoryOperations.checkForUpdates();
+  } catch (error) {
+    privateRepositoryFailure = error;
+  }
+  assert(
+    privateRepositoryFailure?.status === 503 &&
+      privateRepositoryFailure?.code === "UPDATE_REPOSITORY_UNAUTHORIZED" &&
+      privateRepositoryFailure.message.includes("SIGNIFY_UPDATE_GITHUB_TOKEN"),
+    "Private repository authentication failure was not actionable.",
+  );
   db.close();
 
   const restored = applyPendingRestore(config);

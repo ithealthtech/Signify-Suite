@@ -4,9 +4,9 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width,initial-scale=1" />
     <title>Workspace | Signify Creator</title>
-    <link rel="icon" href="/icons/email.png" />
+    <link rel="icon" type="image/png" href="/ithtfavicon.png" />
     <link rel="stylesheet" href="signify-shared.css?v=20260718" />
-    <link rel="stylesheet" href="admin.css" />
+    <link rel="stylesheet" href="admin.css?v=20260722" />
   </head>
   <body>
     <header class="app-header">
@@ -393,26 +393,66 @@
         <div class="dialog-head">
           <div>
             <span class="eyebrow">New person</span>
-            <h2>Invite a workspace member</h2>
+            <h2 id="createUserTitle">Add a workspace member</h2>
           </div>
           <button data-close-user aria-label="Close" type="button">
             &times;
           </button>
         </div>
         <div class="form-grid">
+          <label
+            >Add method<select name="mode" id="createUserMode">
+              <option value="direct">Create directly</option>
+              <option value="invite">Email invitation</option>
+            </select></label
+          >
           <label class="full"
-            >Work email<input name="email" type="email" required /></label
-          ><label
+            >Work email<input
+              name="email"
+              type="email"
+              autocomplete="off"
+              required
+          /></label>
+          <label class="full" data-direct-user-field
+            >Full name<input name="displayName" autocomplete="name"
+          /></label>
+          <label data-direct-user-field
+            >Job title<input name="jobTitle" autocomplete="organization-title"
+          /></label>
+          <label data-direct-user-field
+            >Department<input name="department" autocomplete="off"
+          /></label>
+          <label
             >Role<select name="role">
               <option value="editor">Editor</option>
               <option value="viewer">Viewer</option>
               <option value="admin">Admin</option>
             </select></label
-          ><label class="full" id="inviteLinkField" hidden
+          >
+          <label class="full" data-direct-user-field
+            >Temporary password<input
+              name="password"
+              type="password"
+              minlength="10"
+              autocomplete="new-password"
+              placeholder="Generate automatically"
+          /></label>
+          <label class="full" id="inviteLinkField" hidden
             >Development invite link<input id="inviteLink" readonly
+          /></label>
+          <label class="full" id="temporaryPasswordField" hidden
+            >Temporary password<input id="temporaryPassword" readonly
           /></label>
         </div>
         <div class="dialog-actions">
+          <button
+            class="button"
+            id="copyTemporaryPassword"
+            type="button"
+            hidden
+          >
+            Copy password
+          </button>
           <button class="button" data-close-user type="button">Cancel</button
           ><button
             class="button primary"
@@ -420,7 +460,7 @@
             value="default"
             type="button"
           >
-            Send invitation
+            Add person
           </button>
         </div>
       </form>

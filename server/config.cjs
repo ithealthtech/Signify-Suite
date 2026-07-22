@@ -214,6 +214,9 @@ function loadConfig(env = process.env, baseDir = path.join(__dirname, "..")) {
   const credentialEncryptionKey = String(
     env.SIGNIFY_CREDENTIAL_ENCRYPTION_KEY || "",
   ).trim();
+  const setupToken = String(env.SIGNIFY_SETUP_TOKEN || "").trim();
+  if (setupToken && setupToken.length < 32)
+    throw new Error("SIGNIFY_SETUP_TOKEN must be at least 32 characters.");
   if (production && !credentialEncryptionKey)
     throw new Error(
       "SIGNIFY_CREDENTIAL_ENCRYPTION_KEY is required in production.",
@@ -357,6 +360,7 @@ function loadConfig(env = process.env, baseDir = path.join(__dirname, "..")) {
       env.SIGNIFY_UPDATE_REPOSITORY || "ithealthtech/Signify-Suite",
     ).trim(),
     updateGithubToken: String(env.SIGNIFY_UPDATE_GITHUB_TOKEN || "").trim(),
+    setup: { token: setupToken },
     signature: {
       sessionHours,
       mediaLimitBytes: Math.floor(mediaLimitMb * 1024 * 1024),
