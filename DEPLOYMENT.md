@@ -90,6 +90,19 @@ Use a Hostinger Business or Cloud plan with the Node.js Web App deployment type.
 
 Before using Hostinger managed hosting, confirm that the configured database, upload, generated-banner, and backup directories persist across redeployments. If the plan cannot provide durable writable storage for those paths, deploy this release on a Hostinger VPS or use another host with a persistent volume. The application uses the built-in Node HTTP server and does not require Express.
 
+For a new deployment without terminal access, set
+`SIGNATURE_ALLOW_DEFAULT_ADMIN=false`, generate
+`SIGNIFY_CREDENTIAL_ENCRYPTION_KEY` and `SIGNIFY_SETUP_TOKEN` using the commands
+in the README, and start the application. Open `/setup.html` on the public HTTPS
+domain. The application redirects normal pages to this installer until it
+atomically creates the first Application Owner and records the permanent setup
+lock. Remove `SIGNIFY_SETUP_TOKEN` from hPanel and restart after completion.
+
+The setup status endpoint is `GET /api/setup/status`. It reports only readiness
+checks and never returns either secret. `POST /api/setup/install` is rate
+limited, requires the one-time token, and is disabled permanently once the
+database contains an owner or installation-completion record.
+
 ## 5. Microsoft 365
 
 Register one Entra application with **Accounts in any organizational directory** enabled. Set `MICROSOFT_CLIENT_ID` and `MICROSOFT_CLIENT_SECRET`, then configure both web redirect URIs:

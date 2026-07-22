@@ -1,0 +1,228 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <link rel="icon" type="image/png" href="/ithtfavicon.png" />
+    <meta name="color-scheme" content="light" />
+    <title>Set up Signify Creator</title>
+    <link rel="stylesheet" href="/signify-shared.css" />
+    <link rel="stylesheet" href="/setup.css?v=2026072203" />
+  </head>
+  <body>
+    <main class="setup-shell">
+      <header class="setup-header">
+        <a
+          class="setup-brand"
+          href="/setup.html"
+          aria-label="Signify Creator setup"
+        >
+          <span>S</span>
+          <strong>Signify</strong>
+          <small>Creator</small>
+        </a>
+        <p>Secure self-hosted installation</p>
+      </header>
+
+      <section class="setup-workspace" aria-labelledby="setupTitle">
+        <div class="setup-intro">
+          <p class="eyebrow">Welcome to Signify Creator</p>
+          <h1 id="setupTitle">Let&rsquo;s prepare your workspace.</h1>
+          <p>Three short steps establish your application and owner account.</p>
+        </div>
+
+        <ol class="progress-tracker" aria-label="Setup progress">
+          <li class="active" data-progress-step="1" aria-current="step">
+            <span class="progress-icon"><i>1</i></span>
+            <strong>Setup</strong>
+            <small>Host and identity</small>
+          </li>
+          <li data-progress-step="2">
+            <span class="progress-icon"><i>2</i></span>
+            <strong>Configure</strong>
+            <small>Application owner</small>
+          </li>
+          <li data-progress-step="3">
+            <span class="progress-icon"><i>3</i></span>
+            <strong>Sign in</strong>
+            <small>Enter your workspace</small>
+          </li>
+        </ol>
+
+        <div class="setup-card" id="loadingPanel">
+          <div class="loading-mark" aria-hidden="true"></div>
+          <p class="eyebrow">System check</p>
+          <h2>Inspecting this host</h2>
+          <p>
+            Validating storage, migrations, HTTPS, and credential protection.
+          </p>
+        </div>
+
+        <div class="setup-card" id="unavailablePanel" hidden>
+          <p class="eyebrow">Hosting action required</p>
+          <h2>This server needs attention.</h2>
+          <p>Resolve the failed checks below, then run the validation again.</p>
+          <div class="system-checks" id="unavailableChecks"></div>
+          <button class="button" id="retrySetup" type="button">
+            Run checks again
+          </button>
+        </div>
+
+        <form class="setup-card" id="installerForm" hidden autocomplete="off">
+          <section class="wizard-step" data-wizard-step="1">
+            <div class="step-heading">
+              <span class="step-number">01</span>
+              <div>
+                <p class="eyebrow">Setup</p>
+                <h2>Confirm your application</h2>
+                <p>Review the host checks and identify this installation.</p>
+              </div>
+            </div>
+            <div class="system-checks compact" id="systemChecks"></div>
+            <div class="form-grid">
+              <label class="full"
+                >Company name
+                <input
+                  name="companyName"
+                  autocomplete="organization"
+                  maxlength="120"
+                  required
+                />
+              </label>
+              <label class="full"
+                >Public application URL
+                <input
+                  name="publicUrl"
+                  type="url"
+                  autocomplete="url"
+                  required
+                />
+              </label>
+            </div>
+            <div class="wizard-actions end">
+              <button
+                class="button primary"
+                id="continueConfigure"
+                type="button"
+              >
+                Continue to configure <span aria-hidden="true">&rarr;</span>
+              </button>
+            </div>
+          </section>
+
+          <section class="wizard-step" data-wizard-step="2" hidden>
+            <div class="step-heading">
+              <span class="step-number">02</span>
+              <div>
+                <p class="eyebrow">Configure</p>
+                <h2>Create the Application Owner</h2>
+                <p>
+                  This account controls tenants, integrations, updates, and
+                  billing.
+                </p>
+              </div>
+            </div>
+            <div class="form-grid two">
+              <label
+                >Full name
+                <input
+                  name="name"
+                  autocomplete="name"
+                  maxlength="120"
+                  required
+                />
+              </label>
+              <label
+                >Work email
+                <input
+                  name="email"
+                  type="email"
+                  autocomplete="email"
+                  maxlength="180"
+                  required
+                />
+              </label>
+              <label
+                >Password
+                <input
+                  name="password"
+                  type="password"
+                  autocomplete="new-password"
+                  minlength="12"
+                  required
+                />
+              </label>
+              <label
+                >Confirm password
+                <input
+                  name="confirmPassword"
+                  type="password"
+                  autocomplete="new-password"
+                  minlength="12"
+                  required
+                />
+              </label>
+              <label class="full"
+                >One-time setup token
+                <input
+                  name="setupToken"
+                  type="password"
+                  autocomplete="one-time-code"
+                  minlength="32"
+                  required
+                />
+                <small
+                  >Use the SIGNIFY_SETUP_TOKEN configured on this server.</small
+                >
+              </label>
+            </div>
+            <p
+              class="form-message"
+              id="installerMessage"
+              role="status"
+              aria-live="polite"
+            ></p>
+            <div class="wizard-actions">
+              <button class="button" id="backToSetup" type="button">
+                &larr; Back
+              </button>
+              <button class="button primary" id="installButton" type="submit">
+                Complete setup
+              </button>
+            </div>
+          </section>
+        </form>
+
+        <div class="setup-card completion" id="completePanel" hidden>
+          <div class="completion-mark" aria-hidden="true">&#10003;</div>
+          <p class="eyebrow">Setup complete</p>
+          <h2>Your workspace is ready.</h2>
+          <p>
+            Sign in with the Application Owner account you just created.
+            Optional integrations can be connected afterward.
+          </p>
+          <a
+            class="button primary"
+            id="continueToLogin"
+            href="/signature.html?installed=true"
+            >Continue to sign in</a
+          >
+        </div>
+
+        <div class="setup-card completion" id="lockedPanel" hidden>
+          <div class="completion-mark" aria-hidden="true">&#10003;</div>
+          <p class="eyebrow">Already configured</p>
+          <h2>Signify Creator is ready.</h2>
+          <p>
+            The first-time installer is locked for this application database.
+          </p>
+          <a class="button primary" href="/signature.html"
+            >Continue to sign in</a
+          >
+        </div>
+      </section>
+      <footer>Signify Creator &middot; Secure first-run setup</footer>
+    </main>
+    <script src="/setup.js?v=2026072203"></script>
+  </body>
+</html>

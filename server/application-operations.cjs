@@ -1,6 +1,7 @@
 "use strict";
 const fs = require("node:fs");
 const path = require("node:path");
+const { createCredentialVault } = require("./credential-vault.cjs");
 const { DatabaseSync } = require("node:sqlite");
 
 const BACKUP_PATTERN = /^signify-creator-(?:pre-restore-)?[\w.-]+\.db$/;
@@ -157,7 +158,10 @@ function createApplicationOperations({
   fetchImpl = fetch,
   version,
 }) {
-  const backupPath = ensureDirectory(path.resolve(config.backupPath));
+  const backupPath = ensureDirectory(path.resolve(config.backupPath)),
+    credentialVault = createCredentialVault(
+      config.signature?.credentialEncryptionKey,
+    );
   const migrationsDirectory = path.join(
     config.sourceRoot,
     "server",
@@ -235,6 +239,15 @@ function createApplicationOperations({
       error.code = "UPDATE_REPOSITORY_INVALID";
       throw error;
     }
+    const githubRow = db
+        .prepare(
+          "SELECT encrypted_credentials FROM application_integrations WHERE provider='github' AND status='connected'",
+        )
+        .get(),
+      githubCredentials = githubRow?.encrypted_credentials
+        ? credentialVault.decrypt("github", githubRow.encrypted_credentials)
+        : null,
+      githubToken = githubCredentials?.token || config.updateGithubToken;
     let response;
     try {
       response = await fetchImpl(
@@ -244,9 +257,7 @@ function createApplicationOperations({
             Accept: "application/vnd.github+json",
             "User-Agent": "Signify-Creator",
             "X-GitHub-Api-Version": "2022-11-28",
-            ...(config.updateGithubToken
-              ? { Authorization: `Bearer ${config.updateGithubToken}` }
-              : {}),
+            ...(githubToken ? { Authorization: `Bearer ${githubToken}` } : {}),
           },
           signal: AbortSignal.timeout(10000),
         },
@@ -258,9 +269,16 @@ function createApplicationOperations({
       throw error;
     }
     if (!response.ok) {
-      const error = new Error("The release channel could not be reached.");
-      error.status = 502;
-      error.code = "UPDATE_CHECK_FAILED";
+      const authenticationFailure = [401, 403, 404].includes(response.status),
+        error = new Error(
+          authenticationFailure
+            ? "The private release repository could not be accessed. Configure a read-only SIGNIFY_UPDATE_GITHUB_TOKEN."
+            : "The release channel returned an unexpected response.",
+        );
+      error.status = authenticationFailure ? 503 : 502;
+      error.code = authenticationFailure
+        ? "UPDATE_REPOSITORY_UNAUTHORIZED"
+        : "UPDATE_CHECK_FAILED";
       throw error;
     }
     const release = await response.json();

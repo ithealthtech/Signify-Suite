@@ -679,7 +679,12 @@ $("#animateBanner").addEventListener("click", async (event) => {
     );
     const result = await api("/api/signature/generated-banners", {
       method: "POST",
-      body: JSON.stringify({ width: 650, height: 100, delay: 80, frames }),
+      body: JSON.stringify({
+        width: ANIMATED_BANNER_WIDTH,
+        height: ANIMATED_BANNER_HEIGHT,
+        delay: 80,
+        frames,
+      }),
     });
     state.signature.bannerUrl = result.url;
     fillForm();
@@ -691,11 +696,13 @@ $("#animateBanner").addEventListener("click", async (event) => {
     setBusy(button, false);
   }
 });
+const ANIMATED_BANNER_WIDTH = 440,
+  ANIMATED_BANNER_HEIGHT = 100;
 async function buildAnimationFrames(source, effect) {
   const image = await loadImage(source),
     canvas = document.createElement("canvas"),
-    width = 650,
-    height = 100;
+    width = ANIMATED_BANNER_WIDTH,
+    height = ANIMATED_BANNER_HEIGHT;
   canvas.width = width;
   canvas.height = height;
   const ctx = canvas.getContext("2d"),
@@ -734,6 +741,49 @@ async function buildAnimationFrames(source, effect) {
         );
         ctx.stroke();
       }
+    } else if (effect === "scan-line") {
+      const x = -60 + (width + 120) * t,
+        gradient = ctx.createLinearGradient(x - 45, 0, x + 45, 0);
+      gradient.addColorStop(0, "rgba(95,229,255,0)");
+      gradient.addColorStop(0.5, "rgba(95,229,255,.38)");
+      gradient.addColorStop(1, "rgba(95,229,255,0)");
+      ctx.fillStyle = gradient;
+      ctx.fillRect(0, 0, width, height);
+    } else if (effect === "digital-grid") {
+      ctx.strokeStyle = "rgba(166,180,255,.24)";
+      ctx.lineWidth = 1;
+      const offset = (frame * 4) % 24;
+      for (let x = offset - 24; x < width; x += 24) {
+        ctx.beginPath();
+        ctx.moveTo(x, 0);
+        ctx.lineTo(x, height);
+        ctx.stroke();
+      }
+      for (let y = offset - 24; y < height; y += 24) {
+        ctx.beginPath();
+        ctx.moveTo(0, y);
+        ctx.lineTo(width, y);
+        ctx.stroke();
+      }
+    } else if (effect === "spotlight") {
+      const x = width * (0.1 + 0.8 * t),
+        gradient = ctx.createRadialGradient(
+          x,
+          height / 2,
+          0,
+          x,
+          height / 2,
+          110,
+        );
+      gradient.addColorStop(0, "rgba(255,255,255,.34)");
+      gradient.addColorStop(0.45, "rgba(190,202,255,.16)");
+      gradient.addColorStop(1, "rgba(255,255,255,0)");
+      ctx.fillStyle = gradient;
+      ctx.fillRect(0, 0, width, height);
+    } else if (effect === "soft-pulse") {
+      const strength = 0.08 + 0.14 * ((Math.sin(t * Math.PI * 2) + 1) / 2);
+      ctx.fillStyle = `rgba(205,214,255,${strength})`;
+      ctx.fillRect(0, 0, width, height);
     } else {
       const gradient = ctx.createLinearGradient(
         -140 + width * t,

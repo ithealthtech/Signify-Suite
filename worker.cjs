@@ -87,5 +87,48 @@ function startWorker(options = {}) {
   return { application, config, db, jobs, mediaStorage, stop };
 }
 
-if (require.main === module) startWorker();
+function installFatalHandlers(observability = null) {
+  let exiting = false;
+  function fatal(kind, error) {
+    const payload = {
+      code: error?.code || "FATAL_ERROR",
+      message: error?.message || String(error),
+      stack: error?.stack,
+    };
+    if (observability) observability.log("error", `process.${kind}`, payload);
+    else
+      process.stderr.write(
+        `${JSON.stringify({
+          level: "error",
+          event: `process.${kind}`,
+          ...payload,
+        })}\n`,
+      );
+    process.exitCode = 1;
+    if (!exiting) {
+      exiting = true;
+      setTimeout(() => process.exit(1), 250).unref();
+    }
+  }
+  process.on("uncaughtException", (error) =>
+    fatal("uncaught_exception", error),
+  );
+  process.on("unhandledRejection", (reason) =>
+    fatal(
+      "unhandled_rejection",
+      reason instanceof Error ? reason : new Error(String(reason)),
+    ),
+  );
+}
+
+if (require.main === module) {
+  let started;
+  try {
+    started = startWorker();
+    installFatalHandlers(started.application.observability);
+  } catch (error) {
+    installFatalHandlers();
+    throw error;
+  }
+}
 module.exports = { startWorker };

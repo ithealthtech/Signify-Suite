@@ -8,7 +8,9 @@ const path = require("node:path");
 const { spawn } = require("node:child_process");
 
 const root = path.join(__dirname, ".."),
-  artifact = path.join(root, "dist"),
+  artifact = process.env.SIGNIFY_BUILD_DIR
+    ? path.resolve(root, process.env.SIGNIFY_BUILD_DIR)
+    : path.join(root, "dist"),
   runtime = fs.mkdtempSync(path.join(os.tmpdir(), "signify-artifact-boot-"));
 
 function freePort() {

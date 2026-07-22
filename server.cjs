@@ -10,6 +10,7 @@ const { createSignaturePortal } = require("./server/signature-portal.cjs");
 const { createJobQueue, startJobWorker } = require("./server/job-queue.cjs");
 const { createMediaStorage } = require("./server/media-storage.cjs");
 const { createObservability } = require("./server/observability.cjs");
+const { createInstaller } = require("./server/installer.cjs");
 const { acquireRuntimeLease } = require("./server/runtime-lease.cjs");
 const {
   applyPendingRestore,
@@ -42,6 +43,9 @@ const publicFiles = new Set([
   "platform.js",
   "signify-shared.js",
   "signify-shared.css",
+  "setup.html",
+  "setup.css",
+  "setup.js",
   "signature-it-banner.png",
 ]);
 
@@ -263,6 +267,7 @@ function createApplication(options = {}) {
     createMediaStorage(config, { s3Client: options.s3Client });
   const jobHandlers = {},
     jobQueue = createJobQueue(db, jobHandlers);
+  const installer = createInstaller({ config, db, json, readJsonBody });
   const signaturePortal = createSignaturePortal({
     db,
     production: config.production,
@@ -279,6 +284,8 @@ function createApplication(options = {}) {
     enqueueJob: jobQueue.enqueue,
     deletionGraceDays: config.deletionGraceDays,
     packageVersion: packageMetadata.version,
+    updateRepository: config.updateRepository,
+    updateGithubToken: config.updateGithubToken,
   });
   Object.assign(jobHandlers, signaturePortal.jobHandlers);
   const rateBuckets = new Map(),
@@ -301,6 +308,7 @@ function createApplication(options = {}) {
   }
   function checkRateLimit(req, pathname) {
     const policies = {
+        "/api/setup/install": { limit: 5, windowMs: 60 * 60 * 1000 },
         "/api/signature/login": { limit: 10, windowMs: 15 * 60 * 1000 },
         "/api/signature/register": { limit: 5, windowMs: 60 * 60 * 1000 },
         "/api/signature/password/forgot": {
@@ -360,6 +368,20 @@ function createApplication(options = {}) {
     });
     try {
       const url = new URL(req.url || "/", "http://signature.local");
+      if (
+        ["GET", "HEAD"].includes(req.method) &&
+        url.pathname === "/platform.html" &&
+        url.searchParams.has("token")
+      ) {
+        res.writeHead(303, {
+          Location: "/platform.html",
+          "Cache-Control": "no-store",
+          "Referrer-Policy": "no-referrer",
+          "X-Request-Id": requestId,
+        });
+        res.end();
+        return;
+      }
       const retryAfter = checkRateLimit(req, url.pathname);
       if (retryAfter)
         return json(
@@ -374,6 +396,44 @@ function createApplication(options = {}) {
           requestId,
           { "Retry-After": String(retryAfter) },
         );
+      if (await installer.handle(req, res, url, requestId)) return;
+      if (installer.required()) {
+        const setupAsset = new Set([
+          "/setup.html",
+          "/setup.css",
+          "/setup.js",
+          "/signify-shared.css",
+          "/signify-shared.js",
+        ]).has(url.pathname);
+        if (
+          !setupAsset &&
+          !["/api/live", "/api/health", "/api/ready"].includes(url.pathname)
+        ) {
+          if (
+            ["GET", "HEAD"].includes(req.method) &&
+            !url.pathname.startsWith("/api/")
+          ) {
+            res.writeHead(302, {
+              Location: "/setup.html",
+              "Cache-Control": "no-store",
+              "X-Request-Id": requestId,
+            });
+            res.end();
+            return;
+          }
+          return json(
+            res,
+            503,
+            {
+              error: {
+                code: "INSTALLATION_REQUIRED",
+                message: "Complete first-time installation.",
+              },
+            },
+            requestId,
+          );
+        }
+      }
       if (url.pathname === "/api/live") {
         if (req.method !== "GET")
           return json(
@@ -519,6 +579,7 @@ function createApplication(options = {}) {
     handler,
     jobHandlers,
     jobQueue,
+    installer,
     mediaStorage,
     observability,
     operations,
@@ -592,5 +653,48 @@ function startServer(options = {}) {
   return { ...application, jobs, runtimeLease, server };
 }
 
-if (require.main === module) startServer();
+function installFatalHandlers(observability = null) {
+  let exiting = false;
+  function fatal(kind, error) {
+    const payload = {
+      code: error?.code || "FATAL_ERROR",
+      message: error?.message || String(error),
+      stack: error?.stack,
+    };
+    if (observability) observability.log("error", `process.${kind}`, payload);
+    else
+      process.stderr.write(
+        `${JSON.stringify({
+          level: "error",
+          event: `process.${kind}`,
+          ...payload,
+        })}\n`,
+      );
+    process.exitCode = 1;
+    if (!exiting) {
+      exiting = true;
+      setTimeout(() => process.exit(1), 250).unref();
+    }
+  }
+  process.on("uncaughtException", (error) =>
+    fatal("uncaught_exception", error),
+  );
+  process.on("unhandledRejection", (reason) =>
+    fatal(
+      "unhandled_rejection",
+      reason instanceof Error ? reason : new Error(String(reason)),
+    ),
+  );
+}
+
+if (require.main === module) {
+  let started;
+  try {
+    started = startServer();
+    installFatalHandlers(started.observability);
+  } catch (error) {
+    installFatalHandlers();
+    throw error;
+  }
+}
 module.exports = { createApplication, serveObjectMedia, startServer };

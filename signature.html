@@ -4,9 +4,9 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width,initial-scale=1" />
     <title>Signify Creator</title>
-    <link rel="icon" href="/icons/email.png" />
+    <link rel="icon" type="image/png" href="/ithtfavicon.png" />
     <link rel="stylesheet" href="signify-shared.css?v=20260718" />
-    <link rel="stylesheet" href="signature.css" />
+    <link rel="stylesheet" href="signature.css?v=20260722" />
   </head>
   <body>
     <main class="auth-shell" id="authView">
@@ -494,6 +494,40 @@
                       <span aria-hidden="true"></span
                       ><strong>Light sweep</strong>
                     </label>
+                    <label class="effect-option scan-line">
+                      <input
+                        name="bannerEffect"
+                        type="radio"
+                        value="scan-line"
+                      />
+                      <span aria-hidden="true"></span><strong>Scan line</strong>
+                    </label>
+                    <label class="effect-option digital-grid">
+                      <input
+                        name="bannerEffect"
+                        type="radio"
+                        value="digital-grid"
+                      />
+                      <span aria-hidden="true"></span
+                      ><strong>Digital grid</strong>
+                    </label>
+                    <label class="effect-option spotlight">
+                      <input
+                        name="bannerEffect"
+                        type="radio"
+                        value="spotlight"
+                      />
+                      <span aria-hidden="true"></span><strong>Spotlight</strong>
+                    </label>
+                    <label class="effect-option soft-pulse">
+                      <input
+                        name="bannerEffect"
+                        type="radio"
+                        value="soft-pulse"
+                      />
+                      <span aria-hidden="true"></span
+                      ><strong>Soft pulse</strong>
+                    </label>
                   </div>
                 </fieldset>
                 <button
@@ -571,6 +605,6 @@
     </div>
     <div class="toast" id="toast" role="status" aria-live="polite"></div>
     <script src="signify-shared.js?v=20260718"></script>
-    <script src="signature.js?v=20260718"></script>
+    <script src="signature.js?v=20260722"></script>
   </body>
 </html>

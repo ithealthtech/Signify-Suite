@@ -1,7 +1,18 @@
 {
   "name": "signify-creator",
   "private": true,
-  "version": "0.4.0",
+  "version": "1.0.0",
+  "description": "Self-hosted multi-tenant email-signature SaaS for Node.js.",
+  "license": "UNLICENSED",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/ithealthtech/Signify-Suite.git"
+  },
+  "bugs": {
+    "url": "https://github.com/ithealthtech/Signify-Suite/issues"
+  },
+  "homepage": "https://github.com/ithealthtech/Signify-Suite#readme",
+  "packageManager": "npm@11.6.2",
   "type": "commonjs",
   "engines": {
     "node": ">=22.13.0"
@@ -18,8 +29,9 @@
     "setup": "node scripts/setup.cjs",
     "dev": "node scripts/dev.cjs",
     "build": "node scripts/build.cjs",
+    "typecheck": "node --check server.cjs && node --check worker.cjs && node --check server/config.cjs",
     "benchmark": "node scripts/benchmark.cjs",
-    "test": "node scripts/unit-test.cjs && node scripts/frontend-test.cjs && node scripts/database-test.cjs && node scripts/runtime-lease-test.cjs && node scripts/postgres-test.cjs && node scripts/postgres-import-test.cjs && node scripts/credential-rotation-test.cjs && node scripts/deployment-test.cjs && node scripts/container-test.cjs && node scripts/job-test.cjs && node scripts/media-test.cjs && node scripts/observability-test.cjs && node scripts/operations-test.cjs && node scripts/recovery-test.cjs && node scripts/security-test.cjs && node scripts/setup-test.cjs && node scripts/smoke-test.cjs",
+    "test": "node scripts/unit-test.cjs && node scripts/frontend-test.cjs && node scripts/database-test.cjs && node scripts/runtime-lease-test.cjs && node scripts/postgres-test.cjs && node scripts/postgres-import-test.cjs && node scripts/credential-rotation-test.cjs && node scripts/deployment-test.cjs && node scripts/container-test.cjs && node scripts/job-test.cjs && node scripts/media-test.cjs && node scripts/observability-test.cjs && node scripts/operations-test.cjs && node scripts/recovery-test.cjs && node scripts/security-test.cjs && node scripts/setup-test.cjs && node scripts/installer-test.cjs && node scripts/smoke-test.cjs",
     "test:unit": "node scripts/unit-test.cjs",
     "test:frontend": "node scripts/frontend-test.cjs",
     "test:database": "node scripts/database-test.cjs",
@@ -34,6 +46,7 @@
     "test:security": "node scripts/security-test.cjs && node scripts/secret-scan.cjs",
     "test:artifact-startup": "node scripts/artifact-startup-test.cjs",
     "test:setup": "node scripts/setup-test.cjs",
+    "test:installer": "node scripts/installer-test.cjs",
     "test:smoke": "node scripts/smoke-test.cjs",
     "test:sbom": "npm run sbom && node scripts/sbom-test.cjs",
     "sbom": "node scripts/generate-sbom.cjs",
@@ -41,7 +54,7 @@
     "lint": "eslint .",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
-    "check": "npm run format:check && npm run lint && npm run test:security && npm test && npm run test:sbom && npm run build && node scripts/artifact-test.cjs && npm run test:artifact-startup",
+    "check": "npm run format:check && npm run lint && npm run typecheck && npm run test:security && npm test && npm run test:sbom && npm run build && node scripts/artifact-test.cjs && npm run test:artifact-startup",
     "backup": "node --env-file-if-exists=.env.local scripts/backup.cjs",
     "recovery:drill": "node --env-file-if-exists=.env.local scripts/recovery-drill.cjs",
     "deploy:release": "node --env-file-if-exists=.env.local scripts/deploy-release.cjs",
