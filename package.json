@@ -66,8 +66,8 @@
     "integrations:verify": "node --env-file-if-exists=.env.local scripts/verify-provider-integrations.cjs"
   },
   "dependencies": {
-    "@aws-sdk/client-s3": "^3.1091.0",
-    "@aws-sdk/s3-request-presigner": "^3.1091.0",
+    "@aws-sdk/client-s3": "^3.1096.0",
+    "@aws-sdk/s3-request-presigner": "^3.1096.0",
     "gifenc": "^1.0.3",
     "otpauth": "^9.5.1",
     "pg": "^8.22.0",
