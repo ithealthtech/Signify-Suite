@@ -110,8 +110,18 @@ function readEnvironment(file) {
   return parseEnv(fs.readFileSync(file, "utf8"));
 }
 
-function environmentValue(value) {
-  return JSON.stringify(String(value).replace(/[\r\n]+/g, " "));
+function environmentValue(value, key = "") {
+  const text = String(value);
+  if (key === "SIGNIFY_LICENSE_PUBLIC_KEY") {
+    const pem = text
+      .replaceAll("\\\n", "\n")
+      .replaceAll("\\n", "\n")
+      .replace(/\r\n/g, "\n");
+    if (pem.includes("'"))
+      throw new Error("SIGNIFY_LICENSE_PUBLIC_KEY contains an apostrophe.");
+    return `'${pem}'`;
+  }
+  return JSON.stringify(text.replace(/[\r\n]+/g, " "));
 }
 
 function environmentFile(env, existingKeys = []) {
@@ -161,6 +171,9 @@ function environmentFile(env, existingKeys = []) {
     "SIGNIFY_BOOTSTRAP_EMAIL",
     "SIGNIFY_APPLICATION_OWNER_EMAIL",
     "SIGNIFY_SETUP_TOKEN",
+    "SIGNIFY_LICENSE_PUBLIC_KEY",
+    "SIGNIFY_LICENSE_AUTHORITY_URL",
+    "SIGNIFY_LICENSE_REFRESH_HOURS",
     "SIGNIFY_COMPANY_NAME",
     "SIGNIFY_PUBLIC_URL",
     "SIGNIFY_ASSET_BASE_URL",
@@ -186,7 +199,7 @@ function environmentFile(env, existingKeys = []) {
         /^(SIGNIFY_|SIGNATURE_|MICROSOFT_|AZURE_|STRIPE_|S3_)/.test(key),
     ),
   ];
-  return `${keys.map((key) => `${key}=${environmentValue(env[key] || "")}`).join("\n")}\n`;
+  return `${keys.map((key) => `${key}=${environmentValue(env[key] || "", key)}`).join("\n")}\n`;
 }
 
 function validateWritableDirectory(directory, label) {

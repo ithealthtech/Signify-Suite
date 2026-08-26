@@ -5,11 +5,16 @@ const fs = require("node:fs");
 const os = require("node:os");
 const path = require("node:path");
 const { spawnSync } = require("node:child_process");
+const { generateKeyPairSync } = require("node:crypto");
 const { parseEnv } = require("node:util");
 const { DatabaseSync } = require("node:sqlite");
 const { detectEnvironment, validateNodeVersion } = require("./setup.cjs");
 
 const root = path.join(__dirname, ".."),
+  licensePublicKey = generateKeyPairSync("ed25519").publicKey.export({
+    type: "spki",
+    format: "pem",
+  }),
   temporary = fs.mkdtempSync(path.join(os.tmpdir(), "signify-setup-test-")),
   environmentFile = path.join(temporary, ".env.local"),
   databasePath = path.join(temporary, "data", "signify.db"),
@@ -31,6 +36,9 @@ const root = path.join(__dirname, ".."),
     SIGNIFY_APPLICATION_OWNER_EMAIL: "owner@setup.example.com",
     SIGNIFY_BOOTSTRAP_PASSWORD: "InstallerRegression123!",
     SIGNIFY_CREDENTIAL_ENCRYPTION_KEY: "",
+    SIGNIFY_LICENSE_PUBLIC_KEY: licensePublicKey,
+    SIGNIFY_LICENSE_AUTHORITY_URL: "https://licenses.setup.example.com",
+    SIGNIFY_LICENSE_REFRESH_HOURS: "6",
   };
 
 function run(extraEnvironment = {}, extraArguments = []) {
@@ -120,6 +128,12 @@ try {
   assert.equal(configured.SIGNIFY_MEDIA_STORAGE, "local");
   assert.equal(configured.SIGNIFY_TENANT_DELETION_GRACE_DAYS, "7");
   assert.equal(configured.SIGNIFY_BOOTSTRAP_PASSWORD || "", "");
+  assert.equal(configured.SIGNIFY_LICENSE_PUBLIC_KEY, licensePublicKey);
+  assert.equal(
+    configured.SIGNIFY_LICENSE_AUTHORITY_URL,
+    baseEnvironment.SIGNIFY_LICENSE_AUTHORITY_URL,
+  );
+  assert.equal(configured.SIGNIFY_LICENSE_REFRESH_HOURS, "6");
   assert.equal(
     configured.SIGNIFY_APPLICATION_OWNER_EMAIL,
     baseEnvironment.SIGNIFY_APPLICATION_OWNER_EMAIL,

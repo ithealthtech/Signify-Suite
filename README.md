@@ -21,8 +21,10 @@ Signify has three explicit access tiers:
    Microsoft 365 consent for one tenant.
 3. **End User** creates and manages signatures only in assigned tenants.
 
-Tenant Admin access never grants Application Owner authority. Stripe controls
-are available only in the Application Owner control plane.
+Tenant Admin access never grants Application Owner authority. Stripe provider
+credentials and integration controls are available only in the Application
+Owner control plane. An expired tenant admin can open Stripe-hosted Checkout to
+activate a subscription without receiving access to Stripe configuration.
 
 ## Requirements
 
@@ -367,6 +369,9 @@ can be configured later from **Application > Integrations**.
 | `SIGNIFY_MEDIA_BASE_URL`             | Usually the same value as `SIGNIFY_PUBLIC_URL`           | Yes               |
 | `SIGNIFY_APPLICATION_OWNER_EMAIL`    | Email for the first Application Owner                    | Yes               |
 | `SIGNIFY_CREDENTIAL_ENCRYPTION_KEY`  | One generated 32-byte key; keep it permanently           | Yes               |
+| `SIGNIFY_LICENSE_PUBLIC_KEY`         | Publisher-provided Ed25519 public verification key       | Commercial builds |
+| `SIGNIFY_LICENSE_AUTHORITY_URL`      | Publisher-provided HTTPS licensing service URL           | Commercial builds |
+| `SIGNIFY_RELEASE_SIGNING_PUBLIC_KEY` | Publisher release verification public key                | Managed updates   |
 | `SIGNIFY_JOB_MODE`                   | `embedded`, or `external` with a supervised worker       | Yes               |
 | `SIGNIFY_UPDATE_GITHUB_TOKEN`        | Fine-grained read-only token for private release checks  | Private repo only |
 | `SIGNIFY_MEDIA_STORAGE`              | `local` for one host, or `s3` for private object storage | Yes               |
@@ -485,6 +490,32 @@ Stripe, and GitHub are optional and can be connected later from
 Provider credentials entered in the owner UI are encrypted with AES-256-GCM
 before storage and are never returned by the API or written to audit metadata.
 
+### Community and commercial licensing
+
+An installation without a commercial key runs as **Community Edition** and can
+manage its initial workspace with up to 10 users and managed signatures. The
+Application page becomes a single-workspace settings view and does not expose
+multi-tenant creation. Application Owners use **Application > Licensing**
+to copy the installation ID, enter a commercial license key, inspect tenant
+capacity and expiration, validate the current entitlement, or return to
+Community Edition. A key can also be entered during first-time browser setup;
+customers do not need a server console for activation.
+
+Commercial keys are Ed25519-signed entitlements bound to one installation ID.
+Tenant and per-tenant user capacity are enforced by the server for Application
+Owner tenant creation, public workspace registration, invitations, direct user
+creation, invitation acceptance, and Microsoft 365 directory sync. Pending
+invitations reserve user capacity. Expired licenses retain data and exports but
+revert creation capacity to the Community limits after the signed grace period.
+
+Official builds embed the Signify-controlled public key and HTTPS authority URL.
+The owner UI exchanges activation keys, refreshes rights immediately, reports
+offline grace and revocation state, and automatically refreshes every 12 hours.
+Central Stripe product mappings control tenant capacity and features without
+shipping Stripe credentials or the license private key to a customer host. See
+[`docs/LICENSING.md`](docs/LICENSING.md) for the edition rights, authority
+deployment, key boundary, and signed-release process.
+
 ### Microsoft 365
 
 Register one Entra application for accounts in any organizational directory.
@@ -505,6 +536,21 @@ Required Microsoft Graph permissions:
 Application permissions require tenant-wide administrator consent. Each
 customer Tenant Admin completes consent for their own Microsoft tenant from
 Workspace settings.
+
+#### Centrally managed Outlook signatures
+
+Tenant Admins can enable the Outlook add-in in **Workspace > Settings**, then
+download `signify-outlook.xml`. In Microsoft 365 Admin Center, open **Settings >
+Integrated apps > Upload custom apps**, upload the manifest, and assign it to
+the tenant's users or groups. The add-in retrieves the current tenant-scoped
+signature whenever a new message is composed. Inactive users, expired trials,
+and past-due or canceled subscriptions receive an empty signature; delivery
+resumes automatically after access is restored.
+
+The manifest contains a narrow, read-only deployment credential. Rotating the
+deployment key immediately invalidates the old manifest, so deploy the newly
+downloaded manifest after rotation. Production add-in deployment requires the
+configured public application URL to use HTTPS and remain reachable by Outlook.
 
 ### Stripe
 

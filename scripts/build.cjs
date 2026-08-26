@@ -1,7 +1,7 @@
 "use strict";
 const fs = require("node:fs");
 const path = require("node:path");
-const { createHash } = require("node:crypto");
+const { createHash, createPublicKey } = require("node:crypto");
 const { execFileSync } = require("node:child_process");
 
 const root = path.join(__dirname, ".."),
@@ -49,6 +49,7 @@ const root = path.join(__dirname, ".."),
     "docs/SUBPROCESSORS.md",
     "docs/TERMS.md",
     "docs/SAAS-READINESS.md",
+    "docs/LICENSING.md",
     "docs/sbom.cdx.json",
     "signature.html",
     "signature.css",
@@ -61,9 +62,12 @@ const root = path.join(__dirname, ".."),
     "platform.js",
     "signify-shared.js",
     "signify-shared.css",
+    "signify-app.css",
     "setup.html",
     "setup.css",
     "setup.js",
+    "outlook-addin.html",
+    "outlook-addin.js",
     "server",
     ...publicFiles,
     "scripts/backup.cjs",
@@ -200,6 +204,35 @@ fs.writeFileSync(
   path.join(destination, "manifest.json"),
   `${JSON.stringify(manifest, null, 2)}\n`,
 );
+
+const licensePublicKey = String(process.env.SIGNIFY_LICENSE_PUBLIC_KEY || "")
+    .replaceAll("\\n", "\n")
+    .trim(),
+  licenseAuthorityUrl = String(process.env.SIGNIFY_LICENSE_AUTHORITY_URL || "")
+    .trim()
+    .replace(/\/+$/, "");
+if (licensePublicKey || licenseAuthorityUrl) {
+  if (!licensePublicKey || !licenseAuthorityUrl)
+    throw new Error(
+      "Official licensing configuration requires both SIGNIFY_LICENSE_PUBLIC_KEY and SIGNIFY_LICENSE_AUTHORITY_URL.",
+    );
+  const key = createPublicKey(licensePublicKey),
+    authority = new URL(licenseAuthorityUrl);
+  if (key.asymmetricKeyType !== "ed25519")
+    throw new Error("SIGNIFY_LICENSE_PUBLIC_KEY must be Ed25519.");
+  if (authority.protocol !== "https:")
+    throw new Error(
+      "SIGNIFY_LICENSE_AUTHORITY_URL must use HTTPS in a release.",
+    );
+  fs.writeFileSync(
+    path.join(destination, "server", "license-build.json"),
+    `${JSON.stringify(
+      { publicKey: licensePublicKey, authorityUrl: licenseAuthorityUrl },
+      null,
+      2,
+    )}\n`,
+  );
+}
 
 const checksums = releaseFiles(destination)
   .filter((file) => path.basename(file) !== "checksums.txt")

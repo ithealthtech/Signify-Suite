@@ -98,7 +98,9 @@ async function rawRequest(baseUrl, pathname, body, headers = {}) {
 
 async function main() {
   const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "signify-creator-")),
-    databasePath = path.join(tempDir, "smoke.db");
+    databasePath = path.join(tempDir, "smoke.db"),
+    { privateKey: licensePrivateKey, publicKey: licensePublicKey } =
+      generateKeyPairSync("ed25519");
   const env = {
     ...process.env,
     DATABASE_PATH: databasePath,
@@ -112,6 +114,10 @@ async function main() {
     STRIPE_PRICE_STARTER: "price_starter",
     STRIPE_PRICE_TEAM: "price_team",
     SIGNIFY_CREDENTIAL_ENCRYPTION_KEY: Buffer.alloc(32, 7).toString("base64"),
+    SIGNIFY_LICENSE_PUBLIC_KEY: licensePublicKey.export({
+      type: "spki",
+      format: "pem",
+    }),
     MICROSOFT_CLIENT_ID: "client-smoke",
     MICROSOFT_CLIENT_SECRET: "secret-smoke",
     MICROSOFT_TENANT_ID: "11111111-1111-4111-8111-111111111111",
@@ -257,8 +263,9 @@ async function main() {
       },
     ],
     stripeFactory = (key) =>
-      key === "sk_test_setup"
+      key === "sk_test_setup" || key === "sk_test_smoke"
         ? {
+            webhooks: new Stripe(key).webhooks,
             accounts: {
               retrieve: async () => ({
                 id: "acct_setup",
@@ -321,8 +328,24 @@ async function main() {
             },
           }
         : new Stripe(key);
-  let application = createApplication({ env, fetchImpl, stripeFactory }),
-    server = http.createServer(application.handler);
+  let application = createApplication({ env, fetchImpl, stripeFactory });
+  const licensePayload = Buffer.from(
+    JSON.stringify({
+      licenseId: "smoke-enterprise-license",
+      product: "signify-creator",
+      installationId: application.licensing.installationId,
+      customerName: "Smoke Enterprise",
+      edition: "enterprise",
+      features: ["multi_tenant", "tenant_billing", "advanced_reporting"],
+      maxTenants: 100,
+      maxUsersPerTenant: 1000,
+      issuedAt: "2026-01-01T00:00:00.000Z",
+      expiresAt: "2030-01-01T00:00:00.000Z",
+      graceEndsAt: "2030-02-01T00:00:00.000Z",
+    }),
+  );
+  const commercialLicenseKey = `SIG1.${licensePayload.toString("base64url")}.${sign(null, licensePayload, licensePrivateKey).toString("base64url")}`;
+  let server = http.createServer(application.handler);
   try {
     const baseUrl = await listen(server),
       adminJar = new Map(),
@@ -435,6 +458,26 @@ async function main() {
       !escapedMedia.includes('" onerror="') && escapedMedia.includes("&quot;"),
       "signature media attributes were not escaped",
     );
+    const bannerCard = buildSignatureHtml("bannerCard", {
+      f: {
+        name: "Tyler Gifol",
+        jobTitle: "President",
+        company: "IT HealthTech",
+        phone: "(732) 456-6787",
+        email: "tyler@example.com",
+        social: {},
+      },
+      colors: { accent: "#3158c7" },
+      bannerUrl: "https://assets.example.com/banner.png",
+    });
+    assert(
+      bannerCard.includes('width="446"') &&
+        bannerCard.includes('bgcolor="#c8cdd8"') &&
+        bannerCard.includes("box-shadow:") &&
+        bannerCard.match(/banner\.png/g)?.length === 1 &&
+        bannerCard.includes(">TG<"),
+      "Banner Card did not preserve its Outlook-safe shadow and identity layout",
+    );
     result = await request(baseUrl, "/signature.html");
     assert(
       result.response.status === 200 &&
@@ -529,9 +572,224 @@ async function main() {
       ownerSessionHours > 3.9 && ownerSessionHours <= 4.01,
       "Application Owner session was not capped at four hours",
     );
+    result = await request(baseUrl, "/api/platform/license", {
+      jar: adminJar,
+    });
+    assert(
+      result.response.status === 200 &&
+        result.body.license.edition === "community" &&
+        result.body.license.maxTenants === 1,
+      "fresh installation did not default to Community Edition",
+    );
+    result = await request(baseUrl, "/api/platform/organizations", {
+      method: "POST",
+      body: {
+        name: "Blocked Community Tenant",
+        adminEmail: "blocked@example.com",
+        reason: "Verify Community tenant limit",
+      },
+      jar: adminJar,
+    });
+    assert(
+      result.response.status === 403 &&
+        result.body.error.code === "LICENSE_TENANT_LIMIT",
+      "Community Edition created a second tenant",
+    );
+    const communityOrganizationId = application.db
+      .prepare("SELECT id FROM organizations ORDER BY created_at LIMIT 1")
+      .get().id;
+    for (const [route, body] of [
+      [
+        `/api/platform/organizations/${communityOrganizationId}/billing/checkout`,
+        { plan: "starter", customerEmail: "billing@example.com" },
+      ],
+      [
+        `/api/platform/organizations/${communityOrganizationId}/status`,
+        { status: "suspended", reason: "Community boundary test" },
+      ],
+      [
+        `/api/platform/organizations/${communityOrganizationId}/support-access`,
+        { minutes: 30, reason: "Community boundary test" },
+      ],
+    ]) {
+      result = await request(baseUrl, route, {
+        method: route.endsWith("/status") ? "PUT" : "POST",
+        body,
+        jar: adminJar,
+      });
+      assert(
+        result.response.status === 403 &&
+          result.body.error.code === "LICENSE_FEATURE_REQUIRED",
+        `Community Edition accessed Enterprise tenant control ${route}`,
+      );
+    }
     application.db
       .prepare("UPDATE organization_subscriptions SET seats=100")
       .run();
+    result = await request(baseUrl, "/api/signature/invitations", {
+      method: "POST",
+      body: {
+        email: "community-reserved@example.com",
+        role: "editor",
+      },
+      jar: adminJar,
+    });
+    assert(
+      result.response.status === 201,
+      "Community invitation could not reserve an available user slot",
+    );
+    result = await request(baseUrl, "/api/signature/users", {
+      method: "POST",
+      body: {
+        displayName: "Community Reserved User",
+        email: "community-reserved@example.com",
+        password: "CommunityReserved123!",
+        role: "editor",
+        status: "active",
+      },
+      jar: adminJar,
+    });
+    assert(
+      result.response.status === 201,
+      "Direct user creation did not consume its existing invitation reservation",
+    );
+    const reservedCommunityUserId = result.body.user.id;
+    result = await request(baseUrl, "/api/signature/admin-config", {
+      jar: adminJar,
+    });
+    assert(
+      result.body.license.used === 2 &&
+        result.body.license.pendingInvitations === 0,
+      "Direct user creation double-counted a pending invitation",
+    );
+    result = await request(
+      baseUrl,
+      `/api/signature/users/${encodeURIComponent(reservedCommunityUserId)}`,
+      { method: "DELETE", body: {}, jar: adminJar },
+    );
+    assert(
+      result.response.status === 200,
+      "Reserved Community user cleanup failed",
+    );
+    const communityCapacityUserIds = [];
+    for (let index = 1; index <= 9; index += 1) {
+      result = await request(baseUrl, "/api/signature/users", {
+        method: "POST",
+        body: {
+          displayName: `Community Capacity ${index}`,
+          email: `community-capacity-${index}@example.com`,
+          password: `CommunityCapacity${index}!`,
+          role: "editor",
+          status: "active",
+        },
+        jar: adminJar,
+      });
+      assert(
+        result.response.status === 201,
+        `Community user ${index} could not be created within capacity`,
+      );
+      communityCapacityUserIds.push(result.body.user.id);
+    }
+    result = await request(baseUrl, "/api/signature/users", {
+      method: "POST",
+      body: {
+        displayName: "Blocked Community User",
+        email: "community-capacity-blocked@example.com",
+        password: "CommunityCapacityBlocked!",
+        role: "editor",
+        status: "active",
+      },
+      jar: adminJar,
+    });
+    assert(
+      result.response.status === 403 &&
+        result.body.error.code === "LICENSE_USER_LIMIT",
+      "Community Edition created an eleventh workspace user",
+    );
+    result = await request(baseUrl, "/api/signature/admin-config", {
+      jar: adminJar,
+    });
+    assert(
+      result.response.status === 200 &&
+        result.body.license.edition === "community" &&
+        result.body.license.used === 10 &&
+        result.body.license.maxUsers === 10 &&
+        result.body.license.remaining === 0 &&
+        result.body.subscription === null,
+      "Community user allowance was not exposed to workspace administrators",
+    );
+    application.db
+      .prepare(
+        "UPDATE organization_subscriptions SET status='past_due' WHERE organization_id=?",
+      )
+      .run(communityOrganizationId);
+    result = await request(baseUrl, "/api/signature/subscription", {
+      jar: adminJar,
+    });
+    assert(
+      result.response.status === 200 &&
+        result.body.access === true &&
+        result.body.subscription === null &&
+        result.body.canManageBilling === false,
+      "Community workspace access incorrectly depended on tenant billing",
+    );
+    result = await request(baseUrl, "/api/signature/users", { jar: adminJar });
+    assert(
+      result.response.status === 200,
+      "A stale tenant subscription locked a Community workspace",
+    );
+    application.db
+      .prepare(
+        "UPDATE organization_subscriptions SET status='trialing',trial_ends_at=strftime('%Y-%m-%dT%H:%M:%fZ','now','+30 days') WHERE organization_id=?",
+      )
+      .run(communityOrganizationId);
+    result = await request(baseUrl, "/api/platform/organizations", {
+      jar: adminJar,
+    });
+    assert(
+      result.response.status === 200 &&
+        result.body.organizations.length === 1 &&
+        result.body.organizations[0].userCapacity.maxUsers === 10,
+      "Community Application page exposed a tenant portfolio or omitted user capacity",
+    );
+    for (const id of communityCapacityUserIds) {
+      result = await request(
+        baseUrl,
+        `/api/signature/users/${encodeURIComponent(id)}`,
+        { method: "DELETE", body: {}, jar: adminJar },
+      );
+      assert(
+        result.response.status === 200,
+        "Community capacity test cleanup failed",
+      );
+    }
+    result = await request(baseUrl, "/api/platform/license", {
+      method: "POST",
+      body: {
+        licenseKey: commercialLicenseKey,
+        reason: "Activate smoke Enterprise entitlement",
+      },
+      jar: adminJar,
+    });
+    assert(
+      result.response.status === 200 &&
+        result.body.license.edition === "enterprise" &&
+        result.body.license.maxTenants === 100 &&
+        result.body.license.maxUsersPerTenant === 1000,
+      "Application Owner could not activate a signed commercial license",
+    );
+    application.db
+      .prepare("UPDATE organization_subscriptions SET seats=100")
+      .run();
+    result = await request(baseUrl, "/api/signature/invitations", {
+      method: "POST",
+      body: { email: "graph.one@example.com", role: "editor" },
+      jar: adminJar,
+    });
+    assert(
+      result.response.status === 201,
+      "Directory user invitation reservation could not be created",
+    );
     result = await request(baseUrl, "/api/signature/directory-sync", {
       method: "POST",
       body: {},
@@ -567,7 +825,12 @@ async function main() {
           .prepare(
             "SELECT COUNT(*) AS count FROM signature_users WHERE email IN ('graph.one@example.com','graph.two@example.com')",
           )
-          .get().count === 2,
+          .get().count === 2 &&
+        application.db
+          .prepare(
+            "SELECT COUNT(*) count FROM organization_invitations WHERE email='graph.one@example.com' AND accepted_at IS NULL AND expires_at>strftime('%Y-%m-%dT%H:%M:%fZ','now')",
+          )
+          .get().count === 0,
       "Microsoft directory pagination or import failed",
     );
     result = await request(baseUrl, "/api/signature/session", {
@@ -694,6 +957,90 @@ async function main() {
         result.body.subscription?.status === "trialing" &&
         !Object.hasOwn(result.body.subscription, "stripeCustomerId"),
       "stable workspaces did not start on the Starter trial",
+    );
+    result = await request(baseUrl, "/api/signature/outlook-addin/enable", {
+      method: "POST",
+      body: {},
+      jar: adminJar,
+    });
+    assert(
+      result.response.status === 201 && result.body.deployment?.enabled,
+      "tenant administrator could not enable managed Outlook signatures",
+    );
+    const addinRow = application.db
+        .prepare(
+          "SELECT * FROM outlook_addin_deployments WHERE organization_id=?",
+        )
+        .get(primaryOrganizationId),
+      addinToken = createCredentialVault(
+        env.SIGNIFY_CREDENTIAL_ENCRYPTION_KEY,
+      ).decrypt(
+        `outlook-addin:${primaryOrganizationId}`,
+        addinRow.encrypted_token,
+      ).token;
+    assert(
+      addinRow.token_hash && !addinRow.encrypted_token.includes(addinToken),
+      "Outlook deployment credential was not encrypted at rest",
+    );
+    result = await request(baseUrl, "/api/outlook-addin/signature", {
+      method: "POST",
+      body: {
+        id: addinRow.deployment_id,
+        token: addinToken,
+        email: "admin@signify.local",
+      },
+      csrf: false,
+    });
+    assert(
+      result.response.status === 200 && result.body.enabled && result.body.html,
+      "Outlook add-in did not deliver an active member signature",
+    );
+    result = await request(baseUrl, "/api/outlook-addin/signature", {
+      method: "POST",
+      body: {
+        id: addinRow.deployment_id,
+        token: addinToken,
+        email: "outside@example.com",
+      },
+      csrf: false,
+    });
+    assert(
+      result.response.status === 200 && result.body.enabled === false,
+      "Outlook add-in exposed a signature outside its tenant",
+    );
+    application.db
+      .prepare(
+        "UPDATE organization_subscriptions SET status='past_due' WHERE organization_id=?",
+      )
+      .run(primaryOrganizationId);
+    result = await request(baseUrl, "/api/outlook-addin/signature", {
+      method: "POST",
+      body: {
+        id: addinRow.deployment_id,
+        token: addinToken,
+        email: "admin@signify.local",
+      },
+      csrf: false,
+    });
+    assert(
+      result.response.status === 200 &&
+        result.body.enabled === false &&
+        result.body.reason === "SUBSCRIPTION_REQUIRED",
+      "Outlook add-in did not clear a past-due tenant signature",
+    );
+    application.db
+      .prepare(
+        "UPDATE organization_subscriptions SET status='trialing',trial_ends_at=strftime('%Y-%m-%dT%H:%M:%fZ','now','+30 days') WHERE organization_id=?",
+      )
+      .run(primaryOrganizationId);
+    result = await request(baseUrl, "/api/signature/outlook-addin/manifest", {
+      jar: adminJar,
+    });
+    assert(
+      result.response.status === 200 &&
+        result.text.includes("OnNewMessageCompose") &&
+        result.text.includes("outlook-addin/runtime/"),
+      "managed Outlook manifest was not generated for central deployment",
     );
     result = await request(baseUrl, "/auth/microsoft/admin-consent", {
       jar: editorJar,
@@ -1392,9 +1739,46 @@ async function main() {
     );
     application.db
       .prepare(
-        "UPDATE organization_subscriptions SET status='canceled' WHERE organization_id=?",
+        "UPDATE organization_subscriptions SET status='trialing',trial_ends_at=strftime('%Y-%m-%dT%H:%M:%fZ','now','-1 minute') WHERE organization_id=?",
       )
       .run(primaryOrganizationId);
+    result = await request(baseUrl, "/api/signature/users", {
+      jar: adminJar,
+    });
+    assert(
+      result.response.status === 402 &&
+        result.body.error.code === "SUBSCRIPTION_REQUIRED",
+      "canceled subscription retained editor read access",
+    );
+    result = await request(baseUrl, "/api/signature/subscription", {
+      jar: adminJar,
+    });
+    assert(
+      result.response.status === 200 &&
+        result.body.access === false &&
+        result.body.trialExpired === true &&
+        result.body.canManageBilling === true,
+      "expired tenant could not read its billing entitlement",
+    );
+    result = await request(baseUrl, "/api/signature/billing/checkout", {
+      method: "POST",
+      body: { plan: "team" },
+      jar: editorJar,
+    });
+    assert(
+      result.response.status === 403,
+      "non-admin tenant member could launch subscription checkout",
+    );
+    result = await request(baseUrl, "/api/signature/billing/checkout", {
+      method: "POST",
+      body: { plan: "team" },
+      jar: adminJar,
+    });
+    assert(
+      result.response.status === 201 &&
+        result.body.url === "https://checkout.stripe.test/cs_setup_test",
+      "tenant administrator could not launch hosted checkout",
+    );
     result = await request(baseUrl, "/api/signature/campaigns", {
       method: "POST",
       body: {
@@ -1739,15 +2123,6 @@ async function main() {
     assert(
       result.response.status === 200,
       "Application Owner could not restore a tenant",
-    );
-    result = await request(baseUrl, "/api/signature/billing/checkout", {
-      method: "POST",
-      body: { plan: "team" },
-      jar: adminJar,
-    });
-    assert(
-      result.response.status === 405,
-      "tenant administrator still has a Stripe checkout endpoint",
     );
     result = await request(baseUrl, "/api/platform/audit", { jar: adminJar });
     assert(

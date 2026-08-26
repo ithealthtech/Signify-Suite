@@ -1,4 +1,5 @@
 "use strict";
+const fs = require("node:fs");
 const path = require("node:path");
 const { decodeKey } = require("./credential-vault.cjs");
 
@@ -24,14 +25,35 @@ function validEmail(value) {
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(value || ""));
 }
 
+function bundledLicenseConfig(baseDir) {
+  const file = path.join(baseDir, "server", "license-build.json");
+  if (!fs.existsSync(file)) return {};
+  try {
+    const value = JSON.parse(fs.readFileSync(file, "utf8"));
+    return value && typeof value === "object" && !Array.isArray(value)
+      ? value
+      : {};
+  } catch {
+    throw new Error("server/license-build.json is invalid.");
+  }
+}
+
 function loadConfig(env = process.env, baseDir = path.join(__dirname, "..")) {
-  const production = env.NODE_ENV === "production";
+  const production = env.NODE_ENV === "production",
+    bundledLicense = bundledLicenseConfig(baseDir);
   const port = Number(env.PORT || 4173);
   if (!Number.isInteger(port) || port < 1 || port > 65535)
     throw new Error("PORT must be an integer from 1 to 65535.");
   const sessionHours = Number(env.SIGNATURE_SESSION_HOURS || 12);
   if (!Number.isFinite(sessionHours) || sessionHours < 1 || sessionHours > 168)
     throw new Error("SIGNATURE_SESSION_HOURS must be from 1 to 168.");
+  const licenseRefreshHours = Number(env.SIGNIFY_LICENSE_REFRESH_HOURS || 12);
+  if (
+    !Number.isFinite(licenseRefreshHours) ||
+    licenseRefreshHours < 1 ||
+    licenseRefreshHours > 168
+  )
+    throw new Error("SIGNIFY_LICENSE_REFRESH_HOURS must be from 1 to 168.");
   const workerHeartbeatSeconds = Number(
     env.SIGNIFY_WORKER_HEARTBEAT_SECONDS || 10,
   );
@@ -360,6 +382,16 @@ function loadConfig(env = process.env, baseDir = path.join(__dirname, "..")) {
       env.SIGNIFY_UPDATE_REPOSITORY || "ithealthtech/Signify-Suite",
     ).trim(),
     updateGithubToken: String(env.SIGNIFY_UPDATE_GITHUB_TOKEN || "").trim(),
+    licensePublicKey: String(
+      env.SIGNIFY_LICENSE_PUBLIC_KEY || bundledLicense.publicKey || "",
+    ).trim(),
+    licenseAuthorityUrl: httpUrl(
+      String(
+        env.SIGNIFY_LICENSE_AUTHORITY_URL || bundledLicense.authorityUrl || "",
+      ).trim(),
+      "SIGNIFY_LICENSE_AUTHORITY_URL",
+    ),
+    licenseRefreshIntervalMs: licenseRefreshHours * 60 * 60 * 1000,
     setup: { token: setupToken },
     signature: {
       sessionHours,

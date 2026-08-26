@@ -83,6 +83,13 @@ async function loadStatus() {
     const form = $("#installerForm");
     form.elements.companyName.value = status.companyName || "";
     form.elements.publicUrl.value = status.publicUrl || location.origin;
+    const licenseInput = form.elements.licenseKey;
+    licenseInput.disabled = !status.license.verificationConfigured;
+    $("#setupLicenseNote").textContent = status.license.verificationConfigured
+      ? status.license.authorityConfigured
+        ? `Optional. Enter the activation key supplied with your subscription. It will be bound to installation ${status.license.installationId}.`
+        : `Optional. This signed key must be issued for installation ${status.license.installationId}.`
+      : "Community Edition will be enabled. Commercial license verification is not configured in this build.";
     showOnly("installerForm");
     setStep(1);
   } catch (error) {

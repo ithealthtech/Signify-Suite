@@ -103,7 +103,30 @@ checks and never returns either secret. `POST /api/setup/install` is rate
 limited, requires the one-time token, and is disabled permanently once the
 database contains an owner or installation-completion record.
 
-## 5. Microsoft 365
+## 5. Installation licensing
+
+Unlicensed installations run as Community Edition with one tenant. Customers
+activate commercial capacity in **Application > Licensing** or during the
+first-time browser installer. Tenant creation is enforced server-side and does
+not depend on hidden UI controls.
+
+Commercial distributions set `SIGNIFY_LICENSE_PUBLIC_KEY` to the PEM-encoded
+Ed25519 public verification key controlled by the software publisher. Newlines
+may be represented as `\n` in hosting configuration. This public key is not a
+secret, but customers should not need to configure it in an official release.
+The matching private key must remain in the separate creator-controlled
+authority and must never be deployed with Signify. Official builds also embed
+`SIGNIFY_LICENSE_AUTHORITY_URL`; the owner UI handles activation and refresh.
+The publisher-controlled authority is distributed as a separate private package
+and must never be copied into this repository or a customer release. Central
+Stripe mappings, release signing, backup requirements, and the full trust
+boundary are documented in `docs/LICENSING.md`.
+
+Removing or expiring a license does not delete tenants or user data. Once the
+signed grace period ends, Community tenant-creation limits apply. Backups,
+exports, and license activation remain available for recovery.
+
+## 6. Microsoft 365
 
 Register one Entra application with **Accounts in any organizational directory** enabled. Set `MICROSOFT_CLIENT_ID` and `MICROSOFT_CLIENT_SECRET`, then configure both web redirect URIs:
 
@@ -120,7 +143,22 @@ After consent, the Tenant Admin validates and saves a sender mailbox in Workspac
 
 Directory sync follows Microsoft Graph pagination, imports licensed users up to the available seat count, and commits the local import atomically.
 
-## 6. Stripe
+### Managed Outlook add-in
+
+After the public HTTPS URL is configured, a Tenant Admin enables the Outlook
+add-in from Workspace settings and downloads the generated manifest. Upload the
+manifest in Microsoft 365 Admin Center under **Settings > Integrated apps >
+Upload custom apps**, then assign it to users or groups. Outlook requirement set
+1.10 or newer is required for event-based compose activation.
+
+The deployment credential is tenant-scoped, encrypted at rest, rate limited,
+and read-only. Rotate it if a manifest is exposed; the replacement manifest must
+then be redeployed. New compose windows fetch current signature HTML. The API
+returns an empty signature for inactive members and inactive subscriptions, and
+automatically resumes delivery after renewal. Previously sent messages and
+manually copied static signatures cannot be remotely altered.
+
+## 7. Stripe
 
 Set `STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET`, and the applicable `STRIPE_PRICE_STARTER`, `STRIPE_PRICE_TEAM`, and `STRIPE_PRICE_BUSINESS` values. Stripe is a control-plane integration: only an Application Owner can create checkout or change stored subscription data. Tenant Admins and End Users have read-only plan/seat visibility and no Stripe API route. Register this webhook URL:
 
@@ -173,13 +211,13 @@ provider access without exposing secrets:
 npm run integrations:verify
 ```
 
-## 7. Backups and monitoring
+## 8. Backups and monitoring
 
 Schedule `npm run backup` at least daily and copy backups to separate durable storage. Test restoration by starting a release against a copied backup. Monitor `GET /api/health`, process exits, HTTP 5xx logs, failed directory sync runs, and Stripe webhook delivery failures.
 
 `BACKUP_DIR` is an operator-controlled filesystem location. The workspace backup-location field is informational and does not override the server environment variable.
 
-## 8. Start
+## 9. Start
 
 ```powershell
 node --env-file=.env.local server.cjs
@@ -187,11 +225,23 @@ node --env-file=.env.local server.cjs
 
 Run the process under Windows Service Manager, NSSM, systemd, Docker, or another supervisor that restarts failed processes and captures stdout/stderr JSON logs.
 
-## 9. Immutable staging and production delivery
+## 10. Immutable staging and production delivery
 
 The release workflow deploys a published artifact to the GitHub `staging`
-environment first. Production cannot start until staging has completed. Create
-both protected GitHub environments and configure these environment secrets:
+environment first. Production cannot start until staging has completed.
+
+Repository variables used to build and verify official artifacts:
+
+- `SIGNIFY_LICENSE_PUBLIC_KEY` and `SIGNIFY_LICENSE_AUTHORITY_URL`
+- `SIGNIFY_RELEASE_SIGNING_PUBLIC_KEY`
+- `SIGNIFY_RELEASE_SIGNING_KEY_ID`
+
+Store `SIGNIFY_RELEASE_SIGNING_PRIVATE_KEY` as a repository secret. It is used
+only by the isolated `sign-release` job and must not be copied into the artifact
+or either deployment environment.
+
+Create both protected GitHub environments and configure these environment
+secrets:
 
 - `SIGNIFY_SSH_HOST` and `SIGNIFY_SSH_USER`
 - `SIGNIFY_SSH_PRIVATE_KEY`, limited to the deployment account
@@ -228,6 +278,8 @@ SIGNIFY_RELEASES_DIR=/opt/signify/releases
 SIGNIFY_CURRENT_LINK=/opt/signify/current
 SIGNIFY_DEPLOY_RESTART_SCRIPT=/opt/signify/bin/restart
 SIGNIFY_DEPLOY_HEALTH_URL=https://signify.example.com/api/ready
+SIGNIFY_RELEASE_SIGNING_PUBLIC_KEY=<publisher Ed25519 public key>
+SIGNIFY_DEPLOY_REQUIRE_SIGNATURE=true
 DATABASE_PATH=/opt/signify/shared/data/signify-creator.db
 ```
 

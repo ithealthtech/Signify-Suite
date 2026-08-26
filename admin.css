@@ -612,7 +612,8 @@ td {
   margin: 8px 0 3px;
   font-size: 27px;
 }
-.billing-panel > strong {
+.billing-panel > strong,
+#subscriptionSummary > strong {
   display: inline-flex;
   border-radius: 10px;
   background: #e7f5ef;
@@ -638,8 +639,37 @@ td {
   height: 100%;
   background: var(--accent);
 }
-.billing-panel > small {
+.billing-panel > small,
+#subscriptionSummary > small {
   color: var(--muted);
+}
+#subscriptionSummary[hidden] {
+  display: none;
+}
+.billing-panel hr {
+  margin: 22px 0;
+}
+.integration-field {
+  display: grid;
+  gap: 7px;
+  margin-top: 18px;
+  color: #565c66;
+  font-size: 11px;
+  font-weight: 700;
+}
+.integration-field input {
+  width: 100%;
+  min-width: 0;
+  height: 42px;
+  border: 1.5px solid var(--line);
+  border-radius: 8px;
+  background: #fff;
+  padding: 0 11px;
+  outline: none;
+}
+.integration-field input:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px #eeeeff;
 }
 .campaign-list,
 .mapping-list,
@@ -1316,6 +1346,10 @@ dialog::backdrop {
   display: grid;
   gap: 8px;
   margin-top: 20px;
+}
+.billing-actions .button {
+  width: 100%;
+  min-height: 42px;
 }
 .billing-actions select {
   height: 36px;

@@ -3,6 +3,7 @@
 const assert = require("node:assert/strict");
 const fs = require("node:fs");
 const path = require("node:path");
+const { execFileSync } = require("node:child_process");
 const { scanText } = require("../server/secret-scanner.cjs");
 
 assert.equal(scanText("ordinary source text").length, 0);
@@ -32,6 +33,25 @@ for (const required of [
     `${required} is missing`,
   );
 
+const repositoryFiles = execFileSync(
+    "git",
+    ["ls-files", "--cached", "--others", "--exclude-standard", "-z"],
+    { cwd: path.join(__dirname, "..") },
+  )
+    .toString("utf8")
+    .split("\0")
+    .filter(Boolean),
+  publisherOnlyFiles = repositoryFiles.filter((file) =>
+    /^(?:authority\/|authority-server\.cjs$|authority\.Dockerfile$|\.env\.authority|scripts\/authority-(?:api-)?test\.cjs$|Signify-License-Authority\/)/.test(
+      file.replaceAll("\\", "/"),
+    ),
+  );
+assert.deepEqual(
+  publisherOnlyFiles,
+  [],
+  `Publisher-only license authority files must not enter the public repository: ${publisherOnlyFiles.join(", ")}`,
+);
+
 const codeqlWorkflow = fs.readFileSync(
   path.join(__dirname, "..", ".github", "workflows", "codeql.yml"),
   "utf8",
@@ -48,7 +68,7 @@ assert.match(
 );
 assert.match(
   codeqlWorkflow,
-  /^ {8}uses: actions\/upload-artifact@v6$/m,
+  /^ {8}uses: actions\/upload-artifact@v7$/m,
   "CodeQL SARIF must be retained as a workflow artifact",
 );
 

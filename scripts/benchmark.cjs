@@ -143,6 +143,7 @@ async function main() {
       "platform.css",
       "signature.css",
       "signify-shared.css",
+      "signify-app.css",
       "scripts/smoke-test.cjs",
       "scripts/unit-test.cjs",
     ]),

@@ -375,6 +375,7 @@ function createSignaturePortal({
   packageVersion = "unknown",
   updateRepository = "",
   updateGithubToken = "",
+  licensing,
 }) {
   seed(db, signature);
   const credentialVault = createCredentialVault(
@@ -470,6 +471,67 @@ function createSignaturePortal({
           repository: updateRepository,
           source: updateGithubToken ? "environment" : "none",
         };
+  }
+
+  function outlookDeployment(organizationId) {
+    return db
+      .prepare(
+        "SELECT * FROM outlook_addin_deployments WHERE organization_id=?",
+      )
+      .get(organizationId);
+  }
+  function outlookDeploymentDto(row) {
+    return row
+      ? {
+          enabled: Boolean(row.enabled),
+          deploymentId: row.deployment_id,
+          lastUsedAt: row.last_used_at,
+          createdAt: row.created_at,
+          updatedAt: row.updated_at,
+        }
+      : null;
+  }
+  function outlookManifest(req, user, row) {
+    const base = publicBase(req, user),
+      token = credentialVault.decrypt(
+        `outlook-addin:${user.organizationId}`,
+        row.encrypted_token,
+      ).token,
+      runtime = `${base}/outlook-addin.html?deployment=${encodeURIComponent(row.deployment_id)}&token=${encodeURIComponent(token)}`,
+      xml = (value) =>
+        String(value)
+          .replaceAll("&", "&amp;")
+          .replaceAll('"', "&quot;")
+          .replaceAll("<", "&lt;")
+          .replaceAll(">", "&gt;");
+    return `<?xml version="1.0" encoding="UTF-8"?>
+<OfficeApp xmlns="http://schemas.microsoft.com/office/appforoffice/1.1" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:bt="http://schemas.microsoft.com/office/officeappbasictypes/1.0" xmlns:mailappor="http://schemas.microsoft.com/office/mailappversionoverrides/1.0" xsi:type="MailApp">
+  <Id>${xml(row.deployment_id)}</Id>
+  <Version>1.0.0.0</Version>
+  <ProviderName>Signify</ProviderName>
+  <DefaultLocale>en-US</DefaultLocale>
+  <DisplayName DefaultValue="Signify Managed Signatures"/>
+  <Description DefaultValue="Applies the current authorized Signify signature when a message is composed."/>
+  <IconUrl DefaultValue="${xml(`${base}/ithtfavicon.png`)}"/>
+  <HighResolutionIconUrl DefaultValue="${xml(`${base}/ithtfavicon.png`)}"/>
+  <SupportUrl DefaultValue="${xml(base)}"/>
+  <AppDomains><AppDomain>${xml(base)}</AppDomain></AppDomains>
+  <Hosts><Host Name="Mailbox"/></Hosts>
+  <Requirements><Sets><Set Name="Mailbox" MinVersion="1.10"/></Sets></Requirements>
+  <FormSettings>
+    <Form xsi:type="ItemRead"><DesktopSettings><SourceLocation DefaultValue="${xml(runtime)}"/><RequestedHeight>250</RequestedHeight></DesktopSettings></Form>
+  </FormSettings>
+  <Permissions>ReadWriteMailbox</Permissions>
+  <Rule xsi:type="RuleCollection" Mode="Or"><Rule xsi:type="ItemIs" ItemType="Message" FormType="Read"/></Rule>
+  <DisableEntityHighlighting>false</DisableEntityHighlighting>
+  <VersionOverrides xmlns="http://schemas.microsoft.com/office/mailappversionoverrides" xsi:type="VersionOverridesV1_0">
+    <VersionOverrides xmlns="http://schemas.microsoft.com/office/mailappversionoverrides/1.1" xsi:type="VersionOverridesV1_1">
+      <Requirements><bt:Sets DefaultMinVersion="1.10"><bt:Set Name="Mailbox"/></bt:Sets></Requirements>
+      <Hosts><Host xsi:type="MailHost"><Runtimes><Runtime resid="Runtime.Url"><Override type="javascript" resid="Runtime.Js"/></Runtime></Runtimes><DesktopFormFactor><FunctionFile resid="Runtime.Url"/><ExtensionPoint xsi:type="LaunchEvent"><LaunchEvents><LaunchEvent Type="OnNewMessageCompose" FunctionName="onMessageComposeHandler"/></LaunchEvents><SourceLocation resid="Runtime.Url"/></ExtensionPoint></DesktopFormFactor></Host></Hosts>
+      <Resources><bt:Urls><bt:Url id="Runtime.Url" DefaultValue="${xml(runtime)}"/><bt:Url id="Runtime.Js" DefaultValue="${xml(`${base}/outlook-addin/runtime/${row.deployment_id}.js?token=${encodeURIComponent(token)}`)}"/></bt:Urls></Resources>
+    </VersionOverrides>
+  </VersionOverrides>
+</OfficeApp>`;
   }
   function applicationSetting(key, fallback = "") {
     return (
@@ -781,6 +843,7 @@ function createSignaturePortal({
         pathname,
       ) ||
       pathname === "/api/platform/support-access" ||
+      pathname === "/api/platform/license" ||
       pathname === "/api/platform/billing/reconcile" ||
       (req.method === "DELETE" &&
         /^\/api\/platform\/integrations\/(?:microsoft|stripe)$/.test(
@@ -1012,6 +1075,7 @@ function createSignaturePortal({
     return { beta: 10, starter: 10, team: 50, business: 250 }[plan] || 10;
   }
   function subscriptionAccess(user) {
+    if (licensing.summary().edition === "community") return true;
     const row = db
       .prepare(
         "SELECT * FROM organization_subscriptions WHERE organization_id=?",
@@ -1023,6 +1087,34 @@ function createSignaturePortal({
       row.status === "trialing" &&
       (!row.trial_ends_at || Date.parse(row.trial_ends_at) > Date.now())
     );
+  }
+  function subscriptionEntitlement(user) {
+    if (licensing.summary().edition === "community")
+      return {
+        subscription: null,
+        access: true,
+        trialExpired: false,
+        canManageBilling: false,
+        checkoutAvailable: false,
+      };
+    const row = db
+      .prepare(
+        "SELECT * FROM organization_subscriptions WHERE organization_id=?",
+      )
+      .get(user.organizationId);
+    const subscription = subscriptionDto(row);
+    const access = subscriptionAccess(user);
+    return {
+      subscription,
+      access,
+      trialExpired: Boolean(
+        row?.status === "trialing" &&
+        row.trial_ends_at &&
+        Date.parse(row.trial_ends_at) <= Date.now(),
+      ),
+      canManageBilling: user.role === "admin",
+      checkoutAvailable: billingAvailable(),
+    };
   }
   function requireSubscription(user) {
     if (!subscriptionAccess(user)) {
@@ -1789,6 +1881,26 @@ function createSignaturePortal({
           ),
           existingMembership = memberById(user.organizationId, id);
         if (!existingMembership && added >= availableSeats) continue;
+        const activeInvitation = !existingMembership
+          ? db
+              .prepare(
+                `SELECT id FROM organization_invitations
+                 WHERE organization_id=? AND lower(email)=lower(?)
+                   AND accepted_at IS NULL
+                   AND expires_at>strftime('%Y-%m-%dT%H:%M:%fZ','now')`,
+              )
+              .get(user.organizationId, email)
+          : null;
+        if (!existingMembership)
+          try {
+            licensing.requireUserCapacity(
+              user.organizationId,
+              activeInvitation ? 0 : 1,
+            );
+          } catch (error) {
+            if (error.code === "LICENSE_USER_LIMIT") continue;
+            throw error;
+          }
         if (!account)
           db.prepare(
             `INSERT INTO signature_users(id,email,password_hash,display_name,role,status,signature_json,email_verified_at) VALUES (?,?,?,?,'editor','active',?,strftime('%Y-%m-%dT%H:%M:%fZ','now'))`,
@@ -1803,6 +1915,10 @@ function createSignaturePortal({
           db.prepare(
             `INSERT INTO organization_memberships(organization_id,user_id,role,status,signature_json) VALUES (?,?,'editor','active',?)`,
           ).run(user.organizationId, id, JSON.stringify(personSignature));
+          if (activeInvitation)
+            db.prepare(
+              `UPDATE organization_invitations SET accepted_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE id=?`,
+            ).run(activeInvitation.id);
           added += 1;
         }
       }
@@ -1925,6 +2041,98 @@ function createSignaturePortal({
         throw error;
       }
       return json(res, 200, { received: true }, requestId);
+    }
+    const outlookRuntimeMatch = url.pathname.match(
+      /^\/outlook-addin\/runtime\/([0-9a-f-]{36})\.js$/i,
+    );
+    if (outlookRuntimeMatch && req.method === "GET") {
+      const row = db
+          .prepare(
+            "SELECT * FROM outlook_addin_deployments WHERE deployment_id=? AND enabled=1",
+          )
+          .get(outlookRuntimeMatch[1]),
+        token = String(url.searchParams.get("token") || "");
+      if (!row || !token || tokenHash(token) !== row.token_hash)
+        return textResponse(
+          res,
+          404,
+          "",
+          "application/javascript; charset=utf-8",
+        );
+      const source = fs.readFileSync(
+        path.join(__dirname, "..", "outlook-addin.js"),
+        "utf8",
+      );
+      return textResponse(
+        res,
+        200,
+        `globalThis.SIGNIFY_OUTLOOK_DEPLOYMENT=${JSON.stringify({ id: row.deployment_id, token })};\n${source}`,
+        "application/javascript; charset=utf-8",
+        { "Referrer-Policy": "no-referrer" },
+      );
+    }
+    if (
+      url.pathname === "/api/outlook-addin/signature" &&
+      req.method === "POST"
+    ) {
+      const body = await readJsonBody(req, { limit: 8192 }),
+        deploymentId = String(body.id || ""),
+        token = String(body.token || ""),
+        email = String(body.email || "")
+          .trim()
+          .toLowerCase(),
+        deployment = db
+          .prepare(
+            "SELECT * FROM outlook_addin_deployments WHERE deployment_id=? AND enabled=1",
+          )
+          .get(deploymentId);
+      if (
+        !deployment ||
+        !token ||
+        tokenHash(token) !== deployment.token_hash ||
+        !validEmail(email)
+      )
+        return json(
+          res,
+          401,
+          {
+            error: {
+              code: "ADDIN_UNAUTHORIZED",
+              message: "The Outlook deployment is not authorized.",
+            },
+          },
+          requestId,
+        );
+      const member = memberByEmail(deployment.organization_id, email),
+        user = member ? userDto(member) : null;
+      if (!user || user.status !== "active")
+        return json(
+          res,
+          200,
+          { enabled: false, html: "", reason: "MEMBER_INACTIVE" },
+          requestId,
+        );
+      if (!subscriptionAccess(user))
+        return json(
+          res,
+          200,
+          { enabled: false, html: "", reason: "SUBSCRIPTION_REQUIRED" },
+          requestId,
+        );
+      const rendered = await renderSignature(req, user, user.signature);
+      db.prepare(
+        "UPDATE outlook_addin_deployments SET last_used_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE organization_id=?",
+      ).run(user.organizationId);
+      return json(
+        res,
+        200,
+        {
+          enabled: true,
+          html: rendered.html,
+          fingerprint: createHash("sha256").update(rendered.html).digest("hex"),
+        },
+        requestId,
+      );
     }
     if (
       url.pathname === "/auth/microsoft/admin-consent" &&
@@ -2287,6 +2495,10 @@ function createSignaturePortal({
                 )
                 .get(owner.id).count,
             },
+            license: {
+              ...licensing.summary(),
+              tenantCount: counts.organizations || 0,
+            },
           },
           requestId,
           refreshCsrf(owner),
@@ -2305,6 +2517,24 @@ function createSignaturePortal({
           ),
           { status: 403, code: "OWNER_MFA_REQUIRED" },
         );
+      if (
+        req.method !== "GET" &&
+        /^\/api\/platform\/organizations\/[^/]+\/(?:subscription|billing(?:\/|$))/.test(
+          url.pathname,
+        )
+      )
+        licensing.requireFeature("tenant_billing");
+      if (
+        (req.method === "PUT" &&
+          /^\/api\/platform\/organizations\/[^/]+\/status$/.test(
+            url.pathname,
+          )) ||
+        (req.method === "POST" &&
+          /^\/api\/platform\/organizations\/[^/]+\/(?:support-access|deletion)$/.test(
+            url.pathname,
+          ))
+      )
+        licensing.requireFeature("multi_tenant");
       if (url.pathname === "/api/platform/reauth" && req.method === "POST") {
         const body = await readJsonBody(req, { limit: 8192 }),
           account = db
@@ -2340,6 +2570,83 @@ function createSignaturePortal({
           { verifiedAt: new Date().toISOString(), validForSeconds: 600 },
           requestId,
         );
+      }
+      if (url.pathname === "/api/platform/license") {
+        if (req.method === "GET") {
+          const tenantCount = db
+            .prepare("SELECT COUNT(*) count FROM organizations")
+            .get().count;
+          return json(
+            res,
+            200,
+            { license: { ...licensing.summary(), tenantCount } },
+            requestId,
+          );
+        }
+        requireRecentOwnerAuthentication(owner);
+        const body = await readJsonBody(req, { limit: 65536 }),
+          reason = limited(body.reason, 500);
+        if (reason.length < 3)
+          throw Object.assign(new Error("A reason is required."), {
+            status: 400,
+            code: "REASON_REQUIRED",
+          });
+        if (req.method === "POST") {
+          const entitlement = await licensing.activateKey(
+            body.licenseKey,
+            owner.id,
+          );
+          recordApplicationAudit(
+            owner,
+            "license.activated",
+            "installation_license",
+            entitlement.licenseId,
+            null,
+            reason,
+            {
+              edition: entitlement.edition,
+              maxTenants: entitlement.maxTenants,
+              expiresAt: entitlement.expiresAt,
+            },
+            requestId,
+          );
+          return json(res, 200, { license: entitlement }, requestId);
+        }
+        if (req.method === "PUT") {
+          const entitlement = await licensing.refresh({
+            throwOnFailure: true,
+          });
+          recordApplicationAudit(
+            owner,
+            "license.refreshed",
+            "installation_license",
+            entitlement.licenseId,
+            null,
+            reason,
+            {
+              edition: entitlement.edition,
+              maxTenants: entitlement.maxTenants,
+              expiresAt: entitlement.expiresAt,
+            },
+            requestId,
+          );
+          return json(res, 200, { license: entitlement }, requestId);
+        }
+        if (req.method === "DELETE") {
+          const previous = licensing.summary(),
+            entitlement = licensing.deactivate();
+          recordApplicationAudit(
+            owner,
+            "license.deactivated",
+            "installation_license",
+            previous.licenseId,
+            null,
+            reason,
+            { previousEdition: previous.edition },
+            requestId,
+          );
+          return json(res, 200, { license: entitlement }, requestId);
+        }
       }
       if (
         url.pathname === "/api/platform/mfa/enroll" &&
@@ -3260,13 +3567,28 @@ function createSignaturePortal({
           ),
           where = ["1=1"],
           params = [];
-        if (search) {
+        const communityInstallation =
+          licensing.summary().edition === "community";
+        if (communityInstallation) {
+          const owningOrganizationId =
+            owner.organizationId ||
+            db
+              .prepare(
+                "SELECT id FROM organizations ORDER BY created_at LIMIT 1",
+              )
+              .get()?.id;
+          where.push("o.id=?");
+          params.push(owningOrganizationId || "");
+        } else if (search) {
           where.push(
             "(lower(o.name) LIKE lower(?) OR lower(o.slug) LIKE lower(?))",
           );
           params.push(`%${search}%`, `%${search}%`);
         }
-        if (["active", "suspended"].includes(status)) {
+        if (
+          !communityInstallation &&
+          ["active", "suspended"].includes(status)
+        ) {
           where.push("o.status=?");
           params.push(status);
         }
@@ -3288,6 +3610,7 @@ function createSignaturePortal({
             organizations: rows.map((row) => ({
               ...workspaceDto(row),
               memberCount: row.member_count,
+              userCapacity: licensing.userCapacity(row.id),
               subscription: {
                 plan: row.plan,
                 status: row.subscription_status,
@@ -3320,6 +3643,10 @@ function createSignaturePortal({
         url.pathname === "/api/platform/organizations" &&
         req.method === "POST"
       ) {
+        const currentTenantCount = db
+          .prepare("SELECT COUNT(*) count FROM organizations")
+          .get().count;
+        licensing.requireTenantCapacity(currentTenantCount + 1);
         const body = await readJsonBody(req, { limit: 16384 }),
           name = limited(body.name, 180).trim(),
           adminEmail = limited(body.adminEmail, 180).trim().toLowerCase(),
@@ -3363,6 +3690,10 @@ function createSignaturePortal({
           };
         db.exec("BEGIN IMMEDIATE");
         try {
+          licensing.requireTenantCapacity(
+            db.prepare("SELECT COUNT(*) count FROM organizations").get().count +
+              1,
+          );
           db.prepare(
             "INSERT INTO organizations(id,name,slug,status,settings_json) VALUES (?,?,?,'active',?)",
           ).run(
@@ -3374,6 +3705,7 @@ function createSignaturePortal({
           db.prepare(
             "INSERT INTO organization_subscriptions(organization_id,plan,status,seats,trial_ends_at) VALUES (?,?,'trialing',?,strftime('%Y-%m-%dT%H:%M:%fZ','now','+30 days'))",
           ).run(organizationId, plan, seats);
+          licensing.requireUserCapacity(organizationId, 1);
           db.prepare(
             "INSERT INTO organization_invitations(id,organization_id,email,role,token_hash,invited_by,expires_at) VALUES (?,?,?,'admin',?,?,?)",
           ).run(
@@ -3466,6 +3798,7 @@ function createSignaturePortal({
                 }
               : null,
             microsoft: microsoftConnectionDto(microsoft),
+            userCapacity: licensing.userCapacity(organizationId),
             audit: audit.map(auditDto),
           },
           requestId,
@@ -4224,6 +4557,24 @@ function createSignaturePortal({
         );
       db.exec("BEGIN IMMEDIATE");
       try {
+        const transactionalSubscription = db
+            .prepare(
+              "SELECT seats FROM organization_subscriptions WHERE organization_id=?",
+            )
+            .get(invitation.organization_id),
+          transactionalActiveMembers = db
+            .prepare(
+              "SELECT COUNT(*) count FROM organization_memberships WHERE organization_id=? AND status='active'",
+            )
+            .get(invitation.organization_id).count;
+        if (
+          transactionalActiveMembers >= (transactionalSubscription?.seats || 1)
+        )
+          throw Object.assign(
+            new Error("This workspace has no available seats."),
+            { status: 409, code: "SEAT_LIMIT_REACHED" },
+          );
+        licensing.requireUserCapacity(invitation.organization_id, 0);
         if (!account) {
           db.prepare(
             `INSERT INTO signature_users(id,email,password_hash,display_name,role,status,signature_json,email_verified_at) VALUES (?,?,?,?,'editor','active',?,strftime('%Y-%m-%dT%H:%M:%fZ','now'))`,
@@ -4371,6 +4722,10 @@ function createSignaturePortal({
           requestId,
         );
       }
+      const currentTenantCount = db
+        .prepare("SELECT COUNT(*) count FROM organizations")
+        .get().count;
+      licensing.requireTenantCapacity(currentTenantCount + 1);
       const orgId = randomUUID(),
         userId = randomUUID(),
         baseSlug = `${slug(company)}-${randomBytes(3).toString("hex")}`,
@@ -4390,12 +4745,17 @@ function createSignaturePortal({
         };
       db.exec("BEGIN IMMEDIATE");
       try {
+        licensing.requireTenantCapacity(
+          db.prepare("SELECT COUNT(*) count FROM organizations").get().count +
+            1,
+        );
         db.prepare(
           "INSERT INTO organizations(id,name,slug,settings_json) VALUES (?,?,?,?)",
         ).run(orgId, company, baseSlug, JSON.stringify(settings));
         db.prepare(
           `INSERT INTO organization_subscriptions(organization_id,plan,status,seats,trial_ends_at) VALUES (?,'starter','trialing',10,strftime('%Y-%m-%dT%H:%M:%fZ','now','+30 days'))`,
         ).run(orgId);
+        licensing.requireUserCapacity(orgId, 1);
         const sig = normalizeSignature(
           { display_name: name, email, signature_json: "{}" },
           { fields: { name, email, company } },
@@ -4592,6 +4952,202 @@ function createSignaturePortal({
     const user = requireSession(req);
     if (!["GET", "HEAD", "OPTIONS"].includes(req.method))
       enforceCsrf(req, user);
+    if (url.pathname === "/api/signature/subscription" && req.method === "GET")
+      return json(res, 200, subscriptionEntitlement(user), requestId);
+    if (
+      url.pathname === "/api/signature/billing/checkout" &&
+      req.method === "POST"
+    ) {
+      requireAdmin(user);
+      if (!billingAvailable())
+        return json(
+          res,
+          503,
+          {
+            error: {
+              code: "STRIPE_NOT_CONFIGURED",
+              message: "Subscription checkout is not available yet.",
+            },
+          },
+          requestId,
+        );
+      const configuration = stripeSettings(),
+        stripe = stripeClient(configuration),
+        body = await readJsonBody(req, { limit: 8192 }),
+        plan = String(body.plan || "starter"),
+        price = configuration.prices?.[plan],
+        subscription = db
+          .prepare(
+            "SELECT * FROM organization_subscriptions WHERE organization_id=?",
+          )
+          .get(user.organizationId);
+      if (!price || !subscription)
+        return json(
+          res,
+          400,
+          {
+            error: {
+              code: "CHECKOUT_INVALID",
+              message: "Choose an available subscription plan.",
+            },
+          },
+          requestId,
+        );
+      const base = cleanUrl(signature.publicUrl || requestBase(req)),
+        checkout = await stripeRequest(
+          () =>
+            stripe.checkout.sessions.create({
+              mode: "subscription",
+              client_reference_id: user.organizationId,
+              ...(subscription.stripe_customer_id
+                ? { customer: subscription.stripe_customer_id }
+                : { customer_email: user.email }),
+              line_items: [{ price, quantity: 1 }],
+              allow_promotion_codes: true,
+              success_url: `${base}/signature.html?billing=success`,
+              cancel_url: `${base}/signature.html?billing=canceled`,
+              metadata: { organization_id: user.organizationId, plan },
+              subscription_data: {
+                metadata: { organization_id: user.organizationId, plan },
+              },
+            }),
+          "Stripe could not create the subscription Checkout session.",
+        );
+      recordAudit(
+        user,
+        "stripe.checkout_created",
+        "organization_subscription",
+        user.organizationId,
+        {
+          plan,
+          reason: limited(body.reason || "Tenant subscription checkout", 500),
+          requestId,
+        },
+      );
+      return json(res, 201, { url: checkout.url }, requestId);
+    }
+    if (url.pathname !== "/api/signature/session/switch")
+      requireSubscription(user);
+    if (
+      url.pathname === "/api/signature/outlook-addin" &&
+      req.method === "GET"
+    ) {
+      requireAdmin(user);
+      return json(
+        res,
+        200,
+        {
+          deployment: outlookDeploymentDto(
+            outlookDeployment(user.organizationId),
+          ),
+        },
+        requestId,
+      );
+    }
+    if (
+      url.pathname === "/api/signature/outlook-addin/enable" &&
+      req.method === "POST"
+    ) {
+      requireAdmin(user);
+      const existing = outlookDeployment(user.organizationId),
+        deploymentId = existing?.deployment_id || randomUUID(),
+        token = randomBytes(32).toString("base64url"),
+        encrypted = credentialVault.encrypt(
+          `outlook-addin:${user.organizationId}`,
+          { token },
+        );
+      db.prepare(
+        `INSERT INTO outlook_addin_deployments(organization_id,deployment_id,token_hash,encrypted_token,credential_key_id,enabled)
+         VALUES (?,?,?,?,?,1)
+         ON CONFLICT(organization_id) DO UPDATE SET token_hash=excluded.token_hash,encrypted_token=excluded.encrypted_token,credential_key_id=excluded.credential_key_id,enabled=1,updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now')`,
+      ).run(
+        user.organizationId,
+        deploymentId,
+        tokenHash(token),
+        encrypted,
+        credentialVault.keyId,
+      );
+      recordAudit(
+        user,
+        existing ? "outlook_addin.rotated" : "outlook_addin.enabled",
+        "outlook_addin",
+        deploymentId,
+      );
+      return json(
+        res,
+        existing ? 200 : 201,
+        {
+          deployment: outlookDeploymentDto(
+            outlookDeployment(user.organizationId),
+          ),
+        },
+        requestId,
+      );
+    }
+    if (
+      url.pathname === "/api/signature/outlook-addin/disable" &&
+      req.method === "POST"
+    ) {
+      requireAdmin(user);
+      const row = outlookDeployment(user.organizationId);
+      if (!row)
+        return json(
+          res,
+          404,
+          {
+            error: {
+              code: "NOT_FOUND",
+              message: "Outlook deployment not found.",
+            },
+          },
+          requestId,
+        );
+      db.prepare(
+        "UPDATE outlook_addin_deployments SET enabled=0,updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE organization_id=?",
+      ).run(user.organizationId);
+      recordAudit(
+        user,
+        "outlook_addin.disabled",
+        "outlook_addin",
+        row.deployment_id,
+      );
+      return json(
+        res,
+        200,
+        {
+          deployment: outlookDeploymentDto(
+            outlookDeployment(user.organizationId),
+          ),
+        },
+        requestId,
+      );
+    }
+    if (
+      url.pathname === "/api/signature/outlook-addin/manifest" &&
+      req.method === "GET"
+    ) {
+      requireAdmin(user);
+      const row = outlookDeployment(user.organizationId);
+      if (!row?.enabled)
+        return json(
+          res,
+          404,
+          {
+            error: {
+              code: "NOT_FOUND",
+              message: "Enable Outlook deployment first.",
+            },
+          },
+          requestId,
+        );
+      return textResponse(
+        res,
+        200,
+        outlookManifest(req, user, row),
+        "application/xml; charset=utf-8",
+        { "Content-Disposition": 'attachment; filename="signify-outlook.xml"' },
+      );
+    }
     const gatedFeature = url.pathname.startsWith("/api/signature/campaigns")
       ? "campaigns"
       : url.pathname === "/api/signature/directory-sync"
@@ -4848,11 +5404,6 @@ function createSignaturePortal({
       return json(res, 200, { ok: true }, requestId);
     }
     if (
-      !["GET", "HEAD", "OPTIONS"].includes(req.method) &&
-      url.pathname !== "/api/signature/admin-config"
-    )
-      requireSubscription(user);
-    if (
       url.pathname === "/api/signature/invitations" &&
       req.method === "POST"
     ) {
@@ -4898,17 +5449,41 @@ function createSignaturePortal({
         );
       const token = randomBytes(32).toString("base64url"),
         expires = new Date(Date.now() + 7 * 86400000).toISOString();
-      db.prepare(
-        `INSERT INTO organization_invitations(id,organization_id,email,role,token_hash,invited_by,expires_at) VALUES (?,?,?,?,?,?,?) ON CONFLICT(organization_id,email) DO UPDATE SET role=excluded.role,token_hash=excluded.token_hash,invited_by=excluded.invited_by,expires_at=excluded.expires_at,accepted_at=NULL,created_at=strftime('%Y-%m-%dT%H:%M:%fZ','now')`,
-      ).run(
-        randomUUID(),
-        user.organizationId,
-        email,
-        role,
-        tokenHash(token),
-        user.id,
-        expires,
-      );
+      db.exec("BEGIN IMMEDIATE");
+      try {
+        if (memberByEmail(user.organizationId, email))
+          throw Object.assign(
+            new Error("That person is already in this workspace."),
+            { status: 409, code: "USER_EXISTS" },
+          );
+        const activeInvitation = db
+          .prepare(
+            `SELECT 1 FROM organization_invitations
+             WHERE organization_id=? AND lower(email)=lower(?)
+               AND accepted_at IS NULL
+               AND expires_at>strftime('%Y-%m-%dT%H:%M:%fZ','now')`,
+          )
+          .get(user.organizationId, email);
+        licensing.requireUserCapacity(
+          user.organizationId,
+          activeInvitation ? 0 : 1,
+        );
+        db.prepare(
+          `INSERT INTO organization_invitations(id,organization_id,email,role,token_hash,invited_by,expires_at) VALUES (?,?,?,?,?,?,?) ON CONFLICT(organization_id,email) DO UPDATE SET role=excluded.role,token_hash=excluded.token_hash,invited_by=excluded.invited_by,expires_at=excluded.expires_at,accepted_at=NULL,created_at=strftime('%Y-%m-%dT%H:%M:%fZ','now')`,
+        ).run(
+          randomUUID(),
+          user.organizationId,
+          email,
+          role,
+          tokenHash(token),
+          user.id,
+          expires,
+        );
+        db.exec("COMMIT");
+      } catch (error) {
+        db.exec("ROLLBACK");
+        throw error;
+      }
       const link = `${publicBase(req, user)}/signature.html?invite=${encodeURIComponent(token)}`;
       if (mailAvailable(user.organizationId))
         await sendGraphMail(
@@ -5201,22 +5776,7 @@ function createSignaturePortal({
           },
           requestId,
         );
-      let account = db
-          .prepare("SELECT * FROM signature_users WHERE lower(email)=lower(?)")
-          .get(email),
-        id = account?.id || randomUUID();
-      if (memberByEmail(user.organizationId, email))
-        return json(
-          res,
-          409,
-          {
-            error: {
-              code: "USER_EXISTS",
-              message: "That user is already in this workspace.",
-            },
-          },
-          requestId,
-        );
+      let account, id;
       const initial = normalizeSignature(
         { display_name: displayName, email, signature_json: "{}" },
         {
@@ -5231,6 +5791,44 @@ function createSignaturePortal({
       );
       db.exec("BEGIN IMMEDIATE");
       try {
+        account = db
+          .prepare("SELECT * FROM signature_users WHERE lower(email)=lower(?)")
+          .get(email);
+        id = account?.id || randomUUID();
+        if (memberByEmail(user.organizationId, email))
+          throw Object.assign(
+            new Error("That user is already in this workspace."),
+            { status: 409, code: "USER_EXISTS" },
+          );
+        const transactionalActiveMembers = db
+            .prepare(
+              "SELECT COUNT(*) count FROM organization_memberships WHERE organization_id=? AND status='active'",
+            )
+            .get(user.organizationId).count,
+          transactionalSubscription = db
+            .prepare(
+              "SELECT seats FROM organization_subscriptions WHERE organization_id=?",
+            )
+            .get(user.organizationId);
+        if (
+          transactionalActiveMembers >= (transactionalSubscription?.seats || 1)
+        )
+          throw Object.assign(new Error("Your plan has no available seats."), {
+            status: 409,
+            code: "SEAT_LIMIT_REACHED",
+          });
+        const activeInvitation = db
+          .prepare(
+            `SELECT id FROM organization_invitations
+             WHERE organization_id=? AND lower(email)=lower(?)
+               AND accepted_at IS NULL
+               AND expires_at>strftime('%Y-%m-%dT%H:%M:%fZ','now')`,
+          )
+          .get(user.organizationId, email);
+        licensing.requireUserCapacity(
+          user.organizationId,
+          activeInvitation ? 0 : 1,
+        );
         if (!account) {
           db.prepare(
             `INSERT INTO signature_users(id,email,password_hash,display_name,role,status,signature_json,email_verified_at) VALUES (?,?,?,?,?,?,?,strftime('%Y-%m-%dT%H:%M:%fZ','now'))`,
@@ -5253,6 +5851,10 @@ function createSignaturePortal({
           canonicalStatus(body.status),
           JSON.stringify(initial),
         );
+        if (activeInvitation)
+          db.prepare(
+            `UPDATE organization_invitations SET accepted_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE id=?`,
+          ).run(activeInvitation.id);
         recordAudit(user, "member.created", "user", id, {
           email,
           role: canonicalRole(body.role),
@@ -6236,13 +6838,17 @@ function createSignaturePortal({
         200,
         {
           workspace: workspaceDto(workspaceRow(user)),
-          subscription: subscriptionDto(
-            db
-              .prepare(
-                "SELECT * FROM organization_subscriptions WHERE organization_id=?",
-              )
-              .get(user.organizationId),
-          ),
+          subscription:
+            licensing.summary().edition === "community"
+              ? null
+              : subscriptionDto(
+                  db
+                    .prepare(
+                      "SELECT * FROM organization_subscriptions WHERE organization_id=?",
+                    )
+                    .get(user.organizationId),
+                ),
+          license: licensing.userCapacity(user.organizationId),
           stats,
           audit,
           lastDirectorySync: sync || null,
@@ -6254,6 +6860,9 @@ function createSignaturePortal({
             ),
             microsoft: microsoftConnectionDto(
               microsoftConnection(user.organizationId),
+            ),
+            outlookAddin: outlookDeploymentDto(
+              outlookDeployment(user.organizationId),
             ),
           },
           readiness: {

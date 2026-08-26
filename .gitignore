@@ -18,3 +18,13 @@ public/uploads/
 *.bak
 .sandbox-*/
 .release-validation/
+
+# Publisher-only license authority. This source must remain outside the public
+# Signify Suite repository and release artifacts.
+authority/
+authority-server.cjs
+authority.Dockerfile
+.env.authority*
+scripts/authority-test.cjs
+scripts/authority-api-test.cjs
+Signify-License-Authority/

@@ -7,9 +7,10 @@
     <link rel="icon" type="image/png" href="/ithtfavicon.png" />
     <link rel="stylesheet" href="signify-shared.css?v=20260718" />
     <link rel="stylesheet" href="admin.css?v=20260722" />
-    <link rel="stylesheet" href="platform.css?v=2026072204" />
+    <link rel="stylesheet" href="platform.css?v=2026082503" />
+    <link rel="stylesheet" href="signify-app.css?v=2026082501" />
   </head>
-  <body>
+  <body class="authenticated-page">
     <header class="app-header">
       <a class="app-brand" href="/signature.html"
         ><span class="brand-mark">S</span
@@ -24,20 +25,28 @@
       <button class="profile-button" id="logout" type="button">Sign out</button>
     </header>
     <main class="admin-shell platform-shell">
-      <aside class="admin-nav">
+      <aside class="admin-nav" aria-label="Application sections">
         <div>
           <span class="eyebrow">Control plane</span><strong>Signify</strong>
         </div>
-        <button class="active" data-section="tenants" type="button">
+        <button
+          class="active"
+          data-section="tenants"
+          id="tenantNavLabel"
+          type="button"
+        >
           Tenants
         </button>
+        <button data-section="licensing" type="button">Licensing</button>
         <button data-section="integrations" type="button">Integrations</button>
         <button data-section="owners" type="button">Application Owners</button>
         <button data-section="operations" type="button">
           Updates &amp; backups
         </button>
         <button data-section="jobs" type="button">Background jobs</button>
-        <button data-section="fleet" type="button">Fleet &amp; usage</button>
+        <button data-section="fleet" id="fleetNavLabel" type="button">
+          Fleet &amp; usage
+        </button>
         <button data-section="audit" type="button">Application audit</button>
       </aside>
       <section class="admin-content">
@@ -45,8 +54,8 @@
           <div class="page-head">
             <div>
               <span class="eyebrow">Application control</span>
-              <h1>Tenants</h1>
-              <p>
+              <h1 id="tenantPageTitle">Tenants</h1>
+              <p id="tenantPageDescription">
                 Lifecycle, Microsoft 365 connection, seats, and SaaS billing.
               </p>
             </div>
@@ -54,56 +63,186 @@
               Create tenant
             </button>
           </div>
+          <p class="form-message" id="tenantLicenseNote" role="status"></p>
+          <section class="community-workspace" id="communityWorkspace" hidden>
+            <div class="community-workspace-copy">
+              <span class="eyebrow">Installation workspace</span>
+              <h2 id="communityWorkspaceName">Workspace</h2>
+              <p id="communityWorkspaceSlug"></p>
+            </div>
+            <div class="community-workspace-facts">
+              <div>
+                <span>Status</span
+                ><strong id="communityWorkspaceStatus">-</strong>
+              </div>
+              <div>
+                <span>User slots</span
+                ><strong id="communityWorkspacePeople">0 of 10</strong>
+              </div>
+              <div>
+                <span>Microsoft 365</span
+                ><strong id="communityWorkspaceMicrosoft">Not connected</strong>
+              </div>
+            </div>
+            <button
+              class="button primary"
+              id="manageCommunityWorkspace"
+              type="button"
+            >
+              Workspace settings
+            </button>
+          </section>
+          <div id="tenantPortfolio">
+            <div class="stat-grid platform-stats">
+              <article>
+                <span>All tenants</span
+                ><strong id="statOrganizations">0</strong>
+              </article>
+              <article>
+                <span>Active</span><strong id="statActive">0</strong>
+              </article>
+              <article>
+                <span>Suspended</span><strong id="statSuspended">0</strong>
+              </article>
+              <article>
+                <span>Microsoft connected</span
+                ><strong id="statMicrosoft">0</strong>
+              </article>
+            </div>
+            <div class="table-tools">
+              <label class="search-field"
+                >Search<input id="tenantSearch" type="search"
+              /></label>
+              <label
+                >Status<select id="tenantStatus">
+                  <option value="">All</option>
+                  <option value="active">Active</option>
+                  <option value="suspended">Suspended</option>
+                </select></label
+              >
+              <button class="button" id="refreshTenants" type="button">
+                Refresh
+              </button>
+            </div>
+            <div class="table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Tenant</th>
+                    <th>Status</th>
+                    <th>People</th>
+                    <th>Plan</th>
+                    <th>Microsoft 365</th>
+                    <th></th>
+                  </tr>
+                </thead>
+                <tbody id="tenantRows"></tbody>
+              </table>
+            </div>
+            <div class="pagination">
+              <button class="button" id="previousPage" type="button">
+                Previous</button
+              ><span id="pageLabel"></span
+              ><button class="button" id="nextPage" type="button">Next</button>
+            </div>
+          </div>
+        </section>
+        <section class="admin-section" data-admin-section="licensing">
+          <div class="page-head">
+            <div>
+              <span class="eyebrow">Product entitlement</span>
+              <h1>Licensing</h1>
+              <p id="licenseDescription">
+                Manage this installation's edition and tenant capacity.
+              </p>
+            </div>
+            <div class="page-actions">
+              <button class="button" id="refreshLicense" type="button">
+                Refresh entitlement
+              </button>
+              <button
+                class="button danger"
+                id="removeLicense"
+                type="button"
+                hidden
+              >
+                Return to Community
+              </button>
+            </div>
+          </div>
           <div class="stat-grid platform-stats">
             <article>
-              <span>All tenants</span><strong id="statOrganizations">0</strong>
+              <span>Edition</span><strong id="licenseEdition">Community</strong>
             </article>
             <article>
-              <span>Active</span><strong id="statActive">0</strong>
+              <span>Status</span><strong id="licenseStatus">Active</strong>
             </article>
             <article>
-              <span>Suspended</span><strong id="statSuspended">0</strong>
+              <span id="licenseUsageLabel">Tenant usage</span
+              ><strong id="licenseTenantUsage">1 of 1</strong>
             </article>
             <article>
-              <span>Microsoft connected</span
-              ><strong id="statMicrosoft">0</strong>
+              <span>Lease renews by</span
+              ><strong id="licenseExpiration">No expiration</strong>
             </article>
           </div>
-          <div class="table-tools">
-            <label class="search-field"
-              >Search<input id="tenantSearch" type="search"
-            /></label>
-            <label
-              >Status<select id="tenantStatus">
-                <option value="">All</option>
-                <option value="active">Active</option>
-                <option value="suspended">Suspended</option>
-              </select></label
-            >
-            <button class="button" id="refreshTenants" type="button">
-              Refresh
-            </button>
-          </div>
-          <div class="table-wrap">
-            <table>
-              <thead>
-                <tr>
-                  <th>Tenant</th>
-                  <th>Status</th>
-                  <th>People</th>
-                  <th>Plan</th>
-                  <th>Microsoft 365</th>
-                  <th></th>
-                </tr>
-              </thead>
-              <tbody id="tenantRows"></tbody>
-            </table>
-          </div>
-          <div class="pagination">
-            <button class="button" id="previousPage" type="button">
-              Previous</button
-            ><span id="pageLabel"></span
-            ><button class="button" id="nextPage" type="button">Next</button>
+          <div class="operations-grid license-grid">
+            <section class="operation-panel" id="licenseActivationPanel">
+              <div class="operation-head">
+                <div>
+                  <span class="eyebrow">Installation identity</span>
+                  <h2>License target</h2>
+                </div>
+                <button
+                  class="button"
+                  id="copyInstallationId"
+                  type="button"
+                  title="Copy installation ID"
+                >
+                  Copy ID
+                </button>
+              </div>
+              <label
+                >Installation ID<input id="installationId" readonly
+              /></label>
+              <p class="muted">
+                Provide this ID when purchasing a license. Activation keys are
+                securely bound to this installation by Signify Licensing.
+              </p>
+              <div class="readiness-list" id="licenseFeatures"></div>
+            </section>
+            <section class="operation-panel">
+              <span class="eyebrow">Commercial edition</span>
+              <h2>Activate a license</h2>
+              <form class="control-form" id="licenseForm">
+                <label class="full"
+                  >License key<textarea
+                    name="licenseKey"
+                    rows="5"
+                    required
+                    spellcheck="false"
+                    autocomplete="off"
+                  ></textarea>
+                </label>
+                <label class="full"
+                  >Reason<input
+                    name="reason"
+                    required
+                    minlength="3"
+                    value="Activate commercial license"
+                /></label>
+                <div class="form-actions">
+                  <button
+                    class="button primary"
+                    id="activateLicense"
+                    type="submit"
+                  >
+                    Activate license
+                  </button>
+                </div>
+              </form>
+              <p class="form-message" id="licenseMessage" role="status"></p>
+            </section>
           </div>
         </section>
         <section class="admin-section" data-admin-section="integrations">
@@ -182,7 +321,9 @@
             <div>
               <span class="eyebrow">Global authority</span>
               <h1>Application Owners</h1>
-              <p>Only these accounts can manage tenants and Stripe.</p>
+              <p id="ownersDescription">
+                Only these accounts can manage tenants and Stripe.
+              </p>
             </div>
           </div>
           <div class="control-form" id="ownerMfaPanel">
@@ -253,9 +394,13 @@
         <section class="admin-section" data-admin-section="fleet">
           <div class="page-head">
             <div>
-              <span class="eyebrow">Cross-tenant operations</span>
-              <h1>Fleet &amp; usage</h1>
-              <p>Release, schema, queue, and tenant utilization.</p>
+              <span class="eyebrow" id="fleetEyebrow"
+                >Cross-tenant operations</span
+              >
+              <h1 id="fleetPageTitle">Fleet &amp; usage</h1>
+              <p id="fleetDescription">
+                Release, schema, queue, and tenant utilization.
+              </p>
             </div>
             <button class="button" id="refreshFleet" type="button">
               Refresh
@@ -273,7 +418,7 @@
             <table>
               <thead>
                 <tr>
-                  <th>Tenant</th>
+                  <th id="fleetScopeHeader">Tenant</th>
                   <th>Status</th>
                   <th>People</th>
                   <th>Templates</th>
@@ -311,7 +456,7 @@
               <thead>
                 <tr>
                   <th>Job</th>
-                  <th>Tenant</th>
+                  <th id="jobsScopeHeader">Tenant</th>
                   <th>Status</th>
                   <th>Attempts</th>
                   <th>Updated</th>
@@ -327,7 +472,9 @@
             <div>
               <span class="eyebrow">Immutable activity</span>
               <h1>Application audit</h1>
-              <p>Global tenant, access, subscription, and Stripe changes.</p>
+              <p id="auditDescription">
+                Global tenant, access, subscription, and Stripe changes.
+              </p>
             </div>
             <button class="button" id="refreshAudit" type="button">
               Refresh
@@ -340,7 +487,7 @@
                   <th>Time</th>
                   <th>Actor</th>
                   <th>Action</th>
-                  <th>Tenant</th>
+                  <th id="auditScopeHeader">Tenant</th>
                   <th>Reason</th>
                 </tr>
               </thead>
@@ -909,7 +1056,7 @@
       <div class="dialog-form tenant-detail">
         <div class="dialog-head">
           <div>
-            <span class="eyebrow">Tenant control</span>
+            <span class="eyebrow" id="detailEyebrow">Tenant control</span>
             <h2 id="detailName">Tenant</h2>
             <p id="detailSlug"></p>
           </div>
@@ -931,7 +1078,7 @@
           <button class="button" type="submit">Update status</button>
         </form>
         <div class="control-form" id="tenantDataLifecycle">
-          <h3>Data lifecycle</h3>
+          <h3 id="tenantDataLifecycleTitle">Data lifecycle</h3>
           <p id="tenantDeletionStatus">No deletion is scheduled.</p>
           <div class="integration-actions">
             <button class="button" id="exportTenant" type="button">
@@ -990,112 +1137,116 @@
             Open workspace for support
           </button>
         </form>
-        <form class="control-form" id="subscriptionForm">
-          <h3>Subscription</h3>
-          <div class="form-grid three">
-            <label
-              >Plan<select name="plan">
-                <option value="starter">Starter</option>
-                <option value="team">Team</option>
-                <option value="business">Business</option>
-              </select></label
-            ><label
-              >Status<select name="status">
-                <option value="trialing">Trialing</option>
-                <option value="active">Active</option>
-                <option value="past_due">Past due</option>
-                <option value="canceled">Canceled</option>
-              </select></label
-            ><label
-              >Seats<input
-                name="seats"
-                type="number"
-                min="1"
-                max="10000"
-                required
-            /></label>
-          </div>
-          <div class="form-grid">
-            <label>Stripe customer ID<input name="stripeCustomerId" /></label
-            ><label
-              >Stripe subscription ID<input name="stripeSubscriptionId"
-            /></label>
-          </div>
-          <label>Reason<input name="reason" required minlength="3" /></label
-          ><button class="button" type="submit">Save subscription</button>
-        </form>
-        <form class="control-form" id="checkoutForm">
-          <h3>Stripe checkout</h3>
-          <div class="form-grid three">
-            <label
-              >Plan<select name="plan">
-                <option value="starter">Starter</option>
-                <option value="team">Team</option>
-                <option value="business">Business</option>
-              </select></label
-            ><label
-              >Customer email<input name="customerEmail" type="email" /></label
-            ><label
-              >Reason<input
-                name="reason"
-                value="Subscription checkout"
-                required
-            /></label>
-          </div>
-          <button class="button primary" id="createCheckout" type="submit">
-            Create checkout</button
-          ><small id="stripeStatus"></small>
-        </form>
-        <form class="control-form" id="stripeSubscriptionForm">
-          <h3>Stripe subscription actions</h3>
-          <div class="form-grid">
-            <label
-              >Mapped plan<select name="plan">
-                <option value="starter">Starter</option>
-                <option value="team">Team</option>
-                <option value="business">Business</option>
-              </select></label
-            ><label
-              >Reason<input
-                name="reason"
-                value="Application Owner billing change"
-                required
-                minlength="3"
-            /></label>
-          </div>
-          <div class="integration-actions">
-            <button
-              class="button primary"
-              data-stripe-action="change_plan"
-              type="submit"
+        <div id="tenantBillingControls">
+          <form class="control-form" id="subscriptionForm">
+            <h3>Subscription</h3>
+            <div class="form-grid three">
+              <label
+                >Plan<select name="plan">
+                  <option value="starter">Starter</option>
+                  <option value="team">Team</option>
+                  <option value="business">Business</option>
+                </select></label
+              ><label
+                >Status<select name="status">
+                  <option value="trialing">Trialing</option>
+                  <option value="active">Active</option>
+                  <option value="past_due">Past due</option>
+                  <option value="canceled">Canceled</option>
+                </select></label
+              ><label
+                >Seats<input
+                  name="seats"
+                  type="number"
+                  min="1"
+                  max="10000"
+                  required
+              /></label>
+            </div>
+            <div class="form-grid">
+              <label>Stripe customer ID<input name="stripeCustomerId" /></label
+              ><label
+                >Stripe subscription ID<input name="stripeSubscriptionId"
+              /></label>
+            </div>
+            <label>Reason<input name="reason" required minlength="3" /></label
+            ><button class="button" type="submit">Save subscription</button>
+          </form>
+          <form class="control-form" id="checkoutForm">
+            <h3>Stripe checkout</h3>
+            <div class="form-grid three">
+              <label
+                >Plan<select name="plan">
+                  <option value="starter">Starter</option>
+                  <option value="team">Team</option>
+                  <option value="business">Business</option>
+                </select></label
+              ><label
+                >Customer email<input
+                  name="customerEmail"
+                  type="email" /></label
+              ><label
+                >Reason<input
+                  name="reason"
+                  value="Subscription checkout"
+                  required
+              /></label>
+            </div>
+            <button class="button primary" id="createCheckout" type="submit">
+              Create checkout</button
+            ><small id="stripeStatus"></small>
+          </form>
+          <form class="control-form" id="stripeSubscriptionForm">
+            <h3>Stripe subscription actions</h3>
+            <div class="form-grid">
+              <label
+                >Mapped plan<select name="plan">
+                  <option value="starter">Starter</option>
+                  <option value="team">Team</option>
+                  <option value="business">Business</option>
+                </select></label
+              ><label
+                >Reason<input
+                  name="reason"
+                  value="Application Owner billing change"
+                  required
+                  minlength="3"
+              /></label>
+            </div>
+            <div class="integration-actions">
+              <button
+                class="button primary"
+                data-stripe-action="change_plan"
+                type="submit"
+              >
+                Change plan
+              </button>
+              <button class="button" id="openStripePortal" type="button">
+                Open billing portal
+              </button>
+              <button
+                class="button danger"
+                data-stripe-action="cancel"
+                type="submit"
+              >
+                Cancel at period end
+              </button>
+              <button
+                class="button"
+                data-stripe-action="reactivate"
+                type="submit"
+              >
+                Reactivate
+              </button>
+            </div>
+            <small
+              >Stripe webhooks remain authoritative for local subscription
+              status.</small
             >
-              Change plan
-            </button>
-            <button class="button" id="openStripePortal" type="button">
-              Open billing portal
-            </button>
-            <button
-              class="button danger"
-              data-stripe-action="cancel"
-              type="submit"
-            >
-              Cancel at period end
-            </button>
-            <button
-              class="button"
-              data-stripe-action="reactivate"
-              type="submit"
-            >
-              Reactivate
-            </button>
-          </div>
-          <small
-            >Stripe webhooks remain authoritative for local subscription
-            status.</small
-          >
-        </form>
+          </form>
+        </div>
         <div class="control-form">
-          <h3>Tenant administrators and users</h3>
+          <h3 id="detailMembersTitle">Tenant administrators and users</h3>
           <div id="detailMembers" class="member-list"></div>
         </div>
         <div class="dialog-actions">
@@ -1160,6 +1311,6 @@
     </dialog>
     <div class="toast" id="toast" role="status" aria-live="polite"></div>
     <script src="signify-shared.js?v=20260718"></script>
-    <script src="platform.js?v=2026072204"></script>
+    <script src="platform.js?v=2026082503"></script>
   </body>
 </html>

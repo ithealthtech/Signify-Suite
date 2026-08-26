@@ -2,7 +2,7 @@
   "$schema": "http://cyclonedx.org/schema/bom-1.5.schema.json",
   "bomFormat": "CycloneDX",
   "specVersion": "1.5",
-  "serialNumber": "urn:uuid:a902dbc7-3313-5692-a12b-e97b1642cb1e",
+  "serialNumber": "urn:uuid:8437a262-92f8-5c45-abdc-0e4c88967d02",
   "version": 1,
   "metadata": {
     "timestamp": "1970-01-01T00:00:00.000Z",
@@ -88,19 +88,19 @@
       ]
     },
     {
-      "bom-ref": "@aws-sdk/client-s3@3.1090.0",
+      "bom-ref": "@aws-sdk/client-s3@3.1091.0",
       "type": "library",
       "name": "@aws-sdk/client-s3",
-      "version": "3.1090.0",
+      "version": "3.1091.0",
       "scope": "required",
       "author": "AWS SDK for JavaScript Team",
       "description": "AWS SDK for JavaScript S3 Client for Node.js, Browser and React Native",
-      "purl": "pkg:npm/%40aws-sdk/client-s3@3.1090.0",
+      "purl": "pkg:npm/%40aws-sdk/client-s3@3.1091.0",
       "properties": [],
       "externalReferences": [
         {
           "type": "distribution",
-          "url": "https://registry.npmjs.org/@aws-sdk/client-s3/-/client-s3-3.1090.0.tgz"
+          "url": "https://registry.npmjs.org/@aws-sdk/client-s3/-/client-s3-3.1091.0.tgz"
         },
         {
           "type": "vcs",
@@ -114,7 +114,7 @@
       "hashes": [
         {
           "alg": "SHA-512",
-          "content": "47a197f5c7758e58f0cd9f3116680023f8470ae5f53286c828176cca6bfb58bf5210dbcef55833f4a391e9abd39eed00a3ec352e6c674defa3aa6657127ed0fd"
+          "content": "8ef5c109665d3c45c0085ed311b2ddc0b826adc5af02a4a72097916e79c54f12ee3d1019b446ee8d5514e3c8bb3c69eb3a83ba25ce870b0f6146a0440a8292c3"
         }
       ],
       "licenses": [
@@ -543,18 +543,18 @@
       ]
     },
     {
-      "bom-ref": "@aws-sdk/s3-request-presigner@3.1090.0",
+      "bom-ref": "@aws-sdk/s3-request-presigner@3.1091.0",
       "type": "library",
       "name": "@aws-sdk/s3-request-presigner",
-      "version": "3.1090.0",
+      "version": "3.1091.0",
       "scope": "required",
       "author": "AWS SDK for JavaScript Team",
-      "purl": "pkg:npm/%40aws-sdk/s3-request-presigner@3.1090.0",
+      "purl": "pkg:npm/%40aws-sdk/s3-request-presigner@3.1091.0",
       "properties": [],
       "externalReferences": [
         {
           "type": "distribution",
-          "url": "https://registry.npmjs.org/@aws-sdk/s3-request-presigner/-/s3-request-presigner-3.1090.0.tgz"
+          "url": "https://registry.npmjs.org/@aws-sdk/s3-request-presigner/-/s3-request-presigner-3.1091.0.tgz"
         },
         {
           "type": "vcs",
@@ -568,7 +568,7 @@
       "hashes": [
         {
           "alg": "SHA-512",
-          "content": "0da617a7c18ca6d5895036efa68079d71673b4ec3ab5c6e95e360064c5d3bb5ec4d1a47ee60f05581537b77b74284861ad488ac9f2e9562eae350c4d4977db86"
+          "content": "05d17514d3a163289ffed00dd2ebd39e3a3f202fc992029f05b43c3f0b4cdae0f2d8cabde5a2bc9214be905f192bae30c54dccd1fd302e50174eb1b1387b6b51"
         }
       ],
       "licenses": [
@@ -2887,8 +2887,8 @@
     {
       "ref": "signify-creator@1.0.0",
       "dependsOn": [
-        "@aws-sdk/client-s3@3.1090.0",
-        "@aws-sdk/s3-request-presigner@3.1090.0",
+        "@aws-sdk/client-s3@3.1091.0",
+        "@aws-sdk/s3-request-presigner@3.1091.0",
         "gifenc@1.0.3",
         "otpauth@9.5.1",
         "pg@8.22.0",
@@ -2908,7 +2908,7 @@
       ]
     },
     {
-      "ref": "@aws-sdk/client-s3@3.1090.0",
+      "ref": "@aws-sdk/client-s3@3.1091.0",
       "dependsOn": [
         "@aws-sdk/checksums@3.1000.18",
         "@aws-sdk/core@3.975.3",
@@ -3061,7 +3061,7 @@
       ]
     },
     {
-      "ref": "@aws-sdk/s3-request-presigner@3.1090.0",
+      "ref": "@aws-sdk/s3-request-presigner@3.1091.0",
       "dependsOn": [
         "@aws-sdk/core@3.975.3",
         "@aws-sdk/signature-v4-multi-region@3.996.41",

@@ -56,6 +56,7 @@ for (const required of [
   "docs/SUBPROCESSORS.md",
   "docs/TERMS.md",
   "docs/SAAS-READINESS.md",
+  "docs/LICENSING.md",
   "docs/sbom.cdx.json",
   "manifest.json",
   "checksums.txt",
@@ -137,7 +138,9 @@ const checksumLines = fs
     }),
   ),
   expectedChecksums = relativeFiles
-    .filter((file) => file !== "checksums.txt")
+    .filter(
+      (file) => file !== "checksums.txt" && file !== "release-signature.json",
+    )
     .sort();
 if (
   JSON.stringify([...checksumEntries.keys()].sort()) !==

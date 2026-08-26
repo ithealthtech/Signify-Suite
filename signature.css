@@ -1314,3 +1314,71 @@ button {
     padding-inline: 22px;
   }
 }
+.subscription-locked {
+  filter: blur(3px);
+  pointer-events: none;
+  user-select: none;
+}
+
+.subscription-dialog {
+  width: min(440px, calc(100vw - 32px));
+  padding: 32px;
+  border: 1px solid #d9dce3;
+  border-radius: 8px;
+  background: #fff;
+  color: #17181c;
+  box-shadow: 0 24px 80px rgb(18 20 28 / 28%);
+  text-align: center;
+}
+
+.subscription-dialog::backdrop {
+  background: rgb(17 18 23 / 68%);
+  backdrop-filter: blur(2px);
+}
+
+.subscription-dialog h2 {
+  margin: 8px 0 10px;
+  font-size: 26px;
+  letter-spacing: 0;
+}
+
+.subscription-dialog > p {
+  margin: 0 auto 22px;
+  color: #656978;
+  line-height: 1.55;
+}
+
+.subscription-mark {
+  display: grid;
+  width: 48px;
+  height: 48px;
+  margin: 0 auto 18px;
+  place-items: center;
+  border-radius: 8px;
+  background: #111218;
+  color: #fff;
+  font-size: 22px;
+  font-weight: 800;
+}
+
+.subscription-dialog form {
+  display: grid;
+  gap: 14px;
+  margin-bottom: 14px;
+  text-align: left;
+}
+
+.subscription-dialog label {
+  display: grid;
+  gap: 7px;
+  font-weight: 700;
+}
+
+.subscription-dialog select {
+  width: 100%;
+}
+
+.subscription-dialog .subscription-note {
+  margin-bottom: 6px;
+  font-size: 12px;
+}

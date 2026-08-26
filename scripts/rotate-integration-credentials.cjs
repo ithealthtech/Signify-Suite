@@ -17,6 +17,11 @@ function rotateCredentials(db, oldVault, newVault) {
       .prepare(
         "SELECT user_id,encrypted_secret FROM application_owner_mfa WHERE encrypted_secret<>''",
       )
+      .all(),
+    outlookDeployments = db
+      .prepare(
+        "SELECT organization_id,encrypted_token FROM outlook_addin_deployments",
+      )
       .all();
   db.exec("BEGIN IMMEDIATE");
   try {
@@ -25,6 +30,9 @@ function rotateCredentials(db, oldVault, newVault) {
       ),
       updateMfa = db.prepare(
         `UPDATE application_owner_mfa SET encrypted_secret=?,credential_key_id=?,updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE user_id=?`,
+      ),
+      updateOutlook = db.prepare(
+        `UPDATE outlook_addin_deployments SET encrypted_token=?,credential_key_id=?,updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE organization_id=?`,
       );
     for (const row of integrations)
       updateIntegration.run(
@@ -46,12 +54,27 @@ function rotateCredentials(db, oldVault, newVault) {
         row.user_id,
       );
     }
+    for (const row of outlookDeployments) {
+      const context = `outlook-addin:${row.organization_id}`;
+      updateOutlook.run(
+        newVault.encrypt(
+          context,
+          oldVault.decrypt(context, row.encrypted_token),
+        ),
+        newVault.keyId,
+        row.organization_id,
+      );
+    }
     db.exec("COMMIT");
   } catch (error) {
     db.exec("ROLLBACK");
     throw error;
   }
-  return { integrations: integrations.length, mfa: mfaRecords.length };
+  return {
+    integrations: integrations.length,
+    mfa: mfaRecords.length,
+    outlookDeployments: outlookDeployments.length,
+  };
 }
 
 function main() {
@@ -70,7 +93,7 @@ function main() {
   try {
     const result = rotateCredentials(db, oldVault, newVault);
     console.log(
-      `Rotated ${result.integrations} integration and ${result.mfa} MFA credential record(s) to key ${newVault.keyId}.`,
+      `Rotated ${result.integrations} integration, ${result.mfa} MFA, and ${result.outlookDeployments} Outlook deployment credential record(s) to key ${newVault.keyId}.`,
     );
   } finally {
     db.close();
