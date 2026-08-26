@@ -29,7 +29,15 @@ function createPlatformOperationsRoutes({
     if (!url.pathname.startsWith("/api/platform/operations")) return false;
 
     if (url.pathname === "/api/platform/operations" && req.method === "GET") {
-      json(res, 200, { backups: operations.listBackups() }, requestId);
+      json(
+        res,
+        200,
+        {
+          backups: operations.listBackups(),
+          update: operations.getUpdateStatus(),
+        },
+        requestId,
+      );
       return true;
     }
     if (
@@ -143,6 +151,31 @@ function createPlatformOperationsRoutes({
       req.method === "GET"
     ) {
       json(res, 200, { update: await operations.checkForUpdates() }, requestId);
+      return true;
+    }
+    if (
+      url.pathname === "/api/platform/operations/updates/install" &&
+      req.method === "POST"
+    ) {
+      const body = await readJsonBody(req),
+        reason = operationReason(body);
+      if (body.confirmation !== "INSTALL")
+        throw Object.assign(
+          new Error("Type INSTALL to confirm this operation."),
+          { status: 400, code: "UPDATE_CONFIRMATION_REQUIRED" },
+        );
+      const update = await operations.installUpdate();
+      recordAudit(
+        owner,
+        "application.update_scheduled",
+        "release",
+        update.version,
+        null,
+        reason,
+        update,
+        requestId,
+      );
+      json(res, 202, { update }, requestId);
       return true;
     }
     return false;

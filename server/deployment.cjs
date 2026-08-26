@@ -11,6 +11,7 @@ const {
   SIGNATURE_FILE,
   verifyReleaseSignature,
 } = require("./release-signature.cjs");
+const { compareVersions } = require("./version.cjs");
 
 const execFileAsync = promisify(execFile);
 
@@ -23,19 +24,6 @@ function artifactFiles(directory) {
     const absolute = path.join(directory, entry.name);
     return entry.isDirectory() ? artifactFiles(absolute) : [absolute];
   });
-}
-
-function compareVersions(left, right) {
-  const parse = (value) => {
-    const match = String(value || "").match(/^(\d+)\.(\d+)\.(\d+)/);
-    if (!match) throw new Error(`Invalid semantic version: ${value}`);
-    return match.slice(1).map(Number);
-  };
-  const a = parse(left),
-    b = parse(right);
-  for (let index = 0; index < 3; index += 1)
-    if (a[index] !== b[index]) return a[index] - b[index];
-  return 0;
 }
 
 function verifyArtifact(

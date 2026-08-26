@@ -25,6 +25,13 @@ function validEmail(value) {
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(value || ""));
 }
 
+function optionalAbsolutePath(value, name) {
+  const candidate = String(value || "").trim();
+  if (!candidate) return "";
+  if (!path.isAbsolute(candidate)) throw new Error(`${name} must be absolute.`);
+  return path.normalize(candidate);
+}
+
 function bundledLicenseConfig(baseDir) {
   const file = path.join(baseDir, "server", "license-build.json");
   if (!fs.existsSync(file)) return {};
@@ -54,6 +61,16 @@ function loadConfig(env = process.env, baseDir = path.join(__dirname, "..")) {
     licenseRefreshHours > 168
   )
     throw new Error("SIGNIFY_LICENSE_REFRESH_HOURS must be from 1 to 168.");
+  const updateCheckHours = Number(env.SIGNIFY_UPDATE_CHECK_HOURS || 6);
+  if (
+    !Number.isFinite(updateCheckHours) ||
+    updateCheckHours < 0.25 ||
+    updateCheckHours > 168
+  )
+    throw new Error("SIGNIFY_UPDATE_CHECK_HOURS must be from 0.25 to 168.");
+  const updateMaxMb = Number(env.SIGNIFY_UPDATE_MAX_MB || 250);
+  if (!Number.isInteger(updateMaxMb) || updateMaxMb < 25 || updateMaxMb > 2048)
+    throw new Error("SIGNIFY_UPDATE_MAX_MB must be from 25 to 2048.");
   const workerHeartbeatSeconds = Number(
     env.SIGNIFY_WORKER_HEARTBEAT_SECONDS || 10,
   );
@@ -382,6 +399,30 @@ function loadConfig(env = process.env, baseDir = path.join(__dirname, "..")) {
       env.SIGNIFY_UPDATE_REPOSITORY || "ithealthtech/Signify-Suite",
     ).trim(),
     updateGithubToken: String(env.SIGNIFY_UPDATE_GITHUB_TOKEN || "").trim(),
+    updates: {
+      checkIntervalMs: updateCheckHours * 60 * 60 * 1000,
+      maxArchiveBytes: Math.floor(updateMaxMb * 1024 * 1024),
+      releasesDirectory: optionalAbsolutePath(
+        env.SIGNIFY_RELEASES_DIR,
+        "SIGNIFY_RELEASES_DIR",
+      ),
+      currentLink: optionalAbsolutePath(
+        env.SIGNIFY_CURRENT_LINK,
+        "SIGNIFY_CURRENT_LINK",
+      ),
+      restartScript: optionalAbsolutePath(
+        env.SIGNIFY_DEPLOY_RESTART_SCRIPT,
+        "SIGNIFY_DEPLOY_RESTART_SCRIPT",
+      ),
+      healthUrl: httpUrl(
+        String(env.SIGNIFY_DEPLOY_HEALTH_URL || "").trim(),
+        "SIGNIFY_DEPLOY_HEALTH_URL",
+      ),
+      releasePublicKey: String(env.SIGNIFY_RELEASE_SIGNING_PUBLIC_KEY || "")
+        .replaceAll("\\n", "\n")
+        .trim(),
+      requireSignature: bool(env.SIGNIFY_DEPLOY_REQUIRE_SIGNATURE, true),
+    },
     licensePublicKey: String(
       env.SIGNIFY_LICENSE_PUBLIC_KEY || bundledLicense.publicKey || "",
     ).trim(),

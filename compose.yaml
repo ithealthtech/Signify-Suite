@@ -1,11 +1,11 @@
 name: signify-creator
 
 x-signify-service: &signify-service
-  image: ${SIGNIFY_IMAGE:-ghcr.io/ithealthtech/signify-suite}:${SIGNIFY_VERSION:-0.4.0}
+  image: ${SIGNIFY_IMAGE:-ghcr.io/ithealthtech/signify-suite}:${SIGNIFY_VERSION:-1.1.0}
   build:
     context: .
     args:
-      VERSION: ${SIGNIFY_VERSION:-0.4.0}
+      VERSION: ${SIGNIFY_VERSION:-1.1.0}
       REVISION: ${SIGNIFY_REVISION:-local}
   env_file:
     - .env.container

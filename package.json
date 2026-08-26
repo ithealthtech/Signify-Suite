@@ -1,7 +1,7 @@
 {
   "name": "signify-creator",
   "private": true,
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "Self-hosted multi-tenant email-signature SaaS for Node.js.",
   "license": "UNLICENSED",
   "repository": {
@@ -31,7 +31,8 @@
     "build": "node scripts/build.cjs",
     "typecheck": "node --check server.cjs && node --check worker.cjs && node --check server/config.cjs && node --check server/licensing.cjs",
     "benchmark": "node scripts/benchmark.cjs",
-    "test": "node scripts/unit-test.cjs && node scripts/frontend-test.cjs && node scripts/database-test.cjs && node scripts/licensing-test.cjs && node scripts/release-signature-test.cjs && node scripts/runtime-lease-test.cjs && node scripts/postgres-test.cjs && node scripts/postgres-import-test.cjs && node scripts/credential-rotation-test.cjs && node scripts/deployment-test.cjs && node scripts/container-test.cjs && node scripts/job-test.cjs && node scripts/media-test.cjs && node scripts/observability-test.cjs && node scripts/operations-test.cjs && node scripts/recovery-test.cjs && node scripts/security-test.cjs && node scripts/setup-test.cjs && node scripts/installer-test.cjs && node scripts/smoke-test.cjs",
+    "test": "node scripts/version-test.cjs && node scripts/unit-test.cjs && node scripts/frontend-test.cjs && node scripts/database-test.cjs && node scripts/licensing-test.cjs && node scripts/release-signature-test.cjs && node scripts/runtime-lease-test.cjs && node scripts/postgres-test.cjs && node scripts/postgres-import-test.cjs && node scripts/credential-rotation-test.cjs && node scripts/deployment-test.cjs && node scripts/container-test.cjs && node scripts/job-test.cjs && node scripts/media-test.cjs && node scripts/observability-test.cjs && node scripts/operations-test.cjs && node scripts/recovery-test.cjs && node scripts/security-test.cjs && node scripts/setup-test.cjs && node scripts/installer-test.cjs && node scripts/smoke-test.cjs",
+    "test:version": "node scripts/version-test.cjs",
     "test:unit": "node scripts/unit-test.cjs",
     "test:frontend": "node scripts/frontend-test.cjs",
     "test:database": "node scripts/database-test.cjs",
@@ -75,7 +76,8 @@
     "pg": "^8.22.0",
     "qrcode": "^1.5.4",
     "sharp": "^0.35.3",
-    "stripe": "^22.3.2"
+    "stripe": "^22.3.2",
+    "tar": "^7.5.22"
   },
   "devDependencies": {
     "eslint": "^10.7.0",

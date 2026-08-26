@@ -597,6 +597,7 @@ async function connectGithub(event) {
 async function loadOperations() {
   const result = await api("/api/platform/operations"),
     pending = result.backups.find((item) => item.pendingRestore);
+  renderUpdateStatus(result.update);
   $("#pendingRestore").hidden = !pending;
   $("#pendingRestoreName").textContent = pending
     ? `${pending.name} will be restored after restart.`
@@ -610,9 +611,53 @@ async function loadOperations() {
         .join("")
     : '<tr><td colspan="5" class="muted">No managed backups yet.</td></tr>';
 }
+function renderUpdateStatus(update) {
+  const status = $("#updateStatus"),
+    release = $("#openRelease"),
+    install = $("#installUpdate"),
+    installation = update?.installation;
+  if (!update || update.status === "not_checked") {
+    status.innerHTML =
+      "<strong>Waiting for first check</strong><span>Release detection runs automatically and can also be started now.</span>";
+  } else if (update.status === "failed") {
+    status.innerHTML = `<strong>Release check failed</strong><span>${escapeHtml(update.error || "The release channel could not be reached.")}</span>`;
+  } else {
+    const packageStatus = update.packageReady
+        ? "Signed production package is available."
+        : `The release is missing ${escapeHtml(update.expectedPackage || "its production package")}.`,
+      installStatus = update.installSupported
+        ? "This host supports managed installation."
+        : "This host is download-only until its restart adapter is configured.";
+    status.innerHTML = `<strong>${update.updateAvailable ? "Update available" : "Application is current"}</strong><span>Installed ${escapeHtml(update.currentVersion)} · Latest ${escapeHtml(update.latestVersion)} · Published ${escapeHtml(dateLabel(update.publishedAt))}</span><span>${packageStatus} ${installStatus}</span>`;
+  }
+  if (installation) {
+    const installationLabel = {
+      preparing: "Preparing the verified package",
+      scheduled: "Update scheduled; installation will begin shortly",
+      installing: "Installing and running health checks",
+      activated: "Update installed successfully",
+      unchanged: "Requested release is already installed",
+      failed: `Update failed: ${installation.error || "Review the server log."}`,
+    }[installation.status];
+    if (installationLabel)
+      status.insertAdjacentHTML(
+        "beforeend",
+        `<span><strong>${escapeHtml(installationLabel)}</strong>${installation.version ? ` · ${escapeHtml(installation.version)}` : ""}</span>`,
+      );
+  }
+  release.href = update?.releaseUrl || "#";
+  release.hidden = !update?.releaseUrl;
+  install.hidden = !(
+    update?.status === "checked" &&
+    update.updateAvailable &&
+    update.packageReady &&
+    update.installSupported
+  );
+}
 function openOperation(action, backupName = "") {
   const form = $("#operationForm"),
     restore = action === "restore",
+    install = action === "install",
     labels = {
       create: [
         "Create backup",
@@ -624,18 +669,25 @@ function openOperation(action, backupName = "") {
       ],
       delete: ["Delete backup", `Permanently delete ${backupName}.`],
       cancel: ["Cancel restore", "Remove the pending restore request."],
+      install: [
+        "Install application update",
+        "Signify will verify the release signature, create a safety backup, switch releases, restart, and roll back automatically if readiness fails.",
+      ],
     };
   form.reset();
   form.elements.action.value = action;
   form.elements.backupName.value = backupName;
   $("#operationTitle").textContent = labels[action][0];
   $("#operationMessage").textContent = labels[action][1];
-  $("#restoreConfirmation").hidden = !restore;
-  form.elements.confirmation.required = restore;
+  $("#operationConfirmation").hidden = !(restore || install);
+  $("#operationConfirmationText").textContent = install
+    ? "Type INSTALL to confirm"
+    : "Type RESTORE to confirm";
+  form.elements.confirmation.required = restore || install;
   $("#confirmOperation").textContent = labels[action][0];
   $("#confirmOperation").classList.toggle(
     "danger",
-    ["restore", "delete"].includes(action),
+    ["restore", "delete", "install"].includes(action),
   );
   $("#operationDialog").showModal();
 }
@@ -650,6 +702,7 @@ async function submitOperation(event) {
     restore: [`/api/platform/operations/backups/${name}/restore`, "POST"],
     delete: [`/api/platform/operations/backups/${name}`, "DELETE"],
     cancel: ["/api/platform/operations/restore", "DELETE"],
+    install: ["/api/platform/operations/updates/install", "POST"],
   };
   busy(button, true);
   try {
@@ -663,7 +716,9 @@ async function submitOperation(event) {
     toast(
       body.action === "restore"
         ? "Restore staged. Restart the application to apply it."
-        : "Application operation completed",
+        : body.action === "install"
+          ? "Verified update scheduled. The application will restart automatically."
+          : "Application operation completed",
     );
   } catch (error) {
     toast(error.message);
@@ -676,11 +731,9 @@ async function checkUpdates(event) {
   busy(button, true, "Checking...");
   try {
     const { update } = await api("/api/platform/operations/updates"),
-      status = $("#updateStatus"),
-      link = $("#openRelease");
-    status.innerHTML = `<strong>${update.updateAvailable ? "Update available" : "Application is current"}</strong><span>Installed ${escapeHtml(update.currentVersion)} · Latest ${escapeHtml(update.latestVersion)} · Published ${escapeHtml(dateLabel(update.publishedAt))}</span>`;
-    link.href = update.releaseUrl;
-    link.hidden = !update.releaseUrl;
+      status = $("#updateStatus");
+    renderUpdateStatus(update);
+    status.scrollIntoView({ behavior: "smooth", block: "nearest" });
   } catch (error) {
     toast(error.message);
   } finally {
@@ -1518,6 +1571,7 @@ function bindEvents() {
   );
   $("#createBackup").addEventListener("click", () => openOperation("create"));
   $("#checkUpdates").addEventListener("click", checkUpdates);
+  $("#installUpdate").addEventListener("click", () => openOperation("install"));
   $("#cancelRestore").addEventListener("click", () => openOperation("cancel"));
   $("#backupRows").addEventListener("click", (event) => {
     const button = event.target.closest("[data-backup-action]");

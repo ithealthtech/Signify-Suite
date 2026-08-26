@@ -524,15 +524,25 @@
                   version.</span
                 >
               </div>
-              <a
-                class="button"
-                id="openRelease"
-                href="#"
-                target="_blank"
-                rel="noopener"
-                hidden
-                >Open release</a
-              >
+              <div class="update-actions">
+                <button
+                  class="button primary"
+                  id="installUpdate"
+                  type="button"
+                  hidden
+                >
+                  Install update
+                </button>
+                <a
+                  class="button"
+                  id="openRelease"
+                  href="#"
+                  target="_blank"
+                  rel="noopener"
+                  hidden
+                  >View release</a
+                >
+              </div>
             </section>
             <section class="operation-panel">
               <div class="operation-head">
@@ -1270,8 +1280,9 @@
         <input name="backupName" type="hidden" />
         <input name="action" type="hidden" />
         <label>Reason<input name="reason" required minlength="3" /></label>
-        <label id="restoreConfirmation" hidden
-          >Type RESTORE to confirm<input name="confirmation" autocomplete="off"
+        <label id="operationConfirmation" hidden
+          ><span id="operationConfirmationText">Type RESTORE to confirm</span
+          ><input name="confirmation" autocomplete="off"
         /></label>
         <div class="dialog-actions">
           <button class="button" type="button" data-close-operation>
@@ -1311,6 +1322,6 @@
     </dialog>
     <div class="toast" id="toast" role="status" aria-live="polite"></div>
     <script src="signify-shared.js?v=20260718"></script>
-    <script src="platform.js?v=2026082503"></script>
+    <script src="platform.js?v=2026082601"></script>
   </body>
 </html>

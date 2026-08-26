@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- Aligned the runtime, container, release workflow, documentation, and signed
+  package naming on version `1.1.0`.
+- Added periodic private-release detection and verified one-click installation
+  for managed hosts, including package size limits, SHA-256 and Ed25519 checks,
+  migration preflight, safety backup, readiness gating, and automatic rollback.
+
 - Added a separate creator-controlled license authority with Ed25519 lease
   issuance, installation binding, activation-key rotation, revocation, and
   authenticated administration routes.

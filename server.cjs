@@ -631,8 +631,9 @@ function startServer(options = {}) {
   });
   application.observability.start();
   const licenseRefresh = application.licensing.startAutoRefresh(
-    application.config.licenseRefreshIntervalMs,
-  );
+      application.config.licenseRefreshIntervalMs,
+    ),
+    updateMonitor = application.operations.startUpdateMonitor();
   const server = http.createServer(application.handler);
   const jobs =
     application.config.jobMode === "embedded"
@@ -652,6 +653,7 @@ function startServer(options = {}) {
     });
     await jobs.stop();
     licenseRefresh.stop();
+    updateMonitor.stop();
     runtimeLease.release();
     application.db.close();
     process.exitCode = 1;
@@ -674,6 +676,7 @@ function startServer(options = {}) {
       clearTimeout(forceClose);
       await jobs.stop();
       licenseRefresh.stop();
+      updateMonitor.stop();
       await application.observability.stop();
       runtimeLease.release();
       application.db.close();

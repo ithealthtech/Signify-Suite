@@ -1,7 +1,7 @@
 # Signify Creator
 
 **Current stable release:** [v1.0.0](https://github.com/ithealthtech/Signify-Suite/releases/tag/v1.0.0) ·
-[Download the production Node.js package](https://github.com/ithealthtech/Signify-Suite/releases/download/v1.0.0/signify-creator-v1.0.0.zip)
+[Download the latest signed production package](https://github.com/ithealthtech/Signify-Suite/releases/latest)
 
 Signify Creator is a self-hosted, multi-tenant email-signature SaaS for
 Node.js. It provides an Outlook-safe signature studio, reusable templates,
@@ -179,14 +179,10 @@ yet make `DATABASE_URL` the live application database.
 
 ### Install a release package
 
-Download
-[`signify-creator-v1.0.0.zip`](https://github.com/ithealthtech/Signify-Suite/releases/download/v1.0.0/signify-creator-v1.0.0.zip),
-verify its SHA-256 digest, extract it, open a terminal in that directory, and
-run:
-
-```text
-ed2fd44674689354eba599cd0f5bb6ac608395360c3ddf12138a9d20db20df35
-```
+Open the [latest release](https://github.com/ithealthtech/Signify-Suite/releases/latest)
+and download `signify-creator-vX.Y.Z.tar.gz` plus the matching `.sha256` file.
+Verify that the checksum in the sidecar matches the archive, extract the
+archive, open a terminal in that directory, and run:
 
 ```powershell
 npm ci --omit=dev
@@ -374,6 +370,11 @@ can be configured later from **Application > Integrations**.
 | `SIGNIFY_RELEASE_SIGNING_PUBLIC_KEY` | Publisher release verification public key                | Managed updates   |
 | `SIGNIFY_JOB_MODE`                   | `embedded`, or `external` with a supervised worker       | Yes               |
 | `SIGNIFY_UPDATE_GITHUB_TOKEN`        | Fine-grained read-only token for private release checks  | Private repo only |
+| `SIGNIFY_UPDATE_CHECK_HOURS`         | Automatic release-check interval; defaults to `6`        | No                |
+| `SIGNIFY_RELEASES_DIR`               | Absolute immutable-release storage path                  | Managed updates   |
+| `SIGNIFY_CURRENT_LINK`               | Absolute active-release link                             | Managed updates   |
+| `SIGNIFY_DEPLOY_RESTART_SCRIPT`      | Absolute supervisor restart adapter                      | Managed updates   |
+| `SIGNIFY_DEPLOY_HEALTH_URL`          | Public `/api/ready` URL used after restart               | Managed updates   |
 | `SIGNIFY_MEDIA_STORAGE`              | `local` for one host, or `s3` for private object storage | Yes               |
 | `SIGNIFY_TENANT_DELETION_GRACE_DAYS` | Reversible tenant-deletion delay from `1` through `90`   | Yes               |
 | `S3_BUCKET` / `S3_REGION`            | Tenant-media bucket and its region                       | With `s3`         |
@@ -582,6 +583,17 @@ download assets. The token is never returned to the browser. Configure
 `SIGNIFY_UPDATE_REPOSITORY` and `SIGNIFY_UPDATE_GITHUB_TOKEN` instead when an
 unattended environment-based integration is preferred.
 
+Release detection runs every six hours by default. Change
+`SIGNIFY_UPDATE_CHECK_HOURS` when a different interval is required. Managed
+installations can use **Application > Updates & backups > Install update** after
+configuring the release directory, current-release link, restart adapter,
+health URL, and publisher signing key documented in [DEPLOYMENT.md](DEPLOYMENT.md).
+Signify downloads the private release server-side, verifies the SHA-256 digest
+and Ed25519 signature, preflights migrations against a database copy, creates a
+safety backup, restarts, and rolls back automatically if readiness fails.
+Hosting panels without stable links and a restart adapter remain download-only
+and should deploy the same signed package through their native release system.
+
 The host must allow outbound HTTPS access to `api.github.com` and GitHub release
 asset endpoints. Revoke and replace any token that appears in a URL, log, or
 support transcript.
@@ -719,12 +731,11 @@ environment to the new key before restarting.
 
 ## Updating
 
-1. Back up the database and uploaded assets.
-2. Build a fresh `dist/` artifact from the new release.
+1. Create an application backup and confirm off-site recovery is healthy.
+2. Use **Application > Updates & backups** when managed updates are configured,
+   or deploy the signed release package through the hosting platform.
 3. Preserve the production environment variables and persistent directories.
-4. Run `npm ci --omit=dev` in the new artifact.
-5. Stop the old process and start the new process.
-6. Confirm `GET /api/health` returns HTTP `200`.
+4. Confirm `GET /api/ready` returns HTTP `200` with the new version.
 
 Migrations are forward-only and run automatically on startup. Never replace or
 delete the production database during an application update.
