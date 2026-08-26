@@ -111,7 +111,7 @@ jobs:
     timeout-minutes: 15
     environment:
       name: staging
-      url: ${{ secrets.SIGNIFY_HEALTH_URL }}
+      url: ${{ vars.SIGNIFY_HEALTH_URL }}
     steps:
       - uses: actions/download-artifact@v8
         with:
@@ -149,7 +149,7 @@ jobs:
     timeout-minutes: 15
     environment:
       name: production
-      url: ${{ secrets.SIGNIFY_HEALTH_URL }}
+      url: ${{ vars.SIGNIFY_HEALTH_URL }}
     steps:
       - uses: actions/download-artifact@v8
         with:
