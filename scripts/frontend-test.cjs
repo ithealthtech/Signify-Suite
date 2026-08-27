@@ -297,7 +297,7 @@ async function main() {
       new RegExp(`<strong>${label}</strong>`),
       `Standalone installer is missing the ${label} stage`,
     );
-  for (const provider of ["microsoft", "stripe", "github"])
+  for (const provider of ["email", "microsoft", "stripe", "github"])
     assert.match(
       platformHtml,
       new RegExp(`data-open-integration="${provider}"`),
@@ -314,6 +314,7 @@ async function main() {
     "Integration tiles must open their provider settings",
   );
   for (const formId of [
+    "emailConnectForm",
     "microsoftIntegrationActions",
     "stripeConnectForm",
     "githubConnectForm",
@@ -332,12 +333,12 @@ async function main() {
   );
   assert.equal(
     (platformHtml.match(/autocomplete="new-password"/g) || []).length,
-    3,
+    4,
     "Provider secrets must be marked as new credentials",
   );
   assert.equal(
     (platformHtml.match(/data-1p-ignore/g) || []).length,
-    5,
+    6,
     "Provider identifiers and secrets must opt out of password-manager autofill",
   );
   assert.match(
@@ -444,6 +445,11 @@ async function main() {
     appStyles,
     /\.app-shell \.preview-workspace \{[\s\S]*background-color: var\(--nav\);/,
     "Studio preview must use the login-inspired product canvas",
+  );
+  assert.match(
+    appStyles,
+    /body\.authenticated-page:has\(dialog\[open\]\) \{[\s\S]*overflow: hidden;/,
+    "Open dialogs must lock background page scrolling",
   );
   assert.match(
     platformHtml,

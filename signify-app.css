@@ -27,6 +27,10 @@ body.authenticated-page,
   background: #eef0f3;
 }
 
+body.authenticated-page:has(dialog[open]) {
+  overflow: hidden;
+}
+
 .app-shell .eyebrow,
 body.authenticated-page .eyebrow {
   color: #777d87;

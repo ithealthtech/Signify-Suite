@@ -40,6 +40,11 @@ async function main() {
       terminal: async () => {
         throw new Error("permanent failure");
       },
+      "email.transactional": async (payload) => {
+        if (payload.fail) throw new Error("email delivery failed");
+        assert.match(payload.html, /secret-token/);
+        return { delivered: true };
+      },
     },
     { retryBaseSeconds: 1, staleAfterMinutes: 1 },
   );
@@ -125,6 +130,30 @@ async function main() {
     assert.equal(terminalRow.status, "dead_lettered");
     assert.ok(terminalRow.dead_lettered_at);
     assert.match(terminalRow.last_error, /permanent failure/);
+
+    const deliveredEmail = queue.enqueue("email.transactional", {
+      html: '<a href="https://example.test/secret-token">Verify</a>',
+    });
+    assert.equal(await queue.runOnce(), true);
+    assert.deepEqual(
+      JSON.parse(
+        db
+          .prepare("SELECT payload_json FROM background_jobs WHERE id=?")
+          .get(deliveredEmail.id).payload_json,
+      ),
+      {},
+    );
+    const failedEmail = queue.enqueue(
+      "email.transactional",
+      { fail: true, html: "secret-token" },
+      { maxAttempts: 1 },
+    );
+    assert.equal(await queue.runOnce(), true);
+    const failedEmailRow = db
+      .prepare("SELECT status,payload_json FROM background_jobs WHERE id=?")
+      .get(failedEmail.id);
+    assert.equal(failedEmailRow.status, "dead_lettered");
+    assert.deepEqual(JSON.parse(failedEmailRow.payload_json), {});
 
     db.prepare(
       "INSERT INTO organizations(id,name,slug) VALUES ('tenant-a','Tenant A','tenant-a'),('tenant-b','Tenant B','tenant-b')",
@@ -212,7 +241,7 @@ async function main() {
     await worker.stop("test");
     assert.equal(fs.existsSync(worker.config.workerHealthPath), false);
     console.log(
-      "Job tests passed: deduplication, atomic execution, retry, dead letters, tenant concurrency, completion, stale recovery, external execution, and graceful shutdown",
+      "Job tests passed: deduplication, atomic execution, retry, dead letters, sensitive payload scrubbing, tenant concurrency, completion, stale recovery, external execution, and graceful shutdown",
     );
   } finally {
     db.close();

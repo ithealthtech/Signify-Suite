@@ -8,7 +8,7 @@
     <link rel="stylesheet" href="signify-shared.css?v=20260718" />
     <link rel="stylesheet" href="admin.css?v=20260722" />
     <link rel="stylesheet" href="platform.css?v=2026082503" />
-    <link rel="stylesheet" href="signify-app.css?v=2026082501" />
+    <link rel="stylesheet" href="signify-app.css?v=2026082601" />
   </head>
   <body class="authenticated-page">
     <header class="app-header">
@@ -257,6 +257,23 @@
             </button>
           </div>
           <div class="integration-catalog" aria-label="Available integrations">
+            <button
+              class="integration-tile"
+              data-open-integration="email"
+              type="button"
+            >
+              <span class="provider-logo email-logo" aria-hidden="true">@</span>
+              <span class="integration-tile-copy">
+                <strong>Transactional Email</strong>
+                <small>Verification, invitations, and password recovery</small>
+              </span>
+              <span class="integration-tile-state" id="emailTileState">
+                Loading
+              </span>
+              <span class="integration-chevron" aria-hidden="true"
+                >&rsaquo;</span
+              >
+            </button>
             <button
               class="integration-tile"
               data-open-integration="microsoft"
@@ -602,6 +619,70 @@
             &times;
           </button>
         </div>
+        <section data-integration-panel="email" hidden>
+          <div class="provider-dialog-intro">
+            <span class="provider-logo email-logo" aria-hidden="true">@</span>
+            <div>
+              <strong>Transactional Email</strong>
+              <p>Account verification, invitations, and password recovery.</p>
+            </div>
+          </div>
+          <div class="integration-status" id="emailIntegrationStatus"></div>
+          <form
+            class="control-form integration-form"
+            id="emailConnectForm"
+            autocomplete="off"
+            data-form-type="other"
+          >
+            <h3>Connect Resend</h3>
+            <p>
+              Use a sending-only API key and a sender on a verified domain. A
+              test message is delivered to the current Application Owner before
+              the encrypted key is saved.
+            </p>
+            <label
+              >Resend API key<input
+                name="apiKey"
+                type="password"
+                required
+                autocomplete="new-password"
+                data-1p-ignore
+                data-lpignore="true"
+                spellcheck="false"
+            /></label>
+            <div class="form-grid">
+              <label
+                >From address<input
+                  name="from"
+                  placeholder="Signify &lt;noreply@example.com&gt;"
+                  required
+                  autocomplete="off"
+              /></label>
+              <label
+                >Reply-to address<input
+                  name="replyTo"
+                  type="email"
+                  placeholder="support@example.com"
+                  autocomplete="off"
+              /></label>
+            </div>
+            <label
+              >Reason<input
+                name="reason"
+                value="Connect transactional email"
+                required
+                minlength="3"
+            /></label>
+            <div class="integration-actions">
+              <button class="button primary" type="submit">
+                Send test and connect
+              </button>
+              <button class="button danger" id="disconnectEmail" type="button">
+                Disconnect
+              </button>
+            </div>
+          </form>
+        </section>
         <section data-integration-panel="microsoft" hidden>
           <div class="provider-dialog-intro">
             <span class="provider-logo microsoft-logo" aria-hidden="true">
@@ -1322,6 +1403,6 @@
     </dialog>
     <div class="toast" id="toast" role="status" aria-live="polite"></div>
     <script src="signify-shared.js?v=20260718"></script>
-    <script src="platform.js?v=2026082601"></script>
+    <script src="platform.js?v=2026082602"></script>
   </body>
 </html>

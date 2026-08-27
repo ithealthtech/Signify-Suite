@@ -12,6 +12,10 @@ const { createMediaStorage } = require("./server/media-storage.cjs");
 const { createObservability } = require("./server/observability.cjs");
 const { createInstaller } = require("./server/installer.cjs");
 const { createLicensing } = require("./server/licensing.cjs");
+const {
+  createTransactionalEmail,
+} = require("./server/transactional-email.cjs");
+const { applicationReadiness } = require("./server/readiness.cjs");
 const { acquireRuntimeLease } = require("./server/runtime-lease.cjs");
 const {
   applyPendingRestore,
@@ -278,6 +282,13 @@ function createApplication(options = {}) {
     authorityUrl: config.licenseAuthorityUrl,
     fetchFn: options.fetchImpl,
   });
+  const transactionalEmail =
+    options.transactionalEmail ||
+    createTransactionalEmail({
+      config,
+      db,
+      fetchImpl: options.fetchImpl,
+    });
   const installer = createInstaller({
     config,
     db,
@@ -304,6 +315,7 @@ function createApplication(options = {}) {
     updateRepository: config.updateRepository,
     updateGithubToken: config.updateGithubToken,
     licensing,
+    transactionalEmail,
   });
   Object.assign(jobHandlers, signaturePortal.jobHandlers);
   const rateBuckets = new Map(),
@@ -525,32 +537,18 @@ function createApplication(options = {}) {
             requestId,
             { Allow: "GET" },
           );
-        db.prepare("SELECT 1").get();
-        if (!runtimeHealth.ready)
-          return json(
-            res,
-            503,
-            {
-              status: "unavailable",
-              service: "signify-creator",
-              database: "ready",
-              runtime: runtimeHealth.error || "runtime lease unavailable",
-              version: packageMetadata.version,
-              time: new Date().toISOString(),
-            },
-            requestId,
-          );
+        const readiness = applicationReadiness({
+          config,
+          db,
+          installer,
+          runtimeHealth,
+          transactionalEmail,
+          version: packageMetadata.version,
+        });
         return json(
           res,
-          200,
-          {
-            status: "ok",
-            service: "signify-creator",
-            database: "ready",
-            runtime: "ready",
-            version: packageMetadata.version,
-            time: new Date().toISOString(),
-          },
+          readiness.status === "unavailable" ? 503 : 200,
+          readiness,
           requestId,
         );
       }
@@ -612,6 +610,7 @@ function createApplication(options = {}) {
     operations,
     restored,
     runtimeHealth,
+    transactionalEmail,
   };
 }
 

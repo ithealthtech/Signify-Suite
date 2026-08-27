@@ -498,6 +498,7 @@ function renderIntegrationTile(
   stateLabel.textContent = displayStatus;
   stateLabel.classList.toggle("connected", configured);
   const names = {
+    email: "Transactional Email",
     microsoft: "Microsoft 365",
     stripe: "Stripe",
     github: "GitHub",
@@ -509,6 +510,7 @@ function renderIntegrationTile(
 }
 function openIntegration(provider) {
   const names = {
+    email: "Transactional Email",
     microsoft: "Microsoft 365",
     stripe: "Stripe",
     github: "GitHub",
@@ -526,7 +528,8 @@ async function loadIntegrations() {
   const result = await api("/api/platform/integrations"),
     stripe = result.stripe,
     microsoft = result.microsoft,
-    github = result.github;
+    github = result.github,
+    email = result.email;
   state.stripePrices = stripe.catalog || state.stripePrices;
   $("#microsoftIntegrationStatus").innerHTML =
     `<div><span>Status</span><strong>${escapeHtml(microsoft.status)}</strong></div>` +
@@ -571,7 +574,39 @@ async function loadIntegrations() {
     github.repository,
     github.configured,
   );
+  $("#emailIntegrationStatus").innerHTML =
+    `<div><span>Status</span><strong>${email.configured ? "connected" : "disconnected"}</strong></div>` +
+    `<div><span>Provider</span><strong>${escapeHtml(email.provider || "Not configured")}</strong></div>` +
+    `<div><span>Sender</span><strong>${escapeHtml(email.from || "Not configured")}</strong></div>` +
+    `<div><span>Verified</span><strong>${escapeHtml(dateLabel(email.lastVerifiedAt))}</strong></div>`;
+  const emailForm = $("#emailConnectForm");
+  emailForm.elements.from.value = email.from || "";
+  emailForm.elements.replyTo.value = email.replyTo || "";
+  $("#disconnectEmail").disabled = email.source !== "vault";
+  renderIntegrationTile("email", email.status, email.from, email.configured);
   renderStripePrices(stripe.prices || {});
+}
+
+async function connectEmail(event) {
+  event.preventDefault();
+  const form = event.currentTarget,
+    button = event.submitter,
+    body = Object.fromEntries(new FormData(form));
+  busy(button, true, "Sending test...");
+  try {
+    await api("/api/platform/integrations/email/connect", {
+      method: "POST",
+      body: JSON.stringify(body),
+      timeoutMs: 30000,
+    });
+    form.elements.apiKey.value = "";
+    await loadIntegrations();
+    toast("Transactional email connected");
+  } catch (error) {
+    toast(error.message);
+  } finally {
+    busy(button, false);
+  }
 }
 
 async function connectGithub(event) {
@@ -1616,6 +1651,7 @@ function bindEvents() {
     saveMicrosoftSetup,
   );
   $("#stripeConnectForm").addEventListener("submit", connectStripe);
+  $("#emailConnectForm").addEventListener("submit", connectEmail);
   $("#githubConnectForm").addEventListener("submit", connectGithub);
   $("#disconnectGithub").addEventListener("click", async () => {
     const reason = prompt("Reason for disconnecting GitHub releases:");
@@ -1627,6 +1663,20 @@ function bindEvents() {
       });
       await loadIntegrations();
       toast("GitHub releases disconnected");
+    } catch (error) {
+      toast(error.message);
+    }
+  });
+  $("#disconnectEmail").addEventListener("click", async () => {
+    const reason = prompt("Reason for disconnecting transactional email:");
+    if (!reason) return;
+    try {
+      await api("/api/platform/integrations/email", {
+        method: "DELETE",
+        body: JSON.stringify({ reason }),
+      });
+      await loadIntegrations();
+      toast("Transactional email disconnected");
     } catch (error) {
       toast(error.message);
     }

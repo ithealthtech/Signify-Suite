@@ -428,6 +428,13 @@ hr {
   font-weight: 700;
   letter-spacing: 0;
 }
+.email-logo {
+  border-color: #c7d4ff;
+  background: #3159d4;
+  color: #fff;
+  font-size: 24px;
+  font-weight: 800;
+}
 
 .github-logo {
   color: #fff;

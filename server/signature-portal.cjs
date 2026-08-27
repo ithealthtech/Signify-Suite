@@ -104,6 +104,22 @@ function campaignDto(row) {
 function installEmailBody(signatureHtml) {
   return `<p>Your email signature is ready.</p>${signatureHtml}<p>Copy the signature above and paste it into your Outlook or Gmail signature settings.</p>`;
 }
+function emailText(value) {
+  return String(value || "")
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&#39;");
+}
+function emailSubjectLabel(value) {
+  return limited(
+    String(value || "")
+      .replace(/[\r\n]+/g, " ")
+      .trim(),
+    120,
+  );
+}
 function imageFormat(bytes) {
   if (
     bytes.length >= 8 &&
@@ -376,6 +392,15 @@ function createSignaturePortal({
   updateRepository = "",
   updateGithubToken = "",
   licensing,
+  transactionalEmail = {
+    summary: () => ({ configured: false, source: "none" }),
+    send: async () => {
+      throw Object.assign(new Error("Transactional email is not configured."), {
+        status: 503,
+        code: "MAIL_NOT_CONFIGURED",
+      });
+    },
+  },
 }) {
   seed(db, signature);
   const credentialVault = createCredentialVault(
@@ -846,7 +871,7 @@ function createSignaturePortal({
       pathname === "/api/platform/license" ||
       pathname === "/api/platform/billing/reconcile" ||
       (req.method === "DELETE" &&
-        /^\/api\/platform\/integrations\/(?:microsoft|stripe)$/.test(
+        /^\/api\/platform\/integrations\/(?:email|microsoft|stripe)$/.test(
           pathname,
         )) ||
       /^\/api\/platform\/operations\/backups\/[^/]+\/restore$/.test(pathname) ||
@@ -1049,12 +1074,30 @@ function createSignaturePortal({
     const connection = microsoftConnection(organizationId, true);
     return Boolean(microsoftAvailable() && connection?.sender_email);
   }
-  function mailOrganizationForUser(userId) {
-    return db
-      .prepare(
-        `SELECT c.organization_id FROM organization_microsoft_connections c JOIN organization_memberships m ON m.organization_id=c.organization_id JOIN organizations o ON o.id=c.organization_id WHERE m.user_id=? AND m.status='active' AND o.status='active' AND c.status='connected' AND c.sender_email<>'' ORDER BY m.created_at LIMIT 1`,
-      )
-      .get(userId)?.organization_id;
+  function transactionalMailAvailable() {
+    return Boolean(transactionalEmail.summary().configured);
+  }
+  function queueTransactionalMail({
+    to,
+    subject,
+    html,
+    idempotencyKey,
+    organizationId = null,
+  }) {
+    if (!transactionalMailAvailable())
+      throw Object.assign(new Error("Transactional email is not configured."), {
+        status: 503,
+        code: "MAIL_NOT_CONFIGURED",
+      });
+    return enqueueJob(
+      "email.transactional",
+      { to, subject, html, idempotencyKey },
+      {
+        organizationId,
+        dedupeKey: `email:${idempotencyKey}`,
+        maxAttempts: 8,
+      },
+    );
   }
   function billingAvailable() {
     const settings = stripeSettings();
@@ -1953,6 +1996,10 @@ function createSignaturePortal({
   const workflowHandlers = {
     "billing.reconcile": performBillingReconciliation,
     "directory.sync": performDirectorySync,
+    "email.transactional": async (payload) => {
+      const delivery = await transactionalEmail.send(payload);
+      return { delivered: true, provider: delivery.provider, id: delivery.id };
+    },
     "signature.rollout": performBulkRollout,
   };
 
@@ -2932,6 +2979,10 @@ function createSignaturePortal({
               configured: Boolean(githubSettings().token),
               repository: githubSettings().repository,
             },
+            email: {
+              ...integrationSummary("email"),
+              ...transactionalEmail.summary(),
+            },
           },
           requestId,
         );
@@ -2961,6 +3012,10 @@ function createSignaturePortal({
               ...integrationSummary("stripe"),
               configured: billingAvailable(),
               skipped: stripeSkipped,
+            },
+            email: {
+              ...integrationSummary("email"),
+              ...transactionalEmail.summary(),
             },
             complete,
           },
@@ -3028,6 +3083,93 @@ function createSignaturePortal({
           requestId,
         );
         return json(res, 200, { skipped }, requestId);
+      }
+      if (
+        url.pathname === "/api/platform/integrations/email/connect" &&
+        req.method === "POST"
+      ) {
+        const body = await readJsonBody(req, { limit: 16384 }),
+          apiKey = String(body.apiKey || "").trim(),
+          from = limited(body.from, 320).trim(),
+          replyTo = limited(body.replyTo, 320).trim(),
+          reason = limited(body.reason, 500).trim();
+        if (!/^re_[A-Za-z0-9_-]{8,}$/.test(apiKey) || !from)
+          throw Object.assign(
+            new Error("Enter a valid Resend API key and sender address."),
+            { status: 400, code: "MAIL_CONFIGURATION_INVALID" },
+          );
+        if (reason.length < 3)
+          throw Object.assign(new Error("A reason is required."), {
+            status: 400,
+            code: "REASON_REQUIRED",
+          });
+        const verified = await transactionalEmail.verify(
+            { apiKey, from, replyTo },
+            owner.email,
+          ),
+          encrypted = credentialVault.encrypt("email", { apiKey });
+        db.prepare(
+          `INSERT INTO application_integrations(provider,status,mode,account_id,account_name,configuration_json,encrypted_credentials,credential_key_id,last_verified_at,last_error,updated_by) VALUES ('email','connected','resend',?,?,?,?,?,strftime('%Y-%m-%dT%H:%M:%fZ','now'),'',?) ON CONFLICT(provider) DO UPDATE SET status='connected',mode='resend',account_id=excluded.account_id,account_name=excluded.account_name,configuration_json=excluded.configuration_json,encrypted_credentials=excluded.encrypted_credentials,credential_key_id=excluded.credential_key_id,last_verified_at=excluded.last_verified_at,last_error='',updated_by=excluded.updated_by,updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now')`,
+        ).run(
+          owner.email,
+          from,
+          JSON.stringify({
+            provider: "resend",
+            from,
+            replyTo,
+            endpoint: verified.endpoint,
+          }),
+          encrypted,
+          credentialVault.keyId,
+          owner.id,
+        );
+        recordApplicationAudit(
+          owner,
+          "email.connected",
+          "application_integration",
+          "email",
+          null,
+          reason,
+          {
+            provider: "resend",
+            from,
+            replyTo,
+            testDeliveryId: verified.delivery.id,
+          },
+          requestId,
+        );
+        return json(
+          res,
+          200,
+          { email: transactionalEmail.summary() },
+          requestId,
+        );
+      }
+      if (
+        url.pathname === "/api/platform/integrations/email" &&
+        req.method === "DELETE"
+      ) {
+        const body = await readJsonBody(req, { limit: 8192 }),
+          reason = limited(body.reason, 500).trim();
+        if (reason.length < 3)
+          throw Object.assign(new Error("A reason is required."), {
+            status: 400,
+            code: "REASON_REQUIRED",
+          });
+        db.prepare(
+          "DELETE FROM application_integrations WHERE provider='email'",
+        ).run();
+        recordApplicationAudit(
+          owner,
+          "email.disconnected",
+          "application_integration",
+          "email",
+          null,
+          reason,
+          {},
+          requestId,
+        );
+        return json(res, 200, { disconnected: true }, requestId);
       }
       if (
         url.pathname === "/api/platform/integrations/github/connect" &&
@@ -3669,11 +3811,17 @@ function createSignaturePortal({
             },
             requestId,
           );
+        if (production && !transactionalMailAvailable())
+          throw Object.assign(
+            new Error("Transactional email is required for tenant onboarding."),
+            { status: 503, code: "MAIL_NOT_CONFIGURED" },
+          );
         const organizationId = randomUUID(),
           invitationId = randomUUID(),
           invitationToken = randomBytes(32).toString("base64url"),
           organizationSlug = `${slug(name)}-${organizationId.slice(0, 8)}`,
           expires = new Date(Date.now() + 7 * 86400000).toISOString(),
+          invitationUrl = `${cleanUrl(signature.publicUrl || requestBase(req))}/signature.html?invite=${encodeURIComponent(invitationToken)}`,
           settings = {
             publicUrl: signature.publicUrl || "",
             assetBaseUrl: signature.assetBaseUrl || signature.publicUrl || "",
@@ -3716,6 +3864,14 @@ function createSignaturePortal({
             owner.id,
             expires,
           );
+          if (transactionalMailAvailable())
+            queueTransactionalMail({
+              to: adminEmail,
+              subject: `Join ${emailSubjectLabel(name)} on Signify`,
+              html: `<p>Your ${emailText(name)} Signify workspace is ready.</p><p><a href="${emailText(invitationUrl)}">Create your account</a></p><p>This invitation expires in 7 days.</p>`,
+              idempotencyKey: `tenant-invitation/${invitationId}`,
+              organizationId,
+            });
           recordApplicationAudit(
             owner,
             "tenant.created",
@@ -3742,7 +3898,7 @@ function createSignaturePortal({
               status: "active",
             },
             adminEmail,
-            invitationUrl: `${cleanUrl(signature.publicUrl || requestBase(req))}/signature.html?invite=${encodeURIComponent(invitationToken)}`,
+            invitationUrl,
             invitationExpiresAt: expires,
           },
           requestId,
@@ -4307,16 +4463,7 @@ function createSignaturePortal({
         {
           registration: signature.allowRegistration,
           microsoft: microsoftAvailable(),
-          passwordReset:
-            mailAvailable() ||
-            Boolean(
-              db
-                .prepare(
-                  "SELECT 1 FROM organization_microsoft_connections WHERE status='connected' AND sender_email<>'' LIMIT 1",
-                )
-                .get(),
-            ) ||
-            !production,
+          passwordReset: transactionalMailAvailable() || !production,
         },
         requestId,
       );
@@ -4387,28 +4534,27 @@ function createSignaturePortal({
           );
       let developmentToken = null;
       if (account) {
-        const token = createOneTimeToken(
-            "password_reset_tokens",
-            account.id,
-            30,
-          ),
-          link = `${cleanUrl(signature.publicUrl || requestBase(req))}/signature.html?reset=${encodeURIComponent(token)}`;
-        const mailOrganizationId = mailOrganizationForUser(account.id);
-        if (mailAvailable(mailOrganizationId))
-          await sendGraphMail(
-            mailOrganizationId,
-            account.email,
-            "Reset your Signify password",
-            `<p>A password reset was requested for your Signify account.</p><p><a href="${link}">Reset password</a></p><p>This link expires in 30 minutes.</p>`,
-          );
-        else if (mailAvailable())
-          await sendGraphMail(
-            null,
-            account.email,
-            "Reset your Signify password",
-            `<p>A password reset was requested for your Signify account.</p><p><a href="${link}">Reset password</a></p><p>This link expires in 30 minutes.</p>`,
-          );
-        else developmentToken = token;
+        db.exec("BEGIN IMMEDIATE");
+        try {
+          const token = createOneTimeToken(
+              "password_reset_tokens",
+              account.id,
+              30,
+            ),
+            link = `${cleanUrl(signature.publicUrl || requestBase(req))}/signature.html?reset=${encodeURIComponent(token)}`;
+          if (transactionalMailAvailable())
+            queueTransactionalMail({
+              to: account.email,
+              subject: "Reset your Signify password",
+              html: `<p>A password reset was requested for your Signify account.</p><p><a href="${link}">Reset password</a></p><p>This link expires in 30 minutes.</p>`,
+              idempotencyKey: `password-reset/${tokenHash(token).slice(0, 32)}`,
+            });
+          else developmentToken = token;
+          db.exec("COMMIT");
+        } catch (error) {
+          db.exec("ROLLBACK");
+          throw error;
+        }
       }
       return json(
         res,
@@ -4620,7 +4766,7 @@ function createSignaturePortal({
           },
           requestId,
         );
-      if (production && !mailAvailable())
+      if (production && !transactionalMailAvailable())
         return json(
           res,
           503,
@@ -4683,22 +4829,27 @@ function createSignaturePortal({
           !existingAccount.email_verified_at &&
           verifyPassword(password, existingAccount.password_hash)
         ) {
-          const verificationToken = createOneTimeToken(
+          let verificationToken;
+          db.exec("BEGIN IMMEDIATE");
+          try {
+            verificationToken = createOneTimeToken(
               "email_verification_tokens",
               existingAccount.id,
               24 * 60,
-            ),
-            link = `${cleanUrl(signature.publicUrl || requestBase(req))}/signature.html?verify=${encodeURIComponent(verificationToken)}`;
-          const mailOrganizationId = mailOrganizationForUser(
-            existingAccount.id,
-          );
-          if (mailAvailable(mailOrganizationId))
-            await sendGraphMail(
-              mailOrganizationId,
-              email,
-              "Verify your Signify email",
-              `<p>Verify your email to activate your Signify workspace.</p><p><a href="${link}">Verify email</a></p><p>This link expires in 24 hours.</p>`,
             );
+            const link = `${cleanUrl(signature.publicUrl || requestBase(req))}/signature.html?verify=${encodeURIComponent(verificationToken)}`;
+            if (transactionalMailAvailable())
+              queueTransactionalMail({
+                to: email,
+                subject: "Verify your Signify email",
+                html: `<p>Verify your email to activate your Signify workspace.</p><p><a href="${link}">Verify email</a></p><p>This link expires in 24 hours.</p>`,
+                idempotencyKey: `email-verification/${tokenHash(verificationToken).slice(0, 32)}`,
+              });
+            db.exec("COMMIT");
+          } catch (error) {
+            db.exec("ROLLBACK");
+            throw error;
+          }
           return json(
             res,
             200,
@@ -4743,6 +4894,7 @@ function createSignaturePortal({
             logoUrl: "",
           },
         };
+      let verificationToken;
       db.exec("BEGIN IMMEDIATE");
       try {
         licensing.requireTenantCapacity(
@@ -4773,29 +4925,31 @@ function createSignaturePortal({
         db.prepare(
           `INSERT INTO organization_memberships(organization_id,user_id,role,status,signature_json) VALUES (?,?,'admin','active',?)`,
         ).run(orgId, userId, JSON.stringify(sig));
+        verificationToken = createOneTimeToken(
+          "email_verification_tokens",
+          userId,
+          24 * 60,
+        );
+        if (transactionalMailAvailable()) {
+          const link = `${cleanUrl(signature.publicUrl || requestBase(req))}/signature.html?verify=${encodeURIComponent(verificationToken)}`;
+          queueTransactionalMail({
+            to: email,
+            subject: "Verify your Signify email",
+            html: `<p>Verify your email to activate your Signify workspace.</p><p><a href="${link}">Verify email</a></p><p>This link expires in 24 hours.</p>`,
+            idempotencyKey: `email-verification/${tokenHash(verificationToken).slice(0, 32)}`,
+            organizationId: orgId,
+          });
+        }
         db.exec("COMMIT");
       } catch (error) {
         db.exec("ROLLBACK");
         throw error;
       }
       const row = memberById(orgId, userId),
-        created = userDto(row),
-        verificationToken = createOneTimeToken(
-          "email_verification_tokens",
-          userId,
-          24 * 60,
-        ),
-        link = `${cleanUrl(signature.publicUrl || requestBase(req))}/signature.html?verify=${encodeURIComponent(verificationToken)}`;
+        created = userDto(row);
       recordAudit(created, "workspace.created", "organization", orgId, {
         name: company,
       });
-      if (mailAvailable())
-        await sendGraphMail(
-          null,
-          email,
-          "Verify your Signify email",
-          `<p>Verify your email to activate your Signify workspace.</p><p><a href="${link}">Verify email</a></p><p>This link expires in 24 hours.</p>`,
-        );
       return json(
         res,
         201,
@@ -5408,7 +5562,7 @@ function createSignaturePortal({
       req.method === "POST"
     ) {
       requireAdmin(user);
-      if (production && !mailAvailable(user.organizationId))
+      if (production && !transactionalMailAvailable())
         return json(
           res,
           503,
@@ -5448,7 +5602,9 @@ function createSignaturePortal({
           requestId,
         );
       const token = randomBytes(32).toString("base64url"),
-        expires = new Date(Date.now() + 7 * 86400000).toISOString();
+        expires = new Date(Date.now() + 7 * 86400000).toISOString(),
+        workspaceName = workspaceRow(user).name,
+        link = `${publicBase(req, user)}/signature.html?invite=${encodeURIComponent(token)}`;
       db.exec("BEGIN IMMEDIATE");
       try {
         if (memberByEmail(user.organizationId, email))
@@ -5479,19 +5635,19 @@ function createSignaturePortal({
           user.id,
           expires,
         );
+        if (transactionalMailAvailable())
+          queueTransactionalMail({
+            to: email,
+            subject: `Join ${emailSubjectLabel(workspaceName)} on Signify`,
+            html: `<p>You were invited to manage your email signature in ${emailText(workspaceName)}.</p><p><a href="${emailText(link)}">Accept invitation</a></p><p>This invitation expires in 7 days.</p>`,
+            idempotencyKey: `workspace-invitation/${tokenHash(token).slice(0, 32)}`,
+            organizationId: user.organizationId,
+          });
         db.exec("COMMIT");
       } catch (error) {
         db.exec("ROLLBACK");
         throw error;
       }
-      const link = `${publicBase(req, user)}/signature.html?invite=${encodeURIComponent(token)}`;
-      if (mailAvailable(user.organizationId))
-        await sendGraphMail(
-          user.organizationId,
-          email,
-          `Join ${workspaceRow(user).name} on Signify`,
-          `<p>You were invited to manage your email signature in ${workspaceRow(user).name}.</p><p><a href="${link}">Accept invitation</a></p><p>This invitation expires in 7 days.</p>`,
-        );
       recordAudit(user, "invitation.sent", "invitation", email, { role });
       return json(
         res,

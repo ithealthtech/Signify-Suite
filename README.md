@@ -128,8 +128,8 @@ npm run dev
 
 Open [http://127.0.0.1:4173](http://127.0.0.1:4173), sign in with the
 configured bootstrap account. Database migrations run automatically when the
-server starts. Microsoft 365, Stripe, and GitHub can be connected later from
-**Application > Integrations**.
+server starts. Transactional email, Microsoft 365, Stripe, and GitHub can be
+connected later from **Application > Integrations**.
 
 ## Production Installation
 
@@ -352,8 +352,9 @@ traffic arrives through a trusted reverse proxy.
 
 #### Configuration checklist
 
-Use this table when filling in `.env.local`. Microsoft 365, Stripe, and GitHub
-can be configured later from **Application > Integrations**.
+Use this table when filling in `.env.local`. Transactional email, Microsoft
+365, Stripe, and GitHub can be configured later from **Application >
+Integrations**.
 
 | Setting                              | What to enter                                            | Required          |
 | ------------------------------------ | -------------------------------------------------------- | ----------------- |
@@ -383,6 +384,10 @@ can be configured later from **Application > Integrations**.
 | `SIGNATURE_ALLOW_DEFAULT_ADMIN`      | `false` after the first account exists                   | Yes               |
 | `SIGNIFY_REQUIRE_OWNER_MFA`          | `true` to require enrollment before control-plane use    | Yes               |
 | `TRUST_PROXY`                        | `true` only behind a trusted, private reverse proxy      | No                |
+| `SIGNIFY_MAIL_PROVIDER`              | `resend` for account email, or `disabled` during setup   | Before launch     |
+| `RESEND_API_KEY`                     | Resend API key stored in the host secret store           | With `resend`     |
+| `SIGNIFY_MAIL_FROM`                  | Verified sender, such as `Signify <hello@example.com>`   | With `resend`     |
+| `SIGNIFY_MAIL_REPLY_TO`              | Optional monitored support mailbox                       | No                |
 | `MICROSOFT_*`                        | Leave blank and complete Microsoft setup in the owner UI | No                |
 | `STRIPE_*`                           | Leave blank and complete Stripe setup in the owner UI    | No                |
 
@@ -484,9 +489,9 @@ The progress tracker has three stages:
    commits successfully.
 
 After installation, remove `SIGNIFY_SETUP_TOKEN` from the host and restart the
-application. The installer remains locked by database state. Microsoft 365,
-Stripe, and GitHub are optional and can be connected later from
-**Application > Integrations**.
+application. The installer remains locked by database state. Transactional
+email, Microsoft 365, Stripe, and GitHub are optional during setup and can be
+connected later from **Application > Integrations**.
 
 Provider credentials entered in the owner UI are encrypted with AES-256-GCM
 before storage and are never returned by the API or written to audit metadata.
@@ -516,6 +521,20 @@ Central Stripe product mappings control tenant capacity and features without
 shipping Stripe credentials or the license private key to a customer host. See
 [`docs/LICENSING.md`](docs/LICENSING.md) for the edition rights, authority
 deployment, key boundary, and signed-release process.
+
+### Transactional email
+
+Open **Application > Integrations > Transactional Email** and enter a Resend
+API key plus a sender from a verified domain. Signify sends a verification
+message before encrypting and storing the key. This channel is used only for
+account verification, password recovery, and invitations. Tenant Microsoft 365
+connections remain separate and are used for signature delivery and directory
+operations.
+
+Public registration stays unavailable in production until transactional email
+is connected. Direct user creation remains available to tenant administrators.
+Completed and permanently failed delivery jobs remove message bodies and token
+links from the durable queue.
 
 ### Microsoft 365
 

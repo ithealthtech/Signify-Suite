@@ -18,6 +18,7 @@ assert.equal(
   "Stripe live secret",
 );
 assert.equal(scanText(`AKIA${"A".repeat(16)}`)[0].type, "AWS access key");
+assert.equal(scanText(`re_${"A".repeat(32)}`)[0].type, "Resend API key");
 
 for (const required of [
   "SECURITY.md",

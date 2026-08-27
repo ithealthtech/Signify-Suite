@@ -25,6 +25,12 @@ function validEmail(value) {
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(value || ""));
 }
 
+function validSender(value) {
+  const candidate = String(value || "").trim(),
+    bracketed = candidate.match(/<([^<>]+)>$/);
+  return !/[\r\n]/.test(candidate) && validEmail(bracketed?.[1] || candidate);
+}
+
 function optionalAbsolutePath(value, name) {
   const candidate = String(value || "").trim();
   if (!candidate) return "";
@@ -228,6 +234,32 @@ function loadConfig(env = process.env, baseDir = path.join(__dirname, "..")) {
     throw new Error(
       "MICROSOFT_SENDER_EMAIL requires MICROSOFT_TENANT_ID for system mail.",
     );
+  const mailApiKey = String(env.RESEND_API_KEY || "").trim(),
+    mailProvider = String(
+      env.SIGNIFY_MAIL_PROVIDER || (mailApiKey ? "resend" : "disabled"),
+    )
+      .trim()
+      .toLowerCase(),
+    mailFrom = String(env.SIGNIFY_MAIL_FROM || "").trim(),
+    mailReplyTo = String(env.SIGNIFY_MAIL_REPLY_TO || "").trim(),
+    mailEndpoint = httpUrl(
+      String(env.RESEND_API_URL || "https://api.resend.com").trim(),
+      "RESEND_API_URL",
+    );
+  if (!["disabled", "resend"].includes(mailProvider))
+    throw new Error("SIGNIFY_MAIL_PROVIDER must be disabled or resend.");
+  if (mailFrom && !validSender(mailFrom))
+    throw new Error("SIGNIFY_MAIL_FROM must contain a valid email address.");
+  if (mailReplyTo && !validSender(mailReplyTo))
+    throw new Error(
+      "SIGNIFY_MAIL_REPLY_TO must contain a valid email address.",
+    );
+  if (
+    production &&
+    mailProvider === "resend" &&
+    !mailEndpoint.startsWith("https://")
+  )
+    throw new Error("RESEND_API_URL must use HTTPS in production.");
   const stripeSecretKey = String(env.STRIPE_SECRET_KEY || "").trim(),
     stripeWebhookSecret = String(env.STRIPE_WEBHOOK_SECRET || "").trim(),
     stripePrices = {
@@ -434,6 +466,14 @@ function loadConfig(env = process.env, baseDir = path.join(__dirname, "..")) {
     ),
     licenseRefreshIntervalMs: licenseRefreshHours * 60 * 60 * 1000,
     setup: { token: setupToken },
+    mail: {
+      provider: mailProvider,
+      apiKey: mailApiKey,
+      from: mailFrom,
+      replyTo: mailReplyTo,
+      endpoint: mailEndpoint,
+      lastVerifiedAt: null,
+    },
     signature: {
       sessionHours,
       mediaLimitBytes: Math.floor(mediaLimitMb * 1024 * 1024),

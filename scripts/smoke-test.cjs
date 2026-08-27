@@ -158,9 +158,18 @@ async function main() {
     };
   let microsoftLoginNonce = "",
     githubAuthorization = "";
+  const resendDeliveries = [];
   const fetchImpl = async (input, options = {}) => {
     const url = String(input);
     graphRequests.push(url);
+    if (url === "https://api.resend.com/emails") {
+      resendDeliveries.push({
+        authorization: options.headers?.Authorization || "",
+        idempotencyKey: options.headers?.["Idempotency-Key"] || "",
+        body: JSON.parse(options.body),
+      });
+      return graphResponse({ id: `email-smoke-${resendDeliveries.length}` });
+    }
     if (
       url ===
       "https://api.github.com/repos/ithealthtech/Signify-Suite/releases/latest"
@@ -2192,8 +2201,42 @@ async function main() {
       result.response.status === 200 &&
         result.body.vault.configured === true &&
         result.body.stripe.source === "environment" &&
+        result.body.email.configured === false &&
         result.body.github.configured === false,
       "integration readiness did not expose the environment fallback",
+    );
+    result = await request(
+      baseUrl,
+      "/api/platform/integrations/email/connect",
+      {
+        method: "POST",
+        body: {
+          apiKey: "re_smoke_transactional_key",
+          from: "Signify <noreply@example.com>",
+          replyTo: "support@example.com",
+          reason: "Verify account email delivery",
+        },
+        jar: adminJar,
+      },
+    );
+    const storedEmailIntegration = application.db
+      .prepare(
+        "SELECT encrypted_credentials FROM application_integrations WHERE provider='email'",
+      )
+      .get();
+    assert(
+      result.response.status === 200 &&
+        result.body.email.configured === true &&
+        resendDeliveries.length === 1 &&
+        resendDeliveries[0].authorization ===
+          "Bearer re_smoke_transactional_key" &&
+        resendDeliveries[0].body.to[0] === "admin@signify.local" &&
+        storedEmailIntegration.encrypted_credentials.startsWith("v1.") &&
+        !storedEmailIntegration.encrypted_credentials.includes(
+          "re_smoke_transactional_key",
+        ) &&
+        !JSON.stringify(result.body).includes("re_smoke_transactional_key"),
+      "transactional email onboarding did not verify delivery and protect its credentials",
     );
     result = await request(
       baseUrl,
