@@ -5,11 +5,16 @@ const fs = require("node:fs");
 const os = require("node:os");
 const path = require("node:path");
 const { spawnSync } = require("node:child_process");
+const { generateKeyPairSync } = require("node:crypto");
 const { parseEnv } = require("node:util");
 const { DatabaseSync } = require("node:sqlite");
 const { detectEnvironment, validateNodeVersion } = require("./setup.cjs");
 
 const root = path.join(__dirname, ".."),
+  licensePublicKey = generateKeyPairSync("ed25519").publicKey.export({
+    type: "spki",
+    format: "pem",
+  }),
   temporary = fs.mkdtempSync(path.join(os.tmpdir(), "signify-setup-test-")),
   environmentFile = path.join(temporary, ".env.local"),
   databasePath = path.join(temporary, "data", "signify.db"),
@@ -31,6 +36,13 @@ const root = path.join(__dirname, ".."),
     SIGNIFY_APPLICATION_OWNER_EMAIL: "owner@setup.example.com",
     SIGNIFY_BOOTSTRAP_PASSWORD: "InstallerRegression123!",
     SIGNIFY_CREDENTIAL_ENCRYPTION_KEY: "",
+    SIGNIFY_LICENSE_PUBLIC_KEY: licensePublicKey,
+    SIGNIFY_LICENSE_AUTHORITY_URL: "https://licenses.setup.example.com",
+    SIGNIFY_LICENSE_REFRESH_HOURS: "6",
+    SIGNIFY_MAIL_PROVIDER: "resend",
+    RESEND_API_KEY: "re_setup_test_key",
+    SIGNIFY_MAIL_FROM: "Signify <noreply@setup.example.com>",
+    SIGNIFY_MAIL_REPLY_TO: "support@setup.example.com",
   };
 
 function run(extraEnvironment = {}, extraArguments = []) {
@@ -120,6 +132,18 @@ try {
   assert.equal(configured.SIGNIFY_MEDIA_STORAGE, "local");
   assert.equal(configured.SIGNIFY_TENANT_DELETION_GRACE_DAYS, "7");
   assert.equal(configured.SIGNIFY_BOOTSTRAP_PASSWORD || "", "");
+  assert.equal(configured.SIGNIFY_LICENSE_PUBLIC_KEY, licensePublicKey);
+  assert.equal(
+    configured.SIGNIFY_LICENSE_AUTHORITY_URL,
+    baseEnvironment.SIGNIFY_LICENSE_AUTHORITY_URL,
+  );
+  assert.equal(configured.SIGNIFY_LICENSE_REFRESH_HOURS, "6");
+  assert.equal(configured.SIGNIFY_MAIL_PROVIDER, "resend");
+  assert.equal(configured.RESEND_API_KEY, "re_setup_test_key");
+  assert.equal(
+    configured.SIGNIFY_MAIL_FROM,
+    "Signify <noreply@setup.example.com>",
+  );
   assert.equal(
     configured.SIGNIFY_APPLICATION_OWNER_EMAIL,
     baseEnvironment.SIGNIFY_APPLICATION_OWNER_EMAIL,
@@ -189,8 +213,22 @@ try {
   assert.notEqual(result.status, 0);
   assert.match(result.stderr, /BACKUP_RETENTION_DAYS/);
 
+  result = run({ SIGNIFY_MAIL_PROVIDER: "smtp" }, ["--no-write-env"]);
+  assert.notEqual(result.status, 0);
+  assert.match(result.stderr, /SIGNIFY_MAIL_PROVIDER/);
+
+  result = run({ SIGNIFY_MAIL_FROM: "not-an-address" }, ["--no-write-env"]);
+  assert.notEqual(result.status, 0);
+  assert.match(result.stderr, /SIGNIFY_MAIL_FROM/);
+
+  result = run({ RESEND_API_URL: "http://email.example.com" }, [
+    "--no-write-env",
+  ]);
+  assert.notEqual(result.status, 0);
+  assert.match(result.stderr, /RESEND_API_URL must use HTTPS/);
+
   console.log(
-    "Setup test passed: configuration generation, credential generation, migrations, owner bootstrap, rerun safety, backups, and production validation",
+    "Setup test passed: configuration generation, credential generation, mail configuration, migrations, owner bootstrap, rerun safety, backups, and production validation",
   );
 } finally {
   fs.rmSync(temporary, { recursive: true, force: true, maxRetries: 5 });

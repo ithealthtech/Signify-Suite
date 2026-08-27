@@ -18,6 +18,7 @@ const state = {
   sessions: [],
   flags: {},
   fleet: null,
+  license: null,
 };
 let pendingReauthentication = null;
 
@@ -94,6 +95,7 @@ function showSection(name) {
 async function loadSession() {
   const result = await api("/api/platform/session");
   state.mfa = result.mfa;
+  state.license = result.license;
   $("#statOrganizations").textContent = result.stats.organizations;
   $("#statActive").textContent = result.stats.active;
   $("#statSuspended").textContent = result.stats.suspended;
@@ -109,6 +111,7 @@ async function loadSession() {
     ? "Replace authenticator"
     : "Set up MFA";
   $("#disableOwnerMfa").hidden = !result.mfa.enabled;
+  renderLicense();
   const enrollmentRequired = result.mfa.required && !result.mfa.enabled;
   $$("[data-section]").forEach((button) => {
     button.disabled = enrollmentRequired && button.dataset.section !== "owners";
@@ -116,6 +119,233 @@ async function loadSession() {
   $("#ownerForm").hidden = enrollmentRequired;
   $("#ownerManagementTable").hidden = enrollmentRequired;
   $("#ownerSessionsPanel").hidden = enrollmentRequired;
+}
+
+function editionLabel(value) {
+  return value === "enterprise" ? "Enterprise" : "Community";
+}
+
+function renderTenantMode() {
+  const license = state.license;
+  if (!license) return;
+  const community = license.edition === "community",
+    tenant = state.organizations[0],
+    capacity = tenant?.userCapacity,
+    atTenantLimit = (license.tenantCount || 0) >= license.maxTenants;
+  $("#tenantNavLabel").textContent = community ? "Workspace" : "Tenants";
+  $("#fleetNavLabel").textContent = community ? "Usage" : "Fleet & usage";
+  $("#tenantPageTitle").textContent = community ? "Workspace" : "Tenants";
+  $("#tenantPageDescription").textContent = community
+    ? "Manage the workspace, people, Microsoft 365 connection, and application settings."
+    : "Lifecycle, Microsoft 365 connection, seats, and SaaS billing.";
+  $("#openCreateTenant").hidden = community;
+  $("#openCreateTenant").disabled = community || atTenantLimit;
+  $("#tenantPortfolio").hidden = community;
+  $("#communityWorkspace").hidden = !community;
+  $("#manageCommunityWorkspace").disabled = !tenant;
+  $("#licenseDescription").textContent = community
+    ? "Manage this installation's edition and workspace capacity."
+    : "Manage this installation's edition and tenant capacity.";
+  $("#licenseUsageLabel").textContent = community
+    ? "Workspace usage"
+    : "Tenant usage";
+  $("#ownersDescription").textContent = community
+    ? "Only these accounts can manage this installation."
+    : "Only these accounts can manage tenants and Stripe.";
+  $("#fleetEyebrow").textContent = community
+    ? "Installation operations"
+    : "Cross-tenant operations";
+  $("#fleetPageTitle").textContent = community ? "Usage" : "Fleet & usage";
+  $("#fleetDescription").textContent = community
+    ? "Release, schema, queue, and workspace utilization."
+    : "Release, schema, queue, and tenant utilization.";
+  $("#fleetScopeHeader").textContent = community ? "Workspace" : "Tenant";
+  $("#jobsScopeHeader").textContent = community ? "Workspace" : "Tenant";
+  $("#auditScopeHeader").textContent = community ? "Workspace" : "Tenant";
+  $("#auditDescription").textContent = community
+    ? "Application access, configuration, licensing, and integration changes."
+    : "Global tenant, access, subscription, and Stripe changes.";
+  if (community) {
+    $("#tenantLicenseNote").textContent =
+      `Community Edition includes one workspace and ${license.maxUsersPerTenant} users. Activate a commercial license to add tenants or increase user capacity.`;
+    $("#communityWorkspaceName").textContent =
+      tenant?.name || "Workspace unavailable";
+    $("#communityWorkspaceSlug").textContent = tenant?.slug || "";
+    $("#communityWorkspaceStatus").textContent = tenant?.status || "-";
+    $("#communityWorkspacePeople").textContent =
+      `${capacity?.used ?? tenant?.memberCount ?? 0} of ${capacity?.maxUsers ?? license.maxUsersPerTenant}`;
+    $("#communityWorkspaceMicrosoft").textContent =
+      tenant?.microsoft?.tenantName || "Not connected";
+  } else {
+    $("#tenantLicenseNote").textContent = atTenantLimit
+      ? `${editionLabel(license.edition)} allows ${license.maxTenants} tenants. Open Licensing to increase capacity.`
+      : `${editionLabel(license.edition)} capacity: ${license.tenantCount || 0} of ${license.maxTenants} tenants.`;
+  }
+}
+
+function renderLicense() {
+  const license = state.license;
+  if (!license) return;
+  const community = license.edition === "community";
+  const activationRequired =
+    community || ["revoked", "expired", "suspended"].includes(license.status);
+  $("#licenseEdition").textContent = editionLabel(license.edition);
+  $("#licenseStatus").textContent =
+    license.status === "community"
+      ? "Active"
+      : license.status === "grace"
+        ? "Grace period"
+        : license.status === "revoked"
+          ? "Revoked"
+          : license.status === "suspended"
+            ? "Suspended"
+            : license.status.replace(/^./, (character) =>
+                character.toUpperCase(),
+              );
+  $("#licenseTenantUsage").textContent =
+    `${license.tenantCount || 0} of ${license.maxTenants}`;
+  $("#licenseExpiration").textContent = license.expiresAt
+    ? new Date(license.expiresAt).toLocaleDateString()
+    : "No expiration";
+  $("#installationId").value = license.installationId;
+  $("#licenseFeatures").innerHTML = [
+    [
+      community ? "Workspace capacity" : "Tenant capacity",
+      community
+        ? `${license.maxTenants} workspace`
+        : `${license.maxTenants} tenant${license.maxTenants === 1 ? "" : "s"}`,
+    ],
+    [
+      community ? "Workspace management" : "Multi-tenant management",
+      license.features.includes("multi_tenant") ? "Enabled" : "Community limit",
+    ],
+    [
+      community ? "Users per workspace" : "Users per tenant",
+      String(license.maxUsersPerTenant),
+    ],
+    ["Customer", license.customerName || "Community installation"],
+    [
+      "License service",
+      license.authorityConfigured ? "Connected" : "Offline key only",
+    ],
+    [
+      "Last refreshed",
+      license.lastRefreshedAt
+        ? new Date(license.lastRefreshedAt).toLocaleString()
+        : "Not yet refreshed",
+    ],
+  ]
+    .map(
+      ([label, value]) =>
+        `<div><span>${escapeHtml(label)}</span><strong>${escapeHtml(value)}</strong></div>`,
+    )
+    .join("");
+  $("#removeLicense").hidden = license.edition === "community";
+  $("#licenseActivationPanel").hidden = !activationRequired;
+  $("#refreshLicense").disabled =
+    license.edition === "community" || !license.authorityConfigured;
+  $("#activateLicense").disabled = !license.verificationConfigured;
+  $("#licenseForm").elements.licenseKey.disabled =
+    !license.verificationConfigured;
+  $("#licenseMessage").textContent = license.verificationConfigured
+    ? license.status === "grace"
+      ? `Renew before ${new Date(license.graceEndsAt).toLocaleDateString()} to retain commercial features.`
+      : license.status === "expired"
+        ? "The commercial license expired. Community limits now apply."
+        : license.status === "revoked"
+          ? `This license was revoked. Community limits now apply.${license.revocationReason ? ` ${license.revocationReason}` : ""}`
+          : license.status === "suspended"
+            ? `This subscription is suspended. Community limits apply until the next successful refresh.${license.revocationReason ? ` ${license.revocationReason}` : ""}`
+            : license.lastRefreshError
+              ? `The last online refresh failed. The signed offline entitlement remains in effect until its grace period ends. ${license.lastRefreshError}`
+              : license.authorityConfigured
+                ? "Enter the activation key supplied with your subscription."
+                : "Enter a signed license issued for this installation ID."
+    : "This build does not yet contain the Signify commercial verification key. Community Edition remains active.";
+  renderTenantMode();
+}
+
+async function loadLicense() {
+  const result = await api("/api/platform/license");
+  state.license = result.license;
+  renderLicense();
+}
+
+async function refreshLicenseEntitlement() {
+  const button = $("#refreshLicense");
+  busy(button, true, "Refreshing...");
+  try {
+    const result = await api("/api/platform/license", {
+      method: "PUT",
+      body: JSON.stringify({ reason: "Refresh commercial entitlement" }),
+    });
+    state.license = {
+      ...result.license,
+      tenantCount: state.license.tenantCount,
+    };
+    renderLicense();
+    toast("Entitlement refreshed");
+  } catch (error) {
+    await loadLicense().catch(() => {});
+    toast(error.message);
+  } finally {
+    busy(button, false);
+    renderLicense();
+  }
+}
+
+async function activateLicense(event) {
+  event.preventDefault();
+  const form = event.currentTarget,
+    button = event.submitter;
+  if (!form.reportValidity()) return;
+  busy(button, true, "Activating...");
+  try {
+    const result = await api("/api/platform/license", {
+      method: "POST",
+      body: JSON.stringify(Object.fromEntries(new FormData(form))),
+    });
+    state.license = {
+      ...result.license,
+      tenantCount: state.license.tenantCount,
+    };
+    form.elements.licenseKey.value = "";
+    renderLicense();
+    toast("Commercial license activated");
+  } catch (error) {
+    toast(error.message);
+  } finally {
+    busy(button, false);
+  }
+}
+
+async function removeLicense() {
+  if (
+    !confirm(
+      "Return this installation to Community Edition? Existing tenant data will be preserved, but additional tenant creation will be blocked.",
+    )
+  )
+    return;
+  const reason = prompt("Reason for removing the commercial license:");
+  if (!reason) return;
+  const button = $("#removeLicense");
+  busy(button, true, "Removing...");
+  try {
+    const result = await api("/api/platform/license", {
+      method: "DELETE",
+      body: JSON.stringify({ reason }),
+    });
+    state.license = {
+      ...result.license,
+      tenantCount: state.license.tenantCount,
+    };
+    renderLicense();
+    toast("Community Edition restored");
+  } catch (error) {
+    toast(error.message);
+  } finally {
+    busy(button, false);
+  }
 }
 function resetMfaDialog(mode = "enroll") {
   const enroll = mode === "enroll";
@@ -268,6 +498,7 @@ function renderIntegrationTile(
   stateLabel.textContent = displayStatus;
   stateLabel.classList.toggle("connected", configured);
   const names = {
+    email: "Transactional Email",
     microsoft: "Microsoft 365",
     stripe: "Stripe",
     github: "GitHub",
@@ -279,6 +510,7 @@ function renderIntegrationTile(
 }
 function openIntegration(provider) {
   const names = {
+    email: "Transactional Email",
     microsoft: "Microsoft 365",
     stripe: "Stripe",
     github: "GitHub",
@@ -296,7 +528,8 @@ async function loadIntegrations() {
   const result = await api("/api/platform/integrations"),
     stripe = result.stripe,
     microsoft = result.microsoft,
-    github = result.github;
+    github = result.github,
+    email = result.email;
   state.stripePrices = stripe.catalog || state.stripePrices;
   $("#microsoftIntegrationStatus").innerHTML =
     `<div><span>Status</span><strong>${escapeHtml(microsoft.status)}</strong></div>` +
@@ -341,7 +574,39 @@ async function loadIntegrations() {
     github.repository,
     github.configured,
   );
+  $("#emailIntegrationStatus").innerHTML =
+    `<div><span>Status</span><strong>${email.configured ? "connected" : "disconnected"}</strong></div>` +
+    `<div><span>Provider</span><strong>${escapeHtml(email.provider || "Not configured")}</strong></div>` +
+    `<div><span>Sender</span><strong>${escapeHtml(email.from || "Not configured")}</strong></div>` +
+    `<div><span>Verified</span><strong>${escapeHtml(dateLabel(email.lastVerifiedAt))}</strong></div>`;
+  const emailForm = $("#emailConnectForm");
+  emailForm.elements.from.value = email.from || "";
+  emailForm.elements.replyTo.value = email.replyTo || "";
+  $("#disconnectEmail").disabled = email.source !== "vault";
+  renderIntegrationTile("email", email.status, email.from, email.configured);
   renderStripePrices(stripe.prices || {});
+}
+
+async function connectEmail(event) {
+  event.preventDefault();
+  const form = event.currentTarget,
+    button = event.submitter,
+    body = Object.fromEntries(new FormData(form));
+  busy(button, true, "Sending test...");
+  try {
+    await api("/api/platform/integrations/email/connect", {
+      method: "POST",
+      body: JSON.stringify(body),
+      timeoutMs: 30000,
+    });
+    form.elements.apiKey.value = "";
+    await loadIntegrations();
+    toast("Transactional email connected");
+  } catch (error) {
+    toast(error.message);
+  } finally {
+    busy(button, false);
+  }
 }
 
 async function connectGithub(event) {
@@ -367,6 +632,7 @@ async function connectGithub(event) {
 async function loadOperations() {
   const result = await api("/api/platform/operations"),
     pending = result.backups.find((item) => item.pendingRestore);
+  renderUpdateStatus(result.update);
   $("#pendingRestore").hidden = !pending;
   $("#pendingRestoreName").textContent = pending
     ? `${pending.name} will be restored after restart.`
@@ -380,9 +646,53 @@ async function loadOperations() {
         .join("")
     : '<tr><td colspan="5" class="muted">No managed backups yet.</td></tr>';
 }
+function renderUpdateStatus(update) {
+  const status = $("#updateStatus"),
+    release = $("#openRelease"),
+    install = $("#installUpdate"),
+    installation = update?.installation;
+  if (!update || update.status === "not_checked") {
+    status.innerHTML =
+      "<strong>Waiting for first check</strong><span>Release detection runs automatically and can also be started now.</span>";
+  } else if (update.status === "failed") {
+    status.innerHTML = `<strong>Release check failed</strong><span>${escapeHtml(update.error || "The release channel could not be reached.")}</span>`;
+  } else {
+    const packageStatus = update.packageReady
+        ? "Signed production package is available."
+        : `The release is missing ${escapeHtml(update.expectedPackage || "its production package")}.`,
+      installStatus = update.installSupported
+        ? "This host supports managed installation."
+        : "This host is download-only until its restart adapter is configured.";
+    status.innerHTML = `<strong>${update.updateAvailable ? "Update available" : "Application is current"}</strong><span>Installed ${escapeHtml(update.currentVersion)} · Latest ${escapeHtml(update.latestVersion)} · Published ${escapeHtml(dateLabel(update.publishedAt))}</span><span>${packageStatus} ${installStatus}</span>`;
+  }
+  if (installation) {
+    const installationLabel = {
+      preparing: "Preparing the verified package",
+      scheduled: "Update scheduled; installation will begin shortly",
+      installing: "Installing and running health checks",
+      activated: "Update installed successfully",
+      unchanged: "Requested release is already installed",
+      failed: `Update failed: ${installation.error || "Review the server log."}`,
+    }[installation.status];
+    if (installationLabel)
+      status.insertAdjacentHTML(
+        "beforeend",
+        `<span><strong>${escapeHtml(installationLabel)}</strong>${installation.version ? ` · ${escapeHtml(installation.version)}` : ""}</span>`,
+      );
+  }
+  release.href = update?.releaseUrl || "#";
+  release.hidden = !update?.releaseUrl;
+  install.hidden = !(
+    update?.status === "checked" &&
+    update.updateAvailable &&
+    update.packageReady &&
+    update.installSupported
+  );
+}
 function openOperation(action, backupName = "") {
   const form = $("#operationForm"),
     restore = action === "restore",
+    install = action === "install",
     labels = {
       create: [
         "Create backup",
@@ -394,18 +704,25 @@ function openOperation(action, backupName = "") {
       ],
       delete: ["Delete backup", `Permanently delete ${backupName}.`],
       cancel: ["Cancel restore", "Remove the pending restore request."],
+      install: [
+        "Install application update",
+        "Signify will verify the release signature, create a safety backup, switch releases, restart, and roll back automatically if readiness fails.",
+      ],
     };
   form.reset();
   form.elements.action.value = action;
   form.elements.backupName.value = backupName;
   $("#operationTitle").textContent = labels[action][0];
   $("#operationMessage").textContent = labels[action][1];
-  $("#restoreConfirmation").hidden = !restore;
-  form.elements.confirmation.required = restore;
+  $("#operationConfirmation").hidden = !(restore || install);
+  $("#operationConfirmationText").textContent = install
+    ? "Type INSTALL to confirm"
+    : "Type RESTORE to confirm";
+  form.elements.confirmation.required = restore || install;
   $("#confirmOperation").textContent = labels[action][0];
   $("#confirmOperation").classList.toggle(
     "danger",
-    ["restore", "delete"].includes(action),
+    ["restore", "delete", "install"].includes(action),
   );
   $("#operationDialog").showModal();
 }
@@ -420,6 +737,7 @@ async function submitOperation(event) {
     restore: [`/api/platform/operations/backups/${name}/restore`, "POST"],
     delete: [`/api/platform/operations/backups/${name}`, "DELETE"],
     cancel: ["/api/platform/operations/restore", "DELETE"],
+    install: ["/api/platform/operations/updates/install", "POST"],
   };
   busy(button, true);
   try {
@@ -433,7 +751,9 @@ async function submitOperation(event) {
     toast(
       body.action === "restore"
         ? "Restore staged. Restart the application to apply it."
-        : "Application operation completed",
+        : body.action === "install"
+          ? "Verified update scheduled. The application will restart automatically."
+          : "Application operation completed",
     );
   } catch (error) {
     toast(error.message);
@@ -446,11 +766,9 @@ async function checkUpdates(event) {
   busy(button, true, "Checking...");
   try {
     const { update } = await api("/api/platform/operations/updates"),
-      status = $("#updateStatus"),
-      link = $("#openRelease");
-    status.innerHTML = `<strong>${update.updateAvailable ? "Update available" : "Application is current"}</strong><span>Installed ${escapeHtml(update.currentVersion)} · Latest ${escapeHtml(update.latestVersion)} · Published ${escapeHtml(dateLabel(update.publishedAt))}</span>`;
-    link.href = update.releaseUrl;
-    link.hidden = !update.releaseUrl;
+      status = $("#updateStatus");
+    renderUpdateStatus(update);
+    status.scrollIntoView({ behavior: "smooth", block: "nearest" });
   } catch (error) {
     toast(error.message);
   } finally {
@@ -585,6 +903,7 @@ async function loadTenants() {
     `Page ${result.pagination.page} of ${result.pagination.pages}`;
   $("#previousPage").disabled = result.pagination.page <= 1;
   $("#nextPage").disabled = result.pagination.page >= result.pagination.pages;
+  renderTenantMode();
 }
 async function loadOwners() {
   const result = await api("/api/platform/owners");
@@ -634,7 +953,7 @@ async function loadFleet() {
   $("#fleetStats").innerHTML = stats
     .map(
       ([label, value]) =>
-        `<div class="stat-card"><span>${escapeHtml(label)}</span><strong>${escapeHtml(String(value ?? "-"))}</strong></div>`,
+        `<article class="stat-card"><span>${escapeHtml(label)}</span><strong>${escapeHtml(String(value ?? "-"))}</strong></article>`,
     )
     .join("");
   $("#fleetRows").innerHTML = result.tenants.length
@@ -770,10 +1089,26 @@ async function openTenant(id) {
   state.detail = result;
   state.lifecycle = lifecycle;
   state.flags = featureResult.flags;
+  const community = state.license?.edition === "community";
   $("#detailName").textContent = result.organization.name;
   $("#detailSlug").textContent = result.organization.slug;
+  $("#detailEyebrow").textContent = community
+    ? "Workspace control"
+    : "Tenant control";
+  $("#tenantStatusForm").hidden = community;
+  $("#supportAccessForm").hidden = community;
+  $("#tenantBillingControls").hidden = community;
+  $("#exportTenant").textContent = community
+    ? "Export workspace data"
+    : "Export tenant data";
+  $("#tenantDataLifecycleTitle").textContent = community
+    ? "Workspace data export"
+    : "Data lifecycle";
+  $("#detailMembersTitle").textContent = community
+    ? "Workspace administrators and users"
+    : "Tenant administrators and users";
   $("#detailSummary").innerHTML =
-    `<div><span>Status</span><strong>${escapeHtml(result.organization.status)}</strong></div><div><span>Microsoft 365</span><strong>${escapeHtml(result.microsoft?.tenantName || "Not connected")}</strong></div><div><span>People</span><strong>${result.members.length} of ${result.subscription?.seats || 0}</strong></div>`;
+    `<div><span>Status</span><strong>${escapeHtml(result.organization.status)}</strong></div><div><span>Microsoft 365</span><strong>${escapeHtml(result.microsoft?.tenantName || "Not connected")}</strong></div><div><span>User slots</span><strong>${result.userCapacity?.used ?? result.members.length} of ${result.userCapacity?.maxUsers ?? result.subscription?.seats ?? 0}${result.userCapacity?.pendingInvitations ? ` · ${result.userCapacity.pendingInvitations} pending` : ""}</strong></div>`;
   const statusForm = $("#tenantStatusForm").elements,
     subscriptionForm = $("#subscriptionForm").elements,
     checkoutForm = $("#checkoutForm").elements;
@@ -808,15 +1143,18 @@ async function openTenant(id) {
     : "<div><span>No accepted tenant members yet.</span></div>";
   const deletion = lifecycle.deletion,
     pending = ["pending", "purging"].includes(deletion?.status);
-  $("#tenantDeletionStatus").textContent = pending
-    ? deletion.status === "purging"
-      ? "Tenant deletion is running."
-      : `Deletion scheduled for ${dateLabel(deletion.executeAfter)}.`
-    : deletion?.status === "canceled"
-      ? `Deletion canceled ${dateLabel(deletion.canceledAt)}.`
-      : "No deletion is scheduled.";
-  $("#scheduleTenantDeletion").hidden = pending;
-  $("#cancelTenantDeletion").hidden = !pending || deletion.status !== "pending";
+  $("#tenantDeletionStatus").textContent = community
+    ? "Download a redacted export of this workspace's application data."
+    : pending
+      ? deletion.status === "purging"
+        ? "Tenant deletion is running."
+        : `Deletion scheduled for ${dateLabel(deletion.executeAfter)}.`
+      : deletion?.status === "canceled"
+        ? `Deletion canceled ${dateLabel(deletion.canceledAt)}.`
+        : "No deletion is scheduled.";
+  $("#scheduleTenantDeletion").hidden = community || pending;
+  $("#cancelTenantDeletion").hidden =
+    community || !pending || deletion.status !== "pending";
   $("#tenantStatusForm").elements.status.disabled = pending;
   $("#tenantStatusForm").querySelector('button[type="submit"]').disabled =
     pending;
@@ -825,11 +1163,12 @@ async function openTenant(id) {
 
 function openTenantLifecycleAction(action) {
   const organization = state.detail.organization,
+    community = state.license?.edition === "community",
     form = $("#tenantLifecycleForm"),
     confirmation = $("#tenantDeletionConfirmation"),
     definition = {
       export: {
-        title: "Export tenant data",
+        title: community ? "Export workspace data" : "Export tenant data",
         message: `Create a redacted data export for ${organization.name}.`,
         button: "Create export",
       },
@@ -888,7 +1227,11 @@ async function submitTenantLifecycle(event) {
       link.download = `${organization.slug}-export-${new Date().toISOString().slice(0, 10)}.json`;
       link.click();
       URL.revokeObjectURL(link.href);
-      toast("Tenant export created");
+      toast(
+        state.license?.edition === "community"
+          ? "Workspace export created"
+          : "Tenant export created",
+      );
       closeTenantLifecycleDialog();
     } else {
       await api(`/api/platform/organizations/${organization.id}/deletion`, {
@@ -1054,6 +1397,7 @@ function bindEvents() {
   $$("[data-section]").forEach((button) =>
     button.addEventListener("click", async () => {
       showSection(button.dataset.section);
+      if (button.dataset.section === "licensing") await loadLicense();
       if (button.dataset.section === "integrations") await loadIntegrations();
       if (button.dataset.section === "owners")
         await Promise.all([loadOwners(), loadOwnerSessions()]);
@@ -1067,6 +1411,20 @@ function bindEvents() {
     $("#createTenantForm").reset();
     $("#invitationResult").hidden = true;
     $("#createTenantDialog").showModal();
+  });
+  $("#manageCommunityWorkspace").addEventListener("click", () => {
+    const tenant = state.organizations[0];
+    if (tenant) openTenant(tenant.id).catch((error) => toast(error.message));
+  });
+  $("#licenseForm").addEventListener("submit", activateLicense);
+  $("#refreshLicense").addEventListener("click", refreshLicenseEntitlement);
+  $("#removeLicense").addEventListener("click", removeLicense);
+  $("#copyInstallationId").addEventListener("click", async () => {
+    await navigator.clipboard
+      ?.writeText($("#installationId").value)
+      .catch(() => {});
+    $("#installationId").select();
+    toast("Installation ID copied");
   });
   $("#setupOwnerMfa").addEventListener("click", () => {
     resetMfaDialog("enroll");
@@ -1248,6 +1606,7 @@ function bindEvents() {
   );
   $("#createBackup").addEventListener("click", () => openOperation("create"));
   $("#checkUpdates").addEventListener("click", checkUpdates);
+  $("#installUpdate").addEventListener("click", () => openOperation("install"));
   $("#cancelRestore").addEventListener("click", () => openOperation("cancel"));
   $("#backupRows").addEventListener("click", (event) => {
     const button = event.target.closest("[data-backup-action]");
@@ -1292,6 +1651,7 @@ function bindEvents() {
     saveMicrosoftSetup,
   );
   $("#stripeConnectForm").addEventListener("submit", connectStripe);
+  $("#emailConnectForm").addEventListener("submit", connectEmail);
   $("#githubConnectForm").addEventListener("submit", connectGithub);
   $("#disconnectGithub").addEventListener("click", async () => {
     const reason = prompt("Reason for disconnecting GitHub releases:");
@@ -1303,6 +1663,20 @@ function bindEvents() {
       });
       await loadIntegrations();
       toast("GitHub releases disconnected");
+    } catch (error) {
+      toast(error.message);
+    }
+  });
+  $("#disconnectEmail").addEventListener("click", async () => {
+    const reason = prompt("Reason for disconnecting transactional email:");
+    if (!reason) return;
+    try {
+      await api("/api/platform/integrations/email", {
+        method: "DELETE",
+        body: JSON.stringify({ reason }),
+      });
+      await loadIntegrations();
+      toast("Transactional email disconnected");
     } catch (error) {
       toast(error.message);
     }

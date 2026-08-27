@@ -2,7 +2,10 @@
 const fs = require("node:fs");
 const os = require("node:os");
 const path = require("node:path");
+const { EventEmitter } = require("node:events");
+const { createHash, generateKeyPairSync } = require("node:crypto");
 const { openDatabase } = require("../server/database.cjs");
+const { signRelease } = require("../server/release-signature.cjs");
 const {
   applyPendingRestore,
   createApplicationOperations,
@@ -109,6 +112,98 @@ async function main() {
       privateRepositoryFailure?.code === "UPDATE_REPOSITORY_UNAUTHORIZED" &&
       privateRepositoryFailure.message.includes("SIGNIFY_UPDATE_GITHUB_TOKEN"),
     "Private repository authentication failure was not actionable.",
+  );
+
+  const publisher = generateKeyPairSync("ed25519"),
+    publicKey = publisher.publicKey.export({ type: "spki", format: "pem" }),
+    privateKey = publisher.privateKey.export({ type: "pkcs8", format: "pem" }),
+    signedArtifact = path.join(root, "signed-artifact"),
+    archiveBytes = Buffer.from("verified release archive"),
+    archiveName = "signify-creator-v0.5.0.tar.gz",
+    checksumName = `${archiveName}.sha256`,
+    archiveDigest = createHash("sha256").update(archiveBytes).digest("hex");
+  fs.mkdirSync(signedArtifact);
+  fs.writeFileSync(
+    path.join(signedArtifact, "manifest.json"),
+    JSON.stringify({ version: "0.5.0", commit: "2".repeat(40) }),
+  );
+  fs.writeFileSync(
+    path.join(signedArtifact, "server.cjs"),
+    "module.exports={};",
+  );
+  const artifactDigest = (name) =>
+    createHash("sha256")
+      .update(fs.readFileSync(path.join(signedArtifact, name)))
+      .digest("hex");
+  fs.writeFileSync(
+    path.join(signedArtifact, "checksums.txt"),
+    `${artifactDigest("manifest.json")}  manifest.json\n${artifactDigest("server.cjs")}  server.cjs\n`,
+  );
+  signRelease(signedArtifact, privateKey, "operations-test");
+  let spawned;
+  const installOperations = createApplicationOperations({
+    config: {
+      ...config,
+      updates: {
+        checkIntervalMs: 1000,
+        maxArchiveBytes: 1024 * 1024,
+        releasesDirectory: path.join(root, "releases"),
+        currentLink: path.join(root, "current"),
+        restartScript: path.join(root, "restart.cmd"),
+        healthUrl: "https://signify.example.test/api/ready",
+        releasePublicKey: publicKey,
+        requireSignature: true,
+      },
+    },
+    db,
+    version: "0.4.0",
+    fetchImpl: async (url) => {
+      if (url.endsWith("/releases/latest"))
+        return {
+          ok: true,
+          json: async () => ({
+            tag_name: "v0.5.0",
+            published_at: "2026-08-26T00:00:00Z",
+            html_url: "https://github.example/releases/v0.5.0",
+            assets: [
+              { name: archiveName, url: "https://api.github.test/archive" },
+              { name: checksumName, url: "https://api.github.test/checksum" },
+            ],
+          }),
+        };
+      const bytes = url.endsWith("/archive")
+        ? archiveBytes
+        : Buffer.from(`${archiveDigest}  ${archiveName}\n`);
+      return {
+        ok: true,
+        headers: { get: () => String(bytes.length) },
+        arrayBuffer: async () => bytes,
+      };
+    },
+    extractImpl: async (_archive, destination) =>
+      fs.cpSync(signedArtifact, destination, { recursive: true }),
+    spawnImpl: (command, args, options) => {
+      spawned = { command, args, options };
+      const child = new EventEmitter();
+      child.unref = () => {};
+      return child;
+    },
+  });
+  const available = await installOperations.checkForUpdates();
+  assert(
+    available.packageReady && available.installSupported,
+    "Signed managed update was not reported as installable.",
+  );
+  const scheduled = await installOperations.installUpdate();
+  assert(
+    scheduled.status === "scheduled" && scheduled.version === "0.5.0",
+    "Managed update was not scheduled.",
+  );
+  assert(
+    spawned?.command === process.execPath &&
+      spawned.args.some((item) => item.endsWith("install-update.cjs")) &&
+      spawned.options.detached,
+    "Managed update helper was not detached safely.",
   );
   db.close();
 

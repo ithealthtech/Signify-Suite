@@ -28,6 +28,8 @@ async function main() {
     databasePath,
     backupDirectory,
     allowDowngrade,
+    releasePublicKey: process.env.SIGNIFY_RELEASE_SIGNING_PUBLIC_KEY || "",
+    requireSignature: process.env.SIGNIFY_DEPLOY_REQUIRE_SIGNATURE !== "false",
     install: installDependencies,
     restart: () => restartScript(restart),
     probe: (manifest) => readinessProbe(healthUrl, manifest?.version || null),

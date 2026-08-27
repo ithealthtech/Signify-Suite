@@ -322,7 +322,8 @@ label small {
   font-weight: 500;
 }
 
-input {
+input,
+textarea {
   width: 100%;
   min-height: 46px;
   padding: 11px 13px;
@@ -335,7 +336,14 @@ input {
   font-weight: 500;
 }
 
-input:focus {
+textarea {
+  resize: vertical;
+  font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+  line-height: 1.45;
+}
+
+input:focus,
+textarea:focus {
   border-color: #555bd4;
   outline: 3px solid rgb(85 91 212 / 14%);
 }

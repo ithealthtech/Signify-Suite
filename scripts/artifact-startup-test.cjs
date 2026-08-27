@@ -68,14 +68,15 @@ async function main() {
       child,
       output,
     );
-    assert.equal(ready.status, "ok");
+    assert.equal(ready.status, "setup_required");
+    assert.equal(ready.setupRequired, true);
     const manifest = JSON.parse(
       fs.readFileSync(path.join(artifact, "manifest.json"), "utf8"),
     );
     assert.equal(ready.version, manifest.version);
     assert.match(manifest.version, /^\d+\.\d+\.\d+/);
     console.log(
-      `Artifact startup test passed: version ${manifest.version}, production readiness confirmed`,
+      `Artifact startup test passed: version ${manifest.version}, first-run setup readiness confirmed`,
     );
   } finally {
     child.kill();

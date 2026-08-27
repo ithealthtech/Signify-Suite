@@ -6,9 +6,10 @@
     <title>Workspace | Signify Creator</title>
     <link rel="icon" type="image/png" href="/ithtfavicon.png" />
     <link rel="stylesheet" href="signify-shared.css?v=20260718" />
-    <link rel="stylesheet" href="admin.css?v=20260722" />
+    <link rel="stylesheet" href="admin.css?v=2026082501" />
+    <link rel="stylesheet" href="signify-app.css?v=2026082601" />
   </head>
-  <body>
+  <body class="authenticated-page">
     <header class="app-header">
       <a class="app-brand" href="/signature.html"
         ><span class="brand-mark">S</span
@@ -26,7 +27,7 @@
       <button class="profile-button" id="logout" type="button">Sign out</button>
     </header>
     <main class="admin-shell">
-      <aside class="admin-nav">
+      <aside class="admin-nav" aria-label="Workspace sections">
         <div>
           <span class="eyebrow">Administration</span><strong>Workspace</strong>
         </div>
@@ -107,6 +108,7 @@
               </button>
             </div>
           </div>
+          <p class="form-message" id="teamLicenseNote" role="status"></p>
           <div class="team-toolbar">
             <input
               id="userSearch"
@@ -343,23 +345,26 @@
               >
             </form>
             <aside class="billing-panel">
-              <span class="eyebrow">Subscription</span>
-              <h2 id="planName">Starter</h2>
-              <strong id="planStatus">Trialing</strong>
-              <p id="trialEnd"></p>
-              <div class="seat-meter"><span id="seatBar"></span></div>
-              <small id="seatLabel"></small>
-              <p class="billing-note">
-                Subscription changes are managed by the Signify Application
-                Owner.
-              </p>
-              <hr />
+              <section id="subscriptionSummary">
+                <span class="eyebrow">Subscription</span>
+                <h2 id="planName">Starter</h2>
+                <strong id="planStatus">Trialing</strong>
+                <p id="trialEnd"></p>
+                <div class="seat-meter"><span id="seatBar"></span></div>
+                <small id="seatLabel"></small>
+                <p class="billing-note">
+                  Subscription changes are managed by the Signify Application
+                  Owner.
+                </p>
+                <hr />
+              </section>
               <span class="eyebrow">Microsoft 365</span>
               <h2 id="microsoftTenantName">Not connected</h2>
               <strong id="microsoftStatus">Disconnected</strong>
               <p id="microsoftTenantId"></p>
-              <label
-                >Sender mailbox<input
+              <label class="integration-field"
+                ><span>Sender mailbox</span
+                ><input
                   id="microsoftSenderEmail"
                   type="email"
                   placeholder="signatures@company.com"
@@ -382,6 +387,45 @@
                 </button>
               </div>
               <p class="billing-note" id="microsoftNote"></p>
+              <hr />
+              <span class="eyebrow">Outlook add-in</span>
+              <h2 id="outlookAddinName">Not enabled</h2>
+              <strong id="outlookAddinStatus">Disabled</strong>
+              <p class="billing-note" id="outlookAddinNote">
+                Centrally applies current signatures and removes them when
+                workspace access or a member becomes inactive.
+              </p>
+              <div class="billing-actions">
+                <button
+                  class="button primary"
+                  id="enableOutlookAddin"
+                  type="button"
+                >
+                  Enable deployment
+                </button>
+                <a
+                  class="button"
+                  id="downloadOutlookManifest"
+                  href="/api/signature/outlook-addin/manifest"
+                  download="signify-outlook.xml"
+                  hidden
+                >
+                  Download manifest
+                </a>
+                <button
+                  class="button danger"
+                  id="disableOutlookAddin"
+                  type="button"
+                  hidden
+                >
+                  Disable
+                </button>
+              </div>
+              <p class="billing-note">
+                Upload the manifest in Microsoft 365 Admin Center under
+                Settings, Integrated apps, Upload custom apps, then assign it to
+                the intended users or groups.
+              </p>
             </aside>
           </div>
         </section>
@@ -712,6 +756,6 @@
     </dialog>
     <div class="toast" id="toast" role="status" aria-live="polite"></div>
     <script src="signify-shared.js?v=20260718"></script>
-    <script src="admin.js?v=20260718"></script>
+    <script src="admin.js?v=2026082502"></script>
   </body>
 </html>

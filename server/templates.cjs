@@ -133,6 +133,17 @@ function headerBannerRow(bannerUrl, width = 440, height = 100) {
   return `<tr><td style="padding-bottom:14px;"><img src="${esc(bannerUrl)}" width="${width}" height="${height}" alt="" style="display:block;border:0;width:${width}px;height:${height}px;object-fit:cover;border-radius:8px;"></td></tr>`;
 }
 
+function personInitials(name = "") {
+  return (
+    String(name)
+      .trim()
+      .split(/\s+/)
+      .slice(0, 2)
+      .map((part) => part.charAt(0).toUpperCase())
+      .join("") || "SC"
+  );
+}
+
 // ================= TEMPLATES =================
 
 // ---------- 1. Executive — ring avatar, small-caps title, single-line
@@ -266,6 +277,47 @@ function compact({ f, colors, photoUrl }) {
       )}
     </td>
   </tr>
+</table>`;
+}
+
+// ---------- Banner Card - a connected banner and identity panel. The outer
+// bottom/right cells are an Outlook-safe shadow fallback; modern clients also
+// render the softer CSS shadow on the white card. ----------
+function bannerCard({ f, colors, photoUrl, bannerUrl }) {
+  const accent = colors.accent || "#3158c7";
+  const avatar = photoUrl
+    ? `<img src="${esc(photoUrl)}" width="46" height="46" alt="${esc(f.name)}" style="display:block;border:4px solid #e3e9ff;border-radius:50%;">`
+    : `<table role="presentation" cellpadding="0" cellspacing="0" border="0" width="54" height="54" bgcolor="#e3e9ff" style="background:#e3e9ff;border-radius:50%;"><tr><td align="center" valign="middle"><table role="presentation" cellpadding="0" cellspacing="0" border="0" width="44" height="44" bgcolor="${accent}" style="background:${accent};border-radius:50%;"><tr><td align="center" valign="middle" style="font-family:${SANS};font-size:13px;line-height:44px;font-weight:700;color:#ffffff;">${esc(personInitials(f.name))}</td></tr></table></td></tr></table>`;
+  return `
+<table role="presentation" cellpadding="0" cellspacing="0" border="0" width="446" style="width:446px;font-family:${SANS};">
+  <tr>
+    <td width="440" bgcolor="#ffffff" style="width:440px;background:#ffffff;border:1px solid #d9dde7;border-radius:8px;box-shadow:0 5px 12px rgba(17,24,39,.22);overflow:hidden;">
+      <table role="presentation" cellpadding="0" cellspacing="0" border="0" width="440" style="width:440px;">
+        ${bannerUrl ? `<tr><td><img src="${esc(bannerUrl)}" width="440" height="100" alt="" style="display:block;border:0;width:440px;height:100px;object-fit:cover;"></td></tr>` : ""}
+        <tr>
+          <td bgcolor="#ffffff" style="background:#ffffff;padding:16px 18px 17px;">
+            <table role="presentation" cellpadding="0" cellspacing="0" border="0">
+              <tr>
+                <td width="54" style="width:54px;padding-right:14px;vertical-align:middle;">${avatar}</td>
+                <td style="vertical-align:middle;">
+                  <table role="presentation" cellpadding="0" cellspacing="0" border="0">
+                    <tr><td style="font-family:${SANS};font-size:16px;line-height:20px;font-weight:700;color:#151821;">${esc(f.name)}</td></tr>
+                    <tr><td style="padding-top:2px;font-family:${SANS};font-size:11px;line-height:16px;color:#697080;">${esc(f.jobTitle)}${f.company ? " Â· " + esc(f.company) : ""}</td></tr>
+                    <tr><td style="padding-top:1px;">${contactStrip([
+                      f.phone && { text: f.phone, href: `tel:${f.phone}` },
+                      f.email && { text: f.email, href: `mailto:${f.email}` },
+                    ])}</td></tr>
+                  </table>
+                </td>
+              </tr>
+            </table>
+          </td>
+        </tr>
+      </table>
+    </td>
+    <td width="6" bgcolor="#c8cdd8" style="width:6px;background:#c8cdd8;font-size:1px;line-height:1px;">&nbsp;</td>
+  </tr>
+  <tr><td colspan="2" height="6" bgcolor="#c8cdd8" style="height:6px;background:#c8cdd8;font-size:1px;line-height:1px;">&nbsp;</td></tr>
 </table>`;
 }
 
@@ -408,6 +460,11 @@ const TEMPLATES = {
     blurb: "Serif name, private-bank feel",
   },
   compact: { name: "Compact", build: compact, blurb: "Smallest footprint" },
+  bannerCard: {
+    name: "Banner Card",
+    build: bannerCard,
+    blurb: "Banner, identity badge, Outlook-safe shadow",
+  },
   gradientEdge: {
     name: "Gradient Edge",
     build: gradientEdge,
@@ -440,7 +497,7 @@ function buildSignatureHtml(templateId, data) {
   const tpl = TEMPLATES[templateId] || TEMPLATES.executive;
   const main = tpl.build(data);
   const rows = [
-    headerBannerRow(data.bannerUrl),
+    templateId === "bannerCard" ? "" : headerBannerRow(data.bannerUrl),
     `<tr><td>${main}</td></tr>`,
     campaignBlock(data.campaign, data.campaignLinkUrl),
     vcardBlock(data.qrDataUri, data.vcardLinkUrl),

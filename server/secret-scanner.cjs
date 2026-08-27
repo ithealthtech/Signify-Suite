@@ -4,6 +4,7 @@ const PATTERNS = Object.freeze([
   ["private key", /-----BEGIN (?:RSA |EC |OPENSSH |DSA )?PRIVATE KEY-----/g],
   ["AWS access key", /\bAKIA[0-9A-Z]{16}\b/g],
   ["Stripe live secret", /\bsk_live_[A-Za-z0-9]{20,}\b/g],
+  ["Resend API key", /\bre_[A-Za-z0-9_-]{30,}\b/g],
   ["GitHub token", /\bgh[pousr]_[A-Za-z0-9]{30,}\b/g],
   ["Slack token", /\bxox[baprs]-[A-Za-z0-9-]{20,}\b/g],
   ["Google API key", /\bAIza[0-9A-Za-z_-]{35}\b/g],

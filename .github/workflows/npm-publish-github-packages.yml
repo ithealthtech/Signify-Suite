@@ -19,8 +19,16 @@ jobs:
   validate:
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    env:
+      SIGNIFY_LICENSE_PUBLIC_KEY: ${{ vars.SIGNIFY_LICENSE_PUBLIC_KEY }}
+      SIGNIFY_LICENSE_AUTHORITY_URL: ${{ vars.SIGNIFY_LICENSE_AUTHORITY_URL }}
     steps:
       - uses: actions/checkout@v7
+      - name: Release tag must match package.json
+        if: github.event_name == 'release'
+        env:
+          RELEASE_TAG: ${{ github.event.release.tag_name }}
+        run: node -e "const p=require('./package.json'); if (process.env.RELEASE_TAG !== 'v'+p.version) { console.error('Expected v'+p.version+', received '+process.env.RELEASE_TAG); process.exit(1); }"
       - uses: actions/setup-node@v7
         with:
           node-version: 24
@@ -28,8 +36,6 @@ jobs:
       - run: npm ci
       - run: npm run check
       - run: npm audit --omit=dev
-      - uses: actions/dependency-review-action@v5
-        if: github.event_name == 'pull_request'
       - uses: actions/upload-artifact@v7
         with:
           name: signify-creator-${{ github.sha }}
@@ -37,9 +43,56 @@ jobs:
           if-no-files-found: error
           retention-days: 14
 
-  publish-release:
+  dependency-review:
+    if: github.event_name == 'pull_request'
+    permissions:
+      actions: read
+      contents: read
+      security-events: write
+    uses: google/osv-scanner-action/.github/workflows/osv-scanner-reusable-pr.yml@baa4139e56d6312335d899e6ba045fa16d1d3d0b # v2.5.1
+    with:
+      scan-args: |-
+        --lockfile=package-lock.json
+      fail-on-vuln: true
+      upload-sarif: false
+
+  sign-release:
     if: github.event_name == 'release' && github.event.action == 'published'
     needs: validate
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+      - uses: actions/download-artifact@v8
+        with:
+          name: signify-creator-${{ github.sha }}
+          path: dist
+      - name: Sign and verify release inventory
+        env:
+          SIGNIFY_RELEASE_SIGNING_PRIVATE_KEY: ${{ secrets.SIGNIFY_RELEASE_SIGNING_PRIVATE_KEY }}
+          SIGNIFY_RELEASE_SIGNING_PUBLIC_KEY: ${{ vars.SIGNIFY_RELEASE_SIGNING_PUBLIC_KEY }}
+          SIGNIFY_RELEASE_SIGNING_KEY_ID: ${{ vars.SIGNIFY_RELEASE_SIGNING_KEY_ID }}
+        run: |
+          test -n "$SIGNIFY_RELEASE_SIGNING_PRIVATE_KEY"
+          test -n "$SIGNIFY_RELEASE_SIGNING_PUBLIC_KEY"
+          test -n "$SIGNIFY_RELEASE_SIGNING_KEY_ID"
+          test -f dist/server/license-build.json
+          node scripts/sign-release.cjs dist
+          node scripts/verify-release-signature.cjs dist
+      - uses: actions/upload-artifact@v7
+        with:
+          name: signify-creator-signed-${{ github.sha }}
+          path: dist/
+          if-no-files-found: error
+          retention-days: 14
+
+  publish-release:
+    if: github.event_name == 'release' && github.event.action == 'published'
+    needs: sign-release
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -48,7 +101,7 @@ jobs:
     steps:
       - uses: actions/download-artifact@v8
         with:
-          name: signify-creator-${{ github.sha }}
+          name: signify-creator-signed-${{ github.sha }}
           path: dist
       - name: Package immutable release
         run: |
@@ -64,20 +117,21 @@ jobs:
           gh release upload "${{ github.event.release.tag_name }}"
           "signify-creator-${{ github.event.release.tag_name }}.tar.gz"
           "signify-creator-${{ github.event.release.tag_name }}.tar.gz.sha256"
+          "dist/release-signature.json"
           --clobber
 
   deploy-staging:
     if: github.event_name == 'release' && github.event.action == 'published'
-    needs: validate
+    needs: sign-release
     runs-on: ubuntu-latest
     timeout-minutes: 15
     environment:
       name: staging
-      url: ${{ secrets.SIGNIFY_HEALTH_URL }}
+      url: ${{ vars.SIGNIFY_HEALTH_URL }}
     steps:
       - uses: actions/download-artifact@v8
         with:
-          name: signify-creator-${{ github.sha }}
+          name: signify-creator-signed-${{ github.sha }}
           path: dist
       - name: Configure verified SSH host
         env:
@@ -111,11 +165,11 @@ jobs:
     timeout-minutes: 15
     environment:
       name: production
-      url: ${{ secrets.SIGNIFY_HEALTH_URL }}
+      url: ${{ vars.SIGNIFY_HEALTH_URL }}
     steps:
       - uses: actions/download-artifact@v8
         with:
-          name: signify-creator-${{ github.sha }}
+          name: signify-creator-signed-${{ github.sha }}
           path: dist
       - name: Configure verified SSH host
         env:

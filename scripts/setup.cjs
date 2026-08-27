@@ -110,8 +110,18 @@ function readEnvironment(file) {
   return parseEnv(fs.readFileSync(file, "utf8"));
 }
 
-function environmentValue(value) {
-  return JSON.stringify(String(value).replace(/[\r\n]+/g, " "));
+function environmentValue(value, key = "") {
+  const text = String(value);
+  if (key === "SIGNIFY_LICENSE_PUBLIC_KEY") {
+    const pem = text
+      .replaceAll("\\\n", "\n")
+      .replaceAll("\\n", "\n")
+      .replace(/\r\n/g, "\n");
+    if (pem.includes("'"))
+      throw new Error("SIGNIFY_LICENSE_PUBLIC_KEY contains an apostrophe.");
+    return `'${pem}'`;
+  }
+  return JSON.stringify(text.replace(/[\r\n]+/g, " "));
 }
 
 function environmentFile(env, existingKeys = []) {
@@ -134,7 +144,16 @@ function environmentFile(env, existingKeys = []) {
     "SIGNIFY_ALERT_QUEUE_AGE_SECONDS",
     "SIGNIFY_ALERT_COOLDOWN_SECONDS",
     "SIGNIFY_JOB_MODE",
+    "SIGNIFY_WORKER_HEALTH_PATH",
+    "SIGNIFY_WORKER_HEARTBEAT_SECONDS",
     "DATABASE_PATH",
+    "DATABASE_URL",
+    "DATABASE_SSL_MODE",
+    "DATABASE_CA_CERT",
+    "DATABASE_POOL_MAX",
+    "DATABASE_CONNECT_TIMEOUT_MS",
+    "DATABASE_IDLE_TIMEOUT_MS",
+    "DATABASE_APPLICATION_NAME",
     "BACKUP_DIR",
     "SIGNIFY_BACKUP_STORAGE",
     "SIGNIFY_BACKUP_RETENTION_DAYS",
@@ -154,6 +173,16 @@ function environmentFile(env, existingKeys = []) {
     "S3_FORCE_PATH_STYLE",
     "S3_ACCESS_KEY_ID",
     "S3_SECRET_ACCESS_KEY",
+    "SIGNIFY_UPDATE_REPOSITORY",
+    "SIGNIFY_UPDATE_GITHUB_TOKEN",
+    "SIGNIFY_UPDATE_CHECK_HOURS",
+    "SIGNIFY_UPDATE_MAX_MB",
+    "SIGNIFY_RELEASES_DIR",
+    "SIGNIFY_CURRENT_LINK",
+    "SIGNIFY_DEPLOY_RESTART_SCRIPT",
+    "SIGNIFY_DEPLOY_HEALTH_URL",
+    "SIGNIFY_RELEASE_SIGNING_PUBLIC_KEY",
+    "SIGNIFY_DEPLOY_REQUIRE_SIGNATURE",
     "SIGNATURE_SESSION_HOURS",
     "SIGNIFY_TENANT_MEDIA_LIMIT_MB",
     "SIGNIFY_TENANT_DELETION_GRACE_DAYS",
@@ -161,6 +190,9 @@ function environmentFile(env, existingKeys = []) {
     "SIGNIFY_BOOTSTRAP_EMAIL",
     "SIGNIFY_APPLICATION_OWNER_EMAIL",
     "SIGNIFY_SETUP_TOKEN",
+    "SIGNIFY_LICENSE_PUBLIC_KEY",
+    "SIGNIFY_LICENSE_AUTHORITY_URL",
+    "SIGNIFY_LICENSE_REFRESH_HOURS",
     "SIGNIFY_COMPANY_NAME",
     "SIGNIFY_PUBLIC_URL",
     "SIGNIFY_ASSET_BASE_URL",
@@ -168,6 +200,11 @@ function environmentFile(env, existingKeys = []) {
     "SIGNIFY_ALLOW_REGISTRATION",
     "SIGNIFY_REQUIRE_OWNER_MFA",
     "SIGNIFY_CREDENTIAL_ENCRYPTION_KEY",
+    "SIGNIFY_MAIL_PROVIDER",
+    "RESEND_API_KEY",
+    "SIGNIFY_MAIL_FROM",
+    "SIGNIFY_MAIL_REPLY_TO",
+    "RESEND_API_URL",
     "MICROSOFT_CLIENT_ID",
     "MICROSOFT_CLIENT_SECRET",
     "MICROSOFT_TENANT_ID",
@@ -183,10 +220,12 @@ function environmentFile(env, existingKeys = []) {
     ...existingKeys.filter(
       (key) =>
         !managedKeys.includes(key) &&
-        /^(SIGNIFY_|SIGNATURE_|MICROSOFT_|AZURE_|STRIPE_|S3_)/.test(key),
+        /^(SIGNIFY_|SIGNATURE_|MICROSOFT_|AZURE_|STRIPE_|RESEND_|S3_)/.test(
+          key,
+        ),
     ),
   ];
-  return `${keys.map((key) => `${key}=${environmentValue(env[key] || "")}`).join("\n")}\n`;
+  return `${keys.map((key) => `${key}=${environmentValue(env[key] || "", key)}`).join("\n")}\n`;
 }
 
 function validateWritableDirectory(directory, label) {

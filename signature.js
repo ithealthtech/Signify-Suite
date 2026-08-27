@@ -29,6 +29,8 @@ const els = {
   photoPreview: $("#photoPreview"),
   bannerPreview: $("#bannerPreview"),
   toast: $("#toast"),
+  subscriptionDialog: $("#subscriptionDialog"),
+  subscriptionForm: $("#subscriptionForm"),
 };
 let state = {
   me: null,
@@ -44,6 +46,7 @@ let state = {
   previewTimer: null,
   previewSequence: 0,
   previewController: null,
+  entitlementTimer: null,
 };
 
 const toast = createToast(els.toast, 2600);
@@ -53,6 +56,9 @@ function activeUser() {
     state.users[0] ||
     state.me
   );
+}
+function shouldOpenControlPlane(user) {
+  return Boolean(user?.applicationOwner && !user.organizationId);
 }
 function setBusy(button, busy, label = "Working…") {
   sharedBusy(button, busy, label);
@@ -121,10 +127,7 @@ async function boot() {
   if (session.user) {
     state.me = session.user;
     state.workspaces = session.workspaces || [];
-    if (
-      state.me.applicationOwner &&
-      (state.me.onboardingRequired || !state.me.organizationId)
-    ) {
+    if (shouldOpenControlPlane(state.me)) {
       location.href = "/platform.html";
       return;
     }
@@ -137,6 +140,13 @@ async function boot() {
 async function loadApp() {
   els.authView.hidden = true;
   els.appView.hidden = false;
+  const entitlement = await api("/api/signature/subscription");
+  if (!entitlement.access) {
+    showSubscriptionRequired(entitlement);
+    return;
+  }
+  if (!state.entitlementTimer)
+    state.entitlementTimer = window.setInterval(checkEntitlement, 60_000);
   const [users, templates, runtime] = await Promise.all([
     api("/api/signature/users"),
     api("/api/signature/templates"),
@@ -175,6 +185,33 @@ async function loadApp() {
   renderTemplateGrid();
   renderCustomTemplates();
   selectUser(state.selectedUserId);
+}
+async function checkEntitlement() {
+  try {
+    const entitlement = await api("/api/signature/subscription");
+    if (!entitlement.access) {
+      window.clearInterval(state.entitlementTimer);
+      state.entitlementTimer = null;
+      showSubscriptionRequired(entitlement);
+    }
+  } catch (error) {
+    toast(error.message);
+  }
+}
+function showSubscriptionRequired(entitlement) {
+  const admin = entitlement.canManageBilling;
+  els.appView.setAttribute("inert", "");
+  els.appView.classList.add("subscription-locked");
+  els.subscriptionForm.hidden = !admin || !entitlement.checkoutAvailable;
+  $("#subscriptionMessage").textContent = admin
+    ? "Choose a plan to continue creating and managing email signatures."
+    : "Your workspace trial has ended. Contact a workspace administrator to restore access.";
+  $("#subscriptionNote").textContent = admin
+    ? entitlement.checkoutAvailable
+      ? "Payment is completed securely through Stripe. Access resumes after payment is confirmed."
+      : "Checkout is not configured. Contact the Signify application owner."
+    : "The editor will remain locked until the workspace subscription is active.";
+  els.subscriptionDialog.showModal();
 }
 function renderEmployeePicker() {
   els.employeeSelect.innerHTML = state.users
@@ -366,10 +403,7 @@ els.loginForm.addEventListener("submit", async (event) => {
       return;
     }
     state.me = result.user;
-    if (
-      state.me.applicationOwner &&
-      (state.me.onboardingRequired || !state.me.organizationId)
-    ) {
+    if (shouldOpenControlPlane(state.me)) {
       location.href = "/platform.html";
       return;
     }
@@ -393,10 +427,7 @@ els.mfaForm.addEventListener("submit", async (event) => {
       ),
     });
     state.me = result.user;
-    if (
-      state.me.applicationOwner &&
-      (state.me.onboardingRequired || !state.me.organizationId)
-    ) {
+    if (shouldOpenControlPlane(state.me)) {
       location.href = "/platform.html";
       return;
     }
@@ -543,6 +574,33 @@ $("#logout").addEventListener("click", async () => {
     toast(error.message);
   }
 });
+els.subscriptionDialog.addEventListener("cancel", (event) =>
+  event.preventDefault(),
+);
+els.subscriptionForm.addEventListener("submit", async (event) => {
+  event.preventDefault();
+  const button = event.currentTarget.querySelector("button[type='submit']");
+  setBusy(button, true, "Opening checkoutâ€¦");
+  try {
+    const result = await api("/api/signature/billing/checkout", {
+      method: "POST",
+      body: JSON.stringify({
+        plan: new FormData(event.currentTarget).get("plan"),
+      }),
+    });
+    location.href = result.url;
+  } catch (error) {
+    toast(error.message);
+    setBusy(button, false);
+  }
+});
+$("#subscriptionLogout").addEventListener("click", async () => {
+  try {
+    await api("/api/signature/logout", { method: "POST", body: "{}" });
+  } finally {
+    location.href = "/signature.html";
+  }
+});
 $("#workspaceSwitcher").addEventListener("change", async (event) => {
   try {
     await api("/api/signature/session/switch", {
@@ -581,7 +639,12 @@ els.templateGrid.addEventListener("click", (event) => {
   const card = event.target.closest("[data-template-id]");
   if (!card) return;
   state.signature.templateId = card.dataset.templateId;
+  if (card.dataset.templateId === "bannerCard" && !state.signature.bannerUrl)
+    state.signature.bannerUrl =
+      "/event-banners/cloud-services-modernization.png";
   updateSelectedTemplate();
+  updateSelectedBanner();
+  renderAsset(els.bannerPreview, state.signature.bannerUrl, "Banner preview");
   markDirty();
 });
 els.customTemplateSelect.addEventListener("change", () => {

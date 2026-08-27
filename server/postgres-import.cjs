@@ -35,6 +35,8 @@ const IMPORT_TABLES = [
   "tenant_deletion_requests",
   "feature_flags",
   "support_access_grants",
+  "installation_licenses",
+  "installation_license_revocations",
 ];
 
 const BOOLEAN_COLUMNS = new Set([

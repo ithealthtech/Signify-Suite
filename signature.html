@@ -7,6 +7,7 @@
     <link rel="icon" type="image/png" href="/ithtfavicon.png" />
     <link rel="stylesheet" href="signify-shared.css?v=20260718" />
     <link rel="stylesheet" href="signature.css?v=20260722" />
+    <link rel="stylesheet" href="signify-app.css?v=2026082601" />
   </head>
   <body>
     <main class="auth-shell" id="authView">
@@ -603,8 +604,34 @@
         </section>
       </main>
     </div>
+    <dialog class="subscription-dialog" id="subscriptionDialog">
+      <div class="subscription-mark" aria-hidden="true">S</div>
+      <span class="eyebrow">Subscription required</span>
+      <h2>Your 30-day trial has ended</h2>
+      <p id="subscriptionMessage">
+        Choose a plan to continue creating and managing email signatures.
+      </p>
+      <form id="subscriptionForm">
+        <label
+          >Plan<select name="plan">
+            <option value="starter">Starter</option>
+            <option value="team">Team</option>
+            <option value="business">Business</option>
+          </select></label
+        >
+        <button class="button primary wide" type="submit">
+          Continue to secure checkout
+        </button>
+      </form>
+      <p class="subscription-note" id="subscriptionNote">
+        Payment is completed securely through Stripe.
+      </p>
+      <button class="button text" id="subscriptionLogout" type="button">
+        Sign out
+      </button>
+    </dialog>
     <div class="toast" id="toast" role="status" aria-live="polite"></div>
     <script src="signify-shared.js?v=20260718"></script>
-    <script src="signature.js?v=20260722"></script>
+    <script src="signature.js?v=2026082502"></script>
   </body>
 </html>

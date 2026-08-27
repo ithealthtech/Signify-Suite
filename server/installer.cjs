@@ -15,7 +15,7 @@ function equalToken(actual, expected) {
   return timingSafeEqual(left, right) && Boolean(expected);
 }
 
-function createInstaller({ config, db, json, readJsonBody }) {
+function createInstaller({ config, db, json, readJsonBody, licensing }) {
   function required() {
     const owner = db.prepare("SELECT 1 FROM application_owners LIMIT 1").get(),
       completion = db
@@ -28,6 +28,7 @@ function createInstaller({ config, db, json, readJsonBody }) {
 
   function status() {
     const installationRequired = required(),
+      entitlement = licensing.summary(),
       checks = [
         {
           id: "node",
@@ -84,6 +85,13 @@ function createInstaller({ config, db, json, readJsonBody }) {
       available: !installationRequired || checks.every((check) => check.ok),
       companyName: config.signature.companyName,
       publicUrl: config.signature.publicUrl,
+      license: {
+        installationId: entitlement.installationId,
+        verificationConfigured: entitlement.verificationConfigured,
+        authorityConfigured: entitlement.authorityConfigured,
+        edition: entitlement.edition,
+        maxTenants: entitlement.maxTenants,
+      },
       checks,
     };
   }
@@ -186,7 +194,10 @@ function createInstaller({ config, db, json, readJsonBody }) {
         },
       );
 
-    const userId = randomUUID(),
+    const preparedLicense = String(body.licenseKey || "").trim()
+        ? await licensing.prepareActivation(body.licenseKey)
+        : null,
+      userId = randomUUID(),
       organization = db
         .prepare("SELECT * FROM organizations ORDER BY created_at LIMIT 1")
         .get(),
@@ -221,6 +232,7 @@ function createInstaller({ config, db, json, readJsonBody }) {
         `INSERT INTO signature_users(id,email,password_hash,display_name,role,status,signature_json,email_verified_at)
          VALUES (?,?,?,?,'admin','active','{}',strftime('%Y-%m-%dT%H:%M:%fZ','now'))`,
       ).run(userId, email, hashPassword(password), name);
+      licensing.requireUserCapacity(organization.id, 1);
       db.prepare(
         "INSERT INTO organization_memberships(organization_id,user_id,role,status,signature_json) VALUES (?,?,'admin','active','{}')",
       ).run(organization.id, userId);
@@ -241,6 +253,7 @@ function createInstaller({ config, db, json, readJsonBody }) {
         new Date().toISOString(),
         userId,
       );
+      if (preparedLicense) licensing.persist(preparedLicense, userId, true);
       db.prepare(
         "INSERT INTO application_audit_logs(id,actor_user_id,organization_id,action,target_type,target_id,reason,metadata_json,request_id) VALUES (?,?,?,?,?,?,?,?,?)",
       ).run(

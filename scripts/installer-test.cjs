@@ -67,6 +67,9 @@ async function main() {
     assert.equal(result.response.status, 200);
     assert.equal(result.body.required, true);
     assert.equal(result.body.available, true);
+    assert.equal(result.body.license.edition, "community");
+    assert.equal(result.body.license.maxTenants, 1);
+    assert.ok(result.body.license.installationId);
     assert.equal(JSON.stringify(result.body).includes(setupToken), false);
 
     result = await request(baseUrl, "/signature.html");

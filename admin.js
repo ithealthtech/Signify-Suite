@@ -113,14 +113,25 @@ async function refreshAll() {
   renderAll();
 }
 function renderAll() {
-  const { workspace, subscription, stats } = state.config;
+  const { workspace, subscription, stats, license } = state.config;
   $("#workspaceHeader").textContent = workspace.name;
   $("#statUsers").textContent = stats.activeUsers;
   $("#statTemplates").textContent = stats.templates;
   $("#statCampaigns").textContent = stats.campaigns;
   $("#statClicks").textContent = stats.clicks;
   $("#statSeatUsage").textContent =
-    `${stats.activeUsers} of ${subscription?.seats || 0} seats`;
+    `${license?.used ?? stats.users} of ${license?.maxUsers || subscription?.seats || 0} licensed slots`;
+  const remainingUsers = license?.remaining ?? 0,
+    atLicenseLimit = Boolean(license && remainingUsers <= 0);
+  $("#teamLicenseNote").textContent = license
+    ? license.edition === "community"
+      ? `Community Edition includes 10 users. ${remainingUsers} ${remainingUsers === 1 ? "slot" : "slots"} remaining.`
+      : `${license.used} of ${license.maxUsers} licensed slots. ${remainingUsers} ${remainingUsers === 1 ? "slot" : "slots"} remaining.`
+    : "";
+  $("#openCreateUser").disabled = atLicenseLimit;
+  $("#openCreateUser").title = atLicenseLimit
+    ? "Activate a license with more user capacity to add another person."
+    : "Add a person";
   renderReadiness();
   renderActivity();
   renderUsers();
@@ -257,9 +268,12 @@ function renderSettings() {
     settings = workspace.settings,
     form = $("#settingsForm").elements,
     subscription = state.config.subscription,
+    license = state.config.license,
     microsoft = state.config.integrations?.microsoft,
+    outlookAddin = state.config.integrations?.outlookAddin,
     used = state.config.stats.activeUsers,
-    seats = subscription?.seats || 1;
+    seats = license?.maxUsers || subscription?.seats || 1,
+    community = license?.edition === "community";
   form.name.value = workspace.name;
   form.publicUrl.value = settings.publicUrl || "";
   form.mediaBaseUrl.value = settings.mediaBaseUrl || "";
@@ -267,6 +281,7 @@ function renderSettings() {
   form.sessionHours.value = settings.sessionHours || 12;
   form.backupPath.value = settings.backupPath || "";
   form.requireApproval.checked = Boolean(settings.requireApproval);
+  $("#subscriptionSummary").hidden = community;
   $("#planName").textContent = (subscription?.plan || "starter").replace(
     /^./,
     (char) => char.toUpperCase(),
@@ -292,6 +307,20 @@ function renderSettings() {
     ? microsoft.lastError ||
       "Directory sync and email delivery use this tenant connection."
     : "A Microsoft 365 Global Administrator must grant tenant-wide consent.";
+  $("#outlookAddinName").textContent = outlookAddin
+    ? "Signify Managed Signatures"
+    : "Not enabled";
+  $("#outlookAddinStatus").textContent = outlookAddin?.enabled
+    ? "Enabled"
+    : "Disabled";
+  $("#outlookAddinNote").textContent = outlookAddin?.lastUsedAt
+    ? `Last delivered ${dateLabel(outlookAddin.lastUsedAt)}`
+    : "Centrally applies current signatures and removes them when workspace access or a member becomes inactive.";
+  $("#enableOutlookAddin").textContent = outlookAddin?.enabled
+    ? "Rotate deployment key"
+    : "Enable deployment";
+  $("#downloadOutlookManifest").hidden = !outlookAddin?.enabled;
+  $("#disableOutlookAddin").hidden = !outlookAddin?.enabled;
 }
 
 function showSection(name) {
@@ -401,6 +430,8 @@ function bindEvents() {
   $("#saveSettings").addEventListener("click", saveSettings);
   $("#saveMicrosoftSender").addEventListener("click", saveMicrosoftSender);
   $("#disconnectMicrosoft").addEventListener("click", disconnectMicrosoft);
+  $("#enableOutlookAddin").addEventListener("click", enableOutlookAddin);
+  $("#disableOutlookAddin").addEventListener("click", disableOutlookAddin);
   const microsoftResult = new URLSearchParams(location.search).get("microsoft");
   if (microsoftResult) {
     toast(
@@ -411,6 +442,51 @@ function bindEvents() {
           : "Microsoft 365 application credentials are not configured",
     );
     history.replaceState(null, "", `${location.pathname}#settings`);
+  }
+}
+
+async function enableOutlookAddin() {
+  const existing = state.config.integrations?.outlookAddin?.enabled;
+  if (
+    existing &&
+    !confirm(
+      "Rotate the deployment key? The current manifest will stop working until the replacement is deployed.",
+    )
+  )
+    return;
+  const button = $("#enableOutlookAddin");
+  busy(button, true, existing ? "Rotatingâ€¦" : "Enablingâ€¦");
+  try {
+    const result = await api("/api/signature/outlook-addin/enable", {
+      method: "POST",
+      body: "{}",
+    });
+    state.config.integrations.outlookAddin = result.deployment;
+    renderSettings();
+    toast(existing ? "Deployment key rotated" : "Outlook deployment enabled");
+  } catch (error) {
+    toast(error.message);
+  } finally {
+    busy(button, false);
+  }
+}
+
+async function disableOutlookAddin() {
+  if (!confirm("Disable managed Outlook signatures for this tenant?")) return;
+  const button = $("#disableOutlookAddin");
+  busy(button, true, "Disablingâ€¦");
+  try {
+    const result = await api("/api/signature/outlook-addin/disable", {
+      method: "POST",
+      body: "{}",
+    });
+    state.config.integrations.outlookAddin = result.deployment;
+    renderSettings();
+    toast("Outlook deployment disabled");
+  } catch (error) {
+    toast(error.message);
+  } finally {
+    busy(button, false);
   }
 }
 function updateCreateUserMode() {

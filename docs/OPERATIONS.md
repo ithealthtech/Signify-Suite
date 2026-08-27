@@ -12,6 +12,36 @@
 5. Start `server.cjs` and require `GET /api/ready` to return HTTP 200 before
    moving proxy traffic.
 
+## Microsoft 365 And Stripe Acceptance
+
+Configure both integrations from **Application > Integrations**. Microsoft 365
+requires the `Mail.Send`, `Organization.Read.All`, and `User.Read.All`
+application permissions with administrator consent. Stripe requires at least one
+mapped recurring price and the automatically registered Signify webhook.
+
+Run the non-mutating connectivity and permission checks first:
+
+```powershell
+npm run integrations:verify
+```
+
+For release acceptance, use Microsoft and Stripe sandbox resources. Set
+`SIGNIFY_ACCEPTANCE_M365_SENDER` to a sandbox mailbox. Optionally set
+`SIGNIFY_ACCEPTANCE_EMAIL` to a different sandbox recipient; otherwise the
+sender is used for both providers. Then run:
+
+```powershell
+npm run integrations:accept
+```
+
+Exercise mode refuses Stripe live keys. It reads one Microsoft directory page,
+sends one clearly labeled Microsoft acceptance message, creates one Stripe test
+Checkout session, and immediately expires that session. It also verifies every
+required Stripe webhook event and the signing-secret configuration. Sanitized
+evidence is written to `tmp/provider-acceptance.json`; credentials, tokens, and
+customer records are never included. A blocked or failed provider returns a
+nonzero exit code and must not be recorded as accepted.
+
 When `SIGNIFY_MEDIA_STORAGE=s3`, verify private object put/get/delete access and
 bucket versioning before moving traffic. Stable signature media is proxied by
 the application; provider credentials and raw object keys are never returned to

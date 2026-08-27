@@ -1,8 +1,17 @@
 "use strict";
 const fs = require("node:fs");
 const path = require("node:path");
+const { spawn } = require("node:child_process");
+const { createHash, randomUUID } = require("node:crypto");
 const { createCredentialVault } = require("./credential-vault.cjs");
 const { DatabaseSync } = require("node:sqlite");
+const tar = require("tar");
+const { verifyArtifact } = require("./deployment.cjs");
+const {
+  compareVersions,
+  normalizeVersion,
+  releaseAssets,
+} = require("./version.cjs");
 
 const BACKUP_PATTERN = /^signify-creator-(?:pre-restore-)?[\w.-]+\.db$/;
 
@@ -137,25 +146,96 @@ function applyPendingRestore(config) {
   }
 }
 
-function compareVersions(left, right) {
-  const parse = (value) =>
-    String(value || "0")
-      .replace(/^v/, "")
-      .split(".")
-      .map(Number);
-  const a = parse(left),
-    b = parse(right);
-  for (let index = 0; index < 3; index += 1) {
-    if ((a[index] || 0) !== (b[index] || 0))
-      return (a[index] || 0) - (b[index] || 0);
+function updateStatusFile(backupPath) {
+  return path.join(backupPath, ".update-status.json");
+}
+
+function writeUpdateStatus(backupPath, value) {
+  const target = updateStatusFile(backupPath),
+    temporary = `${target}.${process.pid}`;
+  fs.writeFileSync(
+    temporary,
+    `${JSON.stringify({ ...value, updatedAt: new Date().toISOString() })}\n`,
+    { mode: 0o600 },
+  );
+  fs.renameSync(temporary, target);
+}
+
+function readUpdateStatus(backupPath) {
+  try {
+    const value = JSON.parse(
+      fs.readFileSync(updateStatusFile(backupPath), "utf8"),
+    );
+    return value && typeof value === "object" ? value : null;
+  } catch (error) {
+    if (error.code === "ENOENT" || error.name === "SyntaxError") return null;
+    throw error;
   }
-  return 0;
+}
+
+function updateReadiness(config) {
+  const updates = config.updates || {},
+    required = {
+      releasesDirectory: updates.releasesDirectory,
+      currentLink: updates.currentLink,
+      restartScript: updates.restartScript,
+      healthUrl: updates.healthUrl,
+      releasePublicKey: updates.releasePublicKey,
+    },
+    missing = Object.entries(required)
+      .filter(([, value]) => !value)
+      .map(([name]) => name);
+  if (updates.requireSignature === false)
+    missing.push("signed release enforcement");
+  return {
+    installSupported: missing.length === 0,
+    missing,
+  };
+}
+
+function archiveFilter(maximumBytes) {
+  let entries = 0,
+    extractedBytes = 0;
+  return (name, entry) => {
+    const normalized = path.posix.normalize(
+      String(name || "").replaceAll("\\", "/"),
+    );
+    entries += 1;
+    extractedBytes += Number(entry?.size || 0);
+    if (
+      !normalized ||
+      normalized === ".." ||
+      normalized.startsWith("../") ||
+      normalized.startsWith("/") ||
+      /^[a-zA-Z]:\//.test(normalized) ||
+      ["SymbolicLink", "Link"].includes(entry?.type) ||
+      entries > 20000 ||
+      extractedBytes > maximumBytes
+    )
+      throw Object.assign(
+        new Error("The release archive contains an unsafe entry."),
+        {
+          status: 422,
+          code: "UPDATE_ARCHIVE_UNSAFE",
+        },
+      );
+    return true;
+  };
 }
 
 function createApplicationOperations({
   config,
   db,
   fetchImpl = fetch,
+  spawnImpl = spawn,
+  extractImpl = (archive, directory, maximumBytes) =>
+    tar.x({
+      file: archive,
+      cwd: directory,
+      strict: true,
+      preservePaths: false,
+      filter: archiveFilter(maximumBytes),
+    }),
   version,
 }) {
   const backupPath = ensureDirectory(path.resolve(config.backupPath)),
@@ -230,7 +310,18 @@ function createApplicationOperations({
     }
     fs.rmSync(file);
   }
-  async function checkForUpdates() {
+  function githubToken() {
+    const githubRow = db
+        .prepare(
+          "SELECT encrypted_credentials FROM application_integrations WHERE provider='github' AND status='connected'",
+        )
+        .get(),
+      githubCredentials = githubRow?.encrypted_credentials
+        ? credentialVault.decrypt("github", githubRow.encrypted_credentials)
+        : null;
+    return githubCredentials?.token || config.updateGithubToken;
+  }
+  async function fetchLatestRelease() {
     if (!/^[\w.-]+\/[\w.-]+$/.test(config.updateRepository)) {
       const error = new Error(
         "The update repository configuration is invalid.",
@@ -239,15 +330,7 @@ function createApplicationOperations({
       error.code = "UPDATE_REPOSITORY_INVALID";
       throw error;
     }
-    const githubRow = db
-        .prepare(
-          "SELECT encrypted_credentials FROM application_integrations WHERE provider='github' AND status='connected'",
-        )
-        .get(),
-      githubCredentials = githubRow?.encrypted_credentials
-        ? credentialVault.decrypt("github", githubRow.encrypted_credentials)
-        : null,
-      githubToken = githubCredentials?.token || config.updateGithubToken;
+    const token = githubToken();
     let response;
     try {
       response = await fetchImpl(
@@ -257,7 +340,7 @@ function createApplicationOperations({
             Accept: "application/vnd.github+json",
             "User-Agent": "Signify-Creator",
             "X-GitHub-Api-Version": "2022-11-28",
-            ...(githubToken ? { Authorization: `Bearer ${githubToken}` } : {}),
+            ...(token ? { Authorization: `Bearer ${token}` } : {}),
           },
           signal: AbortSignal.timeout(10000),
         },
@@ -282,14 +365,295 @@ function createApplicationOperations({
       throw error;
     }
     const release = await response.json();
+    try {
+      normalizeVersion(release.tag_name);
+    } catch {
+      throw Object.assign(
+        new Error(
+          "The latest release does not use a valid vMAJOR.MINOR.PATCH tag.",
+        ),
+        { status: 502, code: "UPDATE_RELEASE_INVALID" },
+      );
+    }
+    return { release, token };
+  }
+  let lastCheck = null,
+    activeCheck = null;
+  async function checkForUpdates() {
+    if (activeCheck) return activeCheck;
+    activeCheck = (async () => {
+      try {
+        const { release } = await fetchLatestRelease(),
+          latestVersion = normalizeVersion(release.tag_name),
+          expected = releaseAssets(latestVersion),
+          assetNames = new Set(
+            Array.isArray(release.assets)
+              ? release.assets.map((asset) => String(asset.name || ""))
+              : [],
+          ),
+          readiness = updateReadiness(config);
+        lastCheck = {
+          status: "checked",
+          checkedAt: new Date().toISOString(),
+          currentVersion: normalizeVersion(version),
+          latestVersion,
+          updateAvailable: compareVersions(version, latestVersion) < 0,
+          publishedAt: release.published_at || null,
+          releaseUrl: release.html_url || "",
+          notes: String(release.body || "").slice(0, 4000),
+          packageReady:
+            assetNames.has(expected.archive) &&
+            assetNames.has(expected.checksum),
+          expectedPackage: expected.archive,
+          ...readiness,
+        };
+        return lastCheck;
+      } catch (error) {
+        lastCheck = {
+          status: "failed",
+          checkedAt: new Date().toISOString(),
+          currentVersion: normalizeVersion(version),
+          error: error.message,
+          code: error.code || "UPDATE_CHECK_FAILED",
+          ...updateReadiness(config),
+        };
+        throw error;
+      } finally {
+        activeCheck = null;
+      }
+    })();
+    return activeCheck;
+  }
+  function getUpdateStatus() {
     return {
-      currentVersion: version,
-      latestVersion: String(release.tag_name || "").replace(/^v/, ""),
-      updateAvailable: compareVersions(version, release.tag_name) < 0,
-      publishedAt: release.published_at || null,
-      releaseUrl: release.html_url || "",
-      notes: String(release.body || "").slice(0, 4000),
+      ...(lastCheck || {
+        status: "not_checked",
+        currentVersion: normalizeVersion(version),
+        ...updateReadiness(config),
+      }),
+      installation: readUpdateStatus(backupPath),
     };
+  }
+  function startUpdateMonitor(intervalMs = config.updates?.checkIntervalMs) {
+    if (!Number.isFinite(intervalMs) || intervalMs <= 0) return { stop() {} };
+    let stopped = false,
+      timer;
+    const run = async () => {
+      if (stopped) return;
+      try {
+        await checkForUpdates();
+      } catch {}
+      if (!stopped) {
+        timer = setTimeout(run, intervalMs);
+        timer.unref();
+      }
+    };
+    timer = setTimeout(run, Math.min(30000, intervalMs));
+    timer.unref();
+    return {
+      stop() {
+        stopped = true;
+        clearTimeout(timer);
+      },
+    };
+  }
+  async function downloadAsset(asset, token, maximumBytes) {
+    let response;
+    try {
+      response = await fetchImpl(asset.url, {
+        headers: {
+          Accept: "application/octet-stream",
+          "User-Agent": "Signify-Creator",
+          "X-GitHub-Api-Version": "2022-11-28",
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
+        redirect: "follow",
+        signal: AbortSignal.timeout(120000),
+      });
+    } catch {
+      throw Object.assign(
+        new Error("The release package could not be downloaded."),
+        {
+          status: 502,
+          code: "UPDATE_DOWNLOAD_FAILED",
+        },
+      );
+    }
+    const declared = Number(response.headers?.get?.("content-length") || 0);
+    if (!response.ok || (declared && declared > maximumBytes))
+      throw Object.assign(
+        new Error(
+          declared > maximumBytes
+            ? "The release package exceeds the configured size limit."
+            : "The release package could not be downloaded.",
+        ),
+        {
+          status: declared > maximumBytes ? 413 : 502,
+          code:
+            declared > maximumBytes
+              ? "UPDATE_PACKAGE_TOO_LARGE"
+              : "UPDATE_DOWNLOAD_FAILED",
+        },
+      );
+    const bytes = Buffer.from(await response.arrayBuffer());
+    if (bytes.length > maximumBytes)
+      throw Object.assign(
+        new Error("The release package exceeds the configured size limit."),
+        { status: 413, code: "UPDATE_PACKAGE_TOO_LARGE" },
+      );
+    return bytes;
+  }
+  async function installUpdate() {
+    const readiness = updateReadiness(config);
+    if (!readiness.installSupported)
+      throw Object.assign(
+        new Error(
+          `Managed updates are not configured. Missing: ${readiness.missing.join(", ")}.`,
+        ),
+        { status: 503, code: "UPDATE_INSTALL_UNAVAILABLE" },
+      );
+    const currentInstallation = readUpdateStatus(backupPath);
+    if (
+      ["preparing", "scheduled", "installing"].includes(
+        currentInstallation?.status,
+      )
+    )
+      throw Object.assign(
+        new Error("An application update is already in progress."),
+        {
+          status: 409,
+          code: "UPDATE_ALREADY_RUNNING",
+        },
+      );
+    const { release, token } = await fetchLatestRelease(),
+      latestVersion = normalizeVersion(release.tag_name);
+    if (compareVersions(version, latestVersion) >= 0)
+      throw Object.assign(
+        new Error("No newer application release is available."),
+        {
+          status: 409,
+          code: "UPDATE_NOT_AVAILABLE",
+        },
+      );
+    const expected = releaseAssets(latestVersion),
+      assets = new Map(
+        (release.assets || []).map((asset) => [
+          String(asset.name || ""),
+          asset,
+        ]),
+      ),
+      archiveAsset = assets.get(expected.archive),
+      checksumAsset = assets.get(expected.checksum);
+    if (!archiveAsset || !checksumAsset)
+      throw Object.assign(
+        new Error(
+          `Release ${release.tag_name} is missing its signed production package.`,
+        ),
+        { status: 502, code: "UPDATE_PACKAGE_MISSING" },
+      );
+    const stagingRoot = path.join(
+        backupPath,
+        "update-staging",
+        `${latestVersion}-${randomUUID()}`,
+      ),
+      artifact = path.join(stagingRoot, "artifact"),
+      archive = path.join(stagingRoot, expected.archive);
+    fs.mkdirSync(artifact, { recursive: true });
+    writeUpdateStatus(backupPath, {
+      status: "preparing",
+      version: latestVersion,
+    });
+    try {
+      const [archiveBytes, checksumBytes] = await Promise.all([
+          downloadAsset(
+            archiveAsset,
+            token,
+            config.updates.maxArchiveBytes || 250 * 1024 * 1024,
+          ),
+          downloadAsset(checksumAsset, token, 1024 * 1024),
+        ]),
+        expectedDigest = String(checksumBytes)
+          .trim()
+          .match(/^([0-9a-f]{64})\s+(.+)$/i);
+      if (
+        !expectedDigest ||
+        path.basename(expectedDigest[2]) !== expected.archive
+      )
+        throw Object.assign(
+          new Error("The release checksum file is invalid."),
+          {
+            status: 422,
+            code: "UPDATE_CHECKSUM_INVALID",
+          },
+        );
+      const actualDigest = createHash("sha256")
+        .update(archiveBytes)
+        .digest("hex");
+      if (actualDigest !== expectedDigest[1].toLowerCase())
+        throw Object.assign(
+          new Error("The release package checksum does not match."),
+          {
+            status: 422,
+            code: "UPDATE_CHECKSUM_MISMATCH",
+          },
+        );
+      fs.writeFileSync(archive, archiveBytes, { mode: 0o600, flag: "wx" });
+      await extractImpl(
+        archive,
+        artifact,
+        (config.updates.maxArchiveBytes || 250 * 1024 * 1024) * 4,
+      );
+      const verified = verifyArtifact(artifact, {
+        releasePublicKey: config.updates.releasePublicKey,
+        requireSignature: true,
+      });
+      if (normalizeVersion(verified.manifest.version) !== latestVersion)
+        throw Object.assign(
+          new Error(
+            "The release package version does not match the GitHub release.",
+          ),
+          { status: 422, code: "UPDATE_VERSION_MISMATCH" },
+        );
+      writeUpdateStatus(backupPath, {
+        status: "scheduled",
+        version: latestVersion,
+      });
+      const envFile = path.join(config.sourceRoot, ".env.local"),
+        child = spawnImpl(
+          process.execPath,
+          [
+            ...(fs.existsSync(envFile)
+              ? [`--env-file-if-exists=${envFile}`]
+              : []),
+            path.join(config.sourceRoot, "scripts", "install-update.cjs"),
+            artifact,
+          ],
+          {
+            cwd: config.sourceRoot,
+            detached: true,
+            env: process.env,
+            stdio: "ignore",
+            windowsHide: true,
+          },
+        );
+      child.once?.("error", (error) =>
+        writeUpdateStatus(backupPath, {
+          status: "failed",
+          version: latestVersion,
+          error: error.message,
+        }),
+      );
+      child.unref?.();
+      return { status: "scheduled", version: latestVersion };
+    } catch (error) {
+      writeUpdateStatus(backupPath, {
+        status: "failed",
+        version: latestVersion,
+        error: error.message,
+      });
+      fs.rmSync(stagingRoot, { recursive: true, force: true });
+      throw error;
+    }
   }
   return {
     backupPath,
@@ -300,11 +664,17 @@ function createApplicationOperations({
     deleteBackup,
     managedFile,
     checkForUpdates,
+    getUpdateStatus,
+    installUpdate,
+    startUpdateMonitor,
   };
 }
 
 module.exports = {
   applyPendingRestore,
   createApplicationOperations,
+  readUpdateStatus,
+  updateReadiness,
   validateBackup,
+  writeUpdateStatus,
 };

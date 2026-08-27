@@ -1,4 +1,5 @@
 "use strict";
+const fs = require("node:fs");
 const path = require("node:path");
 const { decodeKey } = require("./credential-vault.cjs");
 
@@ -24,14 +25,58 @@ function validEmail(value) {
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(value || ""));
 }
 
+function validSender(value) {
+  const candidate = String(value || "").trim(),
+    bracketed = candidate.match(/<([^<>]+)>$/);
+  return !/[\r\n]/.test(candidate) && validEmail(bracketed?.[1] || candidate);
+}
+
+function optionalAbsolutePath(value, name) {
+  const candidate = String(value || "").trim();
+  if (!candidate) return "";
+  if (!path.isAbsolute(candidate)) throw new Error(`${name} must be absolute.`);
+  return path.normalize(candidate);
+}
+
+function bundledLicenseConfig(baseDir) {
+  const file = path.join(baseDir, "server", "license-build.json");
+  if (!fs.existsSync(file)) return {};
+  try {
+    const value = JSON.parse(fs.readFileSync(file, "utf8"));
+    return value && typeof value === "object" && !Array.isArray(value)
+      ? value
+      : {};
+  } catch {
+    throw new Error("server/license-build.json is invalid.");
+  }
+}
+
 function loadConfig(env = process.env, baseDir = path.join(__dirname, "..")) {
-  const production = env.NODE_ENV === "production";
+  const production = env.NODE_ENV === "production",
+    bundledLicense = bundledLicenseConfig(baseDir);
   const port = Number(env.PORT || 4173);
   if (!Number.isInteger(port) || port < 1 || port > 65535)
     throw new Error("PORT must be an integer from 1 to 65535.");
   const sessionHours = Number(env.SIGNATURE_SESSION_HOURS || 12);
   if (!Number.isFinite(sessionHours) || sessionHours < 1 || sessionHours > 168)
     throw new Error("SIGNATURE_SESSION_HOURS must be from 1 to 168.");
+  const licenseRefreshHours = Number(env.SIGNIFY_LICENSE_REFRESH_HOURS || 12);
+  if (
+    !Number.isFinite(licenseRefreshHours) ||
+    licenseRefreshHours < 1 ||
+    licenseRefreshHours > 168
+  )
+    throw new Error("SIGNIFY_LICENSE_REFRESH_HOURS must be from 1 to 168.");
+  const updateCheckHours = Number(env.SIGNIFY_UPDATE_CHECK_HOURS || 6);
+  if (
+    !Number.isFinite(updateCheckHours) ||
+    updateCheckHours < 0.25 ||
+    updateCheckHours > 168
+  )
+    throw new Error("SIGNIFY_UPDATE_CHECK_HOURS must be from 0.25 to 168.");
+  const updateMaxMb = Number(env.SIGNIFY_UPDATE_MAX_MB || 250);
+  if (!Number.isInteger(updateMaxMb) || updateMaxMb < 25 || updateMaxMb > 2048)
+    throw new Error("SIGNIFY_UPDATE_MAX_MB must be from 25 to 2048.");
   const workerHeartbeatSeconds = Number(
     env.SIGNIFY_WORKER_HEARTBEAT_SECONDS || 10,
   );
@@ -189,6 +234,32 @@ function loadConfig(env = process.env, baseDir = path.join(__dirname, "..")) {
     throw new Error(
       "MICROSOFT_SENDER_EMAIL requires MICROSOFT_TENANT_ID for system mail.",
     );
+  const mailApiKey = String(env.RESEND_API_KEY || "").trim(),
+    mailProvider = String(
+      env.SIGNIFY_MAIL_PROVIDER || (mailApiKey ? "resend" : "disabled"),
+    )
+      .trim()
+      .toLowerCase(),
+    mailFrom = String(env.SIGNIFY_MAIL_FROM || "").trim(),
+    mailReplyTo = String(env.SIGNIFY_MAIL_REPLY_TO || "").trim(),
+    mailEndpoint = httpUrl(
+      String(env.RESEND_API_URL || "https://api.resend.com").trim(),
+      "RESEND_API_URL",
+    );
+  if (!["disabled", "resend"].includes(mailProvider))
+    throw new Error("SIGNIFY_MAIL_PROVIDER must be disabled or resend.");
+  if (mailFrom && !validSender(mailFrom))
+    throw new Error("SIGNIFY_MAIL_FROM must contain a valid email address.");
+  if (mailReplyTo && !validSender(mailReplyTo))
+    throw new Error(
+      "SIGNIFY_MAIL_REPLY_TO must contain a valid email address.",
+    );
+  if (
+    production &&
+    mailProvider === "resend" &&
+    !mailEndpoint.startsWith("https://")
+  )
+    throw new Error("RESEND_API_URL must use HTTPS in production.");
   const stripeSecretKey = String(env.STRIPE_SECRET_KEY || "").trim(),
     stripeWebhookSecret = String(env.STRIPE_WEBHOOK_SECRET || "").trim(),
     stripePrices = {
@@ -360,7 +431,49 @@ function loadConfig(env = process.env, baseDir = path.join(__dirname, "..")) {
       env.SIGNIFY_UPDATE_REPOSITORY || "ithealthtech/Signify-Suite",
     ).trim(),
     updateGithubToken: String(env.SIGNIFY_UPDATE_GITHUB_TOKEN || "").trim(),
+    updates: {
+      checkIntervalMs: updateCheckHours * 60 * 60 * 1000,
+      maxArchiveBytes: Math.floor(updateMaxMb * 1024 * 1024),
+      releasesDirectory: optionalAbsolutePath(
+        env.SIGNIFY_RELEASES_DIR,
+        "SIGNIFY_RELEASES_DIR",
+      ),
+      currentLink: optionalAbsolutePath(
+        env.SIGNIFY_CURRENT_LINK,
+        "SIGNIFY_CURRENT_LINK",
+      ),
+      restartScript: optionalAbsolutePath(
+        env.SIGNIFY_DEPLOY_RESTART_SCRIPT,
+        "SIGNIFY_DEPLOY_RESTART_SCRIPT",
+      ),
+      healthUrl: httpUrl(
+        String(env.SIGNIFY_DEPLOY_HEALTH_URL || "").trim(),
+        "SIGNIFY_DEPLOY_HEALTH_URL",
+      ),
+      releasePublicKey: String(env.SIGNIFY_RELEASE_SIGNING_PUBLIC_KEY || "")
+        .replaceAll("\\n", "\n")
+        .trim(),
+      requireSignature: bool(env.SIGNIFY_DEPLOY_REQUIRE_SIGNATURE, true),
+    },
+    licensePublicKey: String(
+      env.SIGNIFY_LICENSE_PUBLIC_KEY || bundledLicense.publicKey || "",
+    ).trim(),
+    licenseAuthorityUrl: httpUrl(
+      String(
+        env.SIGNIFY_LICENSE_AUTHORITY_URL || bundledLicense.authorityUrl || "",
+      ).trim(),
+      "SIGNIFY_LICENSE_AUTHORITY_URL",
+    ),
+    licenseRefreshIntervalMs: licenseRefreshHours * 60 * 60 * 1000,
     setup: { token: setupToken },
+    mail: {
+      provider: mailProvider,
+      apiKey: mailApiKey,
+      from: mailFrom,
+      replyTo: mailReplyTo,
+      endpoint: mailEndpoint,
+      lastVerifiedAt: null,
+    },
     signature: {
       sessionHours,
       mediaLimitBytes: Math.floor(mediaLimitMb * 1024 * 1024),

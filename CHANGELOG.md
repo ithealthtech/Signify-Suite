@@ -1,5 +1,73 @@
 # Changelog
 
+## 1.1.0 - 2026-08-27
+
+- Aligned the runtime, container, release workflow, documentation, and signed
+  package naming on version `1.1.0`.
+- Added periodic private-release detection and verified one-click installation
+  for managed hosts, including package size limits, SHA-256 and Ed25519 checks,
+  migration preflight, safety backup, readiness gating, and automatic rollback.
+- Added encrypted transactional email configuration, retry and idempotency
+  controls, delivery-aware account workflows, and production readiness gates.
+- Added repeatable Microsoft 365 and Stripe acceptance checks for permissions,
+  directory access, sandbox mail, recurring prices, webhook configuration, and
+  disposable test Checkout sessions with credential-free evidence reports.
+
+- Added a separate creator-controlled license authority with Ed25519 lease
+  issuance, installation binding, activation-key rotation, revocation, and
+  authenticated administration routes.
+- Connected central Stripe subscription webhooks to mapped installation
+  entitlements with signature verification and idempotent event handling.
+- Added automatic and owner-triggered entitlement refresh, durable revocation,
+  offline grace handling, and safe in-place Community downgrade behavior.
+- Added detached Ed25519 signing and verification for production release
+  inventories; release deployments can now reject unsigned or altered artifacts.
+- Closed a concurrent tenant-creation capacity race by enforcing licensed
+  capacity inside both organization creation transactions.
+
+### Added
+
+- Browser-based Community and Enterprise installation licensing with a stable
+  installation ID, signed-key activation during setup or from the Application
+  Owner console, entitlement status, tenant usage, expiration, and downgrade
+  controls.
+- Community Edition defaults to one tenant; signed Enterprise entitlements can
+  unlock higher tenant limits and product features.
+- Centrally deployable Outlook event-based add-in with tenant-scoped manifest
+  generation, live signature delivery, administrative key rotation, and audit
+  history.
+- Managed Outlook signatures are removed on new message composition for
+  inactive members and expired, past-due, or canceled tenants, then resume
+  automatically after subscription restoration.
+- Banner Card editor preset with an integrated technology banner, compact
+  identity row, initials fallback, and an Outlook-visible shadow layer.
+- Thirty-day trials for new tenant registrations now fail closed when their
+  trial window expires, including editor read and write APIs.
+- Expired tenant admins receive a non-dismissible subscription dialog with a
+  server-created Stripe hosted-checkout link; end users are directed to their
+  workspace administrator.
+
+### Security
+
+- Ed25519 license verification binds commercial entitlements to one
+  installation, rejects modified or cross-installation keys, supports signed
+  grace periods, and keeps the private issuer key outside customer deployments.
+- Tenant limits are enforced on both server-side organization creation paths;
+  hiding or re-enabling the browser control cannot bypass the entitlement.
+- Outlook deployment credentials are encrypted at rest, rate limited, scoped
+  to one tenant, excluded from API responses, and included in credential-key
+  rotation.
+- Subscription entitlement is enforced on the server before signature data is
+  returned, and Stripe credentials remain restricted to the Application Owner.
+
+### Acceptance status
+
+- The complete local validation, security, build, artifact, and clean-start
+  suites passed before release.
+- Live Microsoft 365 mail and Stripe Checkout acceptance was not executed for
+  this release because no external sandbox credentials were supplied. The new
+  acceptance command fails closed until both providers are configured.
+
 ## 1.0.0 - 2026-07-22
 
 ### Added

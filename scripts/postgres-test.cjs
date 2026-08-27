@@ -13,6 +13,8 @@ const expectedTables = [
   "application_owner_mfa",
   "application_owners",
   "background_jobs",
+  "installation_licenses",
+  "installation_license_revocations",
   "organization_memberships",
   "organization_microsoft_connections",
   "organization_subscriptions",

@@ -11,6 +11,11 @@ const { createJobQueue, startJobWorker } = require("./server/job-queue.cjs");
 const { createMediaStorage } = require("./server/media-storage.cjs");
 const { createObservability } = require("./server/observability.cjs");
 const { createInstaller } = require("./server/installer.cjs");
+const { createLicensing } = require("./server/licensing.cjs");
+const {
+  createTransactionalEmail,
+} = require("./server/transactional-email.cjs");
+const { applicationReadiness } = require("./server/readiness.cjs");
 const { acquireRuntimeLease } = require("./server/runtime-lease.cjs");
 const {
   applyPendingRestore,
@@ -43,10 +48,14 @@ const publicFiles = new Set([
   "platform.js",
   "signify-shared.js",
   "signify-shared.css",
+  "signify-app.css",
   "setup.html",
   "setup.css",
   "setup.js",
+  "outlook-addin.html",
+  "outlook-addin.js",
   "signature-it-banner.png",
+  "ithtfavicon.png",
 ]);
 
 function securityHeaders(production = false) {
@@ -63,7 +72,7 @@ function securityHeaders(production = false) {
     "X-DNS-Prefetch-Control": "off",
     "Permissions-Policy": "camera=(), microphone=(), geolocation=()",
     "Content-Security-Policy":
-      "default-src 'self'; base-uri 'self'; object-src 'none'; frame-ancestors 'self'; form-action 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; script-src 'self'; img-src 'self' data: https:; connect-src 'self'",
+      "default-src 'self'; base-uri 'self'; object-src 'none'; frame-ancestors 'self' https://outlook.office.com https://outlook.office365.com; form-action 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; script-src 'self' https://appsforoffice.microsoft.com; img-src 'self' data: https:; connect-src 'self'",
   };
 }
 
@@ -159,7 +168,7 @@ function serve(config, req, res, pathname, requestId) {
   let file = publicFiles.has(relative)
     ? path.join(config.sourceRoot, relative)
     : path.join(config.publicRoot, relative);
-  if (relative === "signature-it-banner.png")
+  if (["signature-it-banner.png", "ithtfavicon.png"].includes(relative))
     file = path.join(config.publicRoot, relative);
   const resolved = path.resolve(file);
   const allowedRoots = [
@@ -267,7 +276,26 @@ function createApplication(options = {}) {
     createMediaStorage(config, { s3Client: options.s3Client });
   const jobHandlers = {},
     jobQueue = createJobQueue(db, jobHandlers);
-  const installer = createInstaller({ config, db, json, readJsonBody });
+  const licensing = createLicensing({
+    db,
+    publicKey: config.licensePublicKey,
+    authorityUrl: config.licenseAuthorityUrl,
+    fetchFn: options.fetchImpl,
+  });
+  const transactionalEmail =
+    options.transactionalEmail ||
+    createTransactionalEmail({
+      config,
+      db,
+      fetchImpl: options.fetchImpl,
+    });
+  const installer = createInstaller({
+    config,
+    db,
+    json,
+    readJsonBody,
+    licensing,
+  });
   const signaturePortal = createSignaturePortal({
     db,
     production: config.production,
@@ -286,6 +314,8 @@ function createApplication(options = {}) {
     packageVersion: packageMetadata.version,
     updateRepository: config.updateRepository,
     updateGithubToken: config.updateGithubToken,
+    licensing,
+    transactionalEmail,
   });
   Object.assign(jobHandlers, signaturePortal.jobHandlers);
   const rateBuckets = new Map(),
@@ -322,6 +352,14 @@ function createApplication(options = {}) {
         "/api/signature/login/mfa": {
           limit: 10,
           windowMs: 15 * 60 * 1000,
+        },
+        "/api/outlook-addin/signature": {
+          limit: 120,
+          windowMs: 60 * 1000,
+        },
+        "/api/platform/license": {
+          limit: 20,
+          windowMs: 60 * 60 * 1000,
         },
       },
       policy = policies[pathname];
@@ -499,32 +537,18 @@ function createApplication(options = {}) {
             requestId,
             { Allow: "GET" },
           );
-        db.prepare("SELECT 1").get();
-        if (!runtimeHealth.ready)
-          return json(
-            res,
-            503,
-            {
-              status: "unavailable",
-              service: "signify-creator",
-              database: "ready",
-              runtime: runtimeHealth.error || "runtime lease unavailable",
-              version: packageMetadata.version,
-              time: new Date().toISOString(),
-            },
-            requestId,
-          );
+        const readiness = applicationReadiness({
+          config,
+          db,
+          installer,
+          runtimeHealth,
+          transactionalEmail,
+          version: packageMetadata.version,
+        });
         return json(
           res,
-          200,
-          {
-            status: "ok",
-            service: "signify-creator",
-            database: "ready",
-            runtime: "ready",
-            version: packageMetadata.version,
-            time: new Date().toISOString(),
-          },
+          readiness.status === "unavailable" ? 503 : 200,
+          readiness,
           requestId,
         );
       }
@@ -580,11 +604,13 @@ function createApplication(options = {}) {
     jobHandlers,
     jobQueue,
     installer,
+    licensing,
     mediaStorage,
     observability,
     operations,
     restored,
     runtimeHealth,
+    transactionalEmail,
   };
 }
 
@@ -603,6 +629,10 @@ function startServer(options = {}) {
     },
   });
   application.observability.start();
+  const licenseRefresh = application.licensing.startAutoRefresh(
+      application.config.licenseRefreshIntervalMs,
+    ),
+    updateMonitor = application.operations.startUpdateMonitor();
   const server = http.createServer(application.handler);
   const jobs =
     application.config.jobMode === "embedded"
@@ -621,6 +651,8 @@ function startServer(options = {}) {
       message: error.message,
     });
     await jobs.stop();
+    licenseRefresh.stop();
+    updateMonitor.stop();
     runtimeLease.release();
     application.db.close();
     process.exitCode = 1;
@@ -642,6 +674,8 @@ function startServer(options = {}) {
     server.close(async () => {
       clearTimeout(forceClose);
       await jobs.stop();
+      licenseRefresh.stop();
+      updateMonitor.stop();
       await application.observability.stop();
       runtimeLease.release();
       application.db.close();

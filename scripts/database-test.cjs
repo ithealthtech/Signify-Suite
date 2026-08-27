@@ -86,7 +86,14 @@ try {
     .all()
     .map((row) => row.version);
   assert.ok(migrations.includes("013_query_plan_optimization.sql"));
-  assert.equal(migrations.at(-1), "023_github_integration.sql");
+  assert.equal(migrations.at(-1), "028_transactional_email.sql");
+  assert.doesNotThrow(() =>
+    db
+      .prepare(
+        "INSERT INTO application_integrations(provider,status) VALUES ('email','disconnected')",
+      )
+      .run(),
+  );
   assert.equal(
     db
       .prepare(

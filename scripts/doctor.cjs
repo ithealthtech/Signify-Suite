@@ -4,6 +4,9 @@ const fs = require("node:fs");
 const path = require("node:path");
 const { loadConfig } = require("../server/config.cjs");
 const { openDatabase } = require("../server/database.cjs");
+const {
+  createTransactionalEmail,
+} = require("../server/transactional-email.cjs");
 
 function writable(directory) {
   fs.mkdirSync(directory, { recursive: true });
@@ -60,6 +63,21 @@ function diagnose(config = loadConfig()) {
     if (!config.signature.credentialEncryptionKey)
       throw new Error("Credential encryption key is not configured.");
     return "configured";
+  });
+  check("transactional_email", () => {
+    const database = openDatabase(config.databasePath);
+    try {
+      const mail = createTransactionalEmail({ config, db: database }).summary();
+      if (config.signature.allowRegistration && !mail.configured)
+        throw new Error(
+          "Public registration is enabled but transactional email is not configured.",
+        );
+      return mail.configured
+        ? `${mail.provider} configured from ${mail.source}`
+        : "not configured; public registration remains disabled";
+    } finally {
+      database.close();
+    }
   });
   check("job_mode", () => config.jobMode);
   check("media_storage", () => config.mediaStorage);

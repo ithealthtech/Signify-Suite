@@ -97,6 +97,7 @@ function createJobQueue(db, handlers = {}, options = {}) {
     db.prepare(
       `UPDATE background_jobs SET status='completed',locked_at=NULL,
        completed_at=strftime('%Y-%m-%dT%H:%M:%fZ','now'),dead_lettered_at=NULL,last_error='',
+       payload_json=CASE WHEN type='email.transactional' THEN '{}' ELSE payload_json END,
        result_json=?,updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE id=?`,
     ).run(JSON.stringify(result ?? {}), id);
   }
@@ -108,6 +109,7 @@ function createJobQueue(db, handlers = {}, options = {}) {
       `UPDATE background_jobs SET status=?,locked_at=NULL,last_error=?,
        dead_lettered_at=CASE WHEN ? THEN strftime('%Y-%m-%dT%H:%M:%fZ','now') ELSE NULL END,
        available_at=CASE WHEN ? THEN available_at ELSE datetime('now',?) END,
+       payload_json=CASE WHEN ? AND type='email.transactional' THEN '{}' ELSE payload_json END,
        updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE id=?`,
     ).run(
       terminal ? "dead_lettered" : "queued",
@@ -115,6 +117,7 @@ function createJobQueue(db, handlers = {}, options = {}) {
       terminal ? 1 : 0,
       terminal ? 1 : 0,
       `+${delay} seconds`,
+      terminal ? 1 : 0,
       job.id,
     );
   }

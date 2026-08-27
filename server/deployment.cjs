@@ -7,6 +7,11 @@ const { createHash } = require("node:crypto");
 const { execFile } = require("node:child_process");
 const { promisify } = require("node:util");
 const { DatabaseSync } = require("node:sqlite");
+const {
+  SIGNATURE_FILE,
+  verifyReleaseSignature,
+} = require("./release-signature.cjs");
+const { compareVersions } = require("./version.cjs");
 
 const execFileAsync = promisify(execFile);
 
@@ -21,20 +26,10 @@ function artifactFiles(directory) {
   });
 }
 
-function compareVersions(left, right) {
-  const parse = (value) => {
-    const match = String(value || "").match(/^(\d+)\.(\d+)\.(\d+)/);
-    if (!match) throw new Error(`Invalid semantic version: ${value}`);
-    return match.slice(1).map(Number);
-  };
-  const a = parse(left),
-    b = parse(right);
-  for (let index = 0; index < 3; index += 1)
-    if (a[index] !== b[index]) return a[index] - b[index];
-  return 0;
-}
-
-function verifyArtifact(artifact) {
+function verifyArtifact(
+  artifact,
+  { releasePublicKey = "", requireSignature = false } = {},
+) {
   const root = fs.realpathSync(artifact),
     manifestFile = path.join(root, "manifest.json"),
     checksumsFile = path.join(root, "checksums.txt");
@@ -42,7 +37,10 @@ function verifyArtifact(artifact) {
     throw new Error(
       "Deployment artifact is missing its manifest or checksums.",
     );
-  const manifest = JSON.parse(fs.readFileSync(manifestFile, "utf8"));
+  const releaseSignature = verifyReleaseSignature(root, releasePublicKey, {
+      required: requireSignature,
+    }),
+    manifest = JSON.parse(fs.readFileSync(manifestFile, "utf8"));
   if (!/^\d+\.\d+\.\d+/.test(String(manifest.version || "")))
     throw new Error("Deployment manifest version is invalid.");
   const entries = fs
@@ -69,12 +67,22 @@ function verifyArtifact(artifact) {
   }
   const unlisted = artifactFiles(root)
     .map((file) => path.relative(root, file).replaceAll(path.sep, "/"))
-    .filter((file) => file !== "checksums.txt" && !inventory.has(file));
+    .filter(
+      (file) =>
+        file !== "checksums.txt" &&
+        file !== SIGNATURE_FILE &&
+        !inventory.has(file),
+    );
   if (unlisted.length)
     throw new Error(
       `Deployment artifact contains unlisted files: ${unlisted.join(", ")}`,
     );
-  return { root, manifest, files: entries.length };
+  return {
+    root,
+    manifest,
+    files: entries.length,
+    releaseSignature,
+  };
 }
 
 function consistentSnapshot(source, target) {
@@ -162,8 +170,11 @@ async function deployArtifact({
   openDatabase,
   snapshotDatabase,
   allowDowngrade = false,
+  releasePublicKey = "",
+  requireSignature = false,
 }) {
-  const verified = verifyArtifact(artifact),
+  const verification = { releasePublicKey, requireSignature },
+    verified = verifyArtifact(artifact, verification),
     preflight = preflightDatabase({
       artifact: verified.root,
       databasePath,
@@ -178,13 +189,13 @@ async function deployArtifact({
     const staging = `${release}.staging-${process.pid}`;
     fs.cpSync(verified.root, staging, { recursive: true, errorOnExist: true });
     fs.renameSync(staging, release);
-  } else verifyArtifact(release);
+  } else verifyArtifact(release, verification);
   await install(release, verified.manifest);
   const previousTarget = fs.existsSync(current)
     ? fs.realpathSync(current)
     : null;
   if (previousTarget) {
-    const previous = verifyArtifact(previousTarget);
+    const previous = verifyArtifact(previousTarget, verification);
     if (
       !allowDowngrade &&
       compareVersions(verified.manifest.version, previous.manifest.version) < 0

@@ -15,6 +15,16 @@ const directory = fs.mkdtempSync(path.join(os.tmpdir(), "signify-rotation-")),
   newVault = createCredentialVault(Buffer.alloc(32, 9).toString("base64"));
 try {
   db.prepare(
+    "INSERT INTO organizations(id,name,slug) VALUES ('tenant','Tenant','tenant')",
+  ).run();
+  db.prepare(
+    `INSERT INTO outlook_addin_deployments(organization_id,deployment_id,token_hash,encrypted_token,credential_key_id)
+     VALUES ('tenant','11111111-1111-4111-8111-111111111111','hash',?,?)`,
+  ).run(
+    oldVault.encrypt("outlook-addin:tenant", { token: "deployment-secret" }),
+    oldVault.keyId,
+  );
+  db.prepare(
     "INSERT INTO signature_users(id,email,password_hash,display_name,role) VALUES ('owner','owner@example.com',?,'Owner','admin')",
   ).run(hashPassword("RotationTest123!"));
   db.prepare(
@@ -34,6 +44,7 @@ try {
   assert.deepEqual(rotateCredentials(db, oldVault, newVault), {
     integrations: 1,
     mfa: 1,
+    outlookDeployments: 1,
   });
   const integration = db
       .prepare(
@@ -42,9 +53,15 @@ try {
       .get(),
     mfa = db
       .prepare("SELECT * FROM application_owner_mfa WHERE user_id='owner'")
+      .get(),
+    outlook = db
+      .prepare(
+        "SELECT * FROM outlook_addin_deployments WHERE organization_id='tenant'",
+      )
       .get();
   assert.equal(integration.credential_key_id, newVault.keyId);
   assert.equal(mfa.credential_key_id, newVault.keyId);
+  assert.equal(outlook.credential_key_id, newVault.keyId);
   assert.equal(
     newVault.decrypt("microsoft", integration.encrypted_credentials)
       .clientSecret,
@@ -54,9 +71,13 @@ try {
     newVault.decrypt("mfa:owner", mfa.encrypted_secret).secret,
     "JBSWY3DPEHPK3PXP",
   );
+  assert.equal(
+    newVault.decrypt("outlook-addin:tenant", outlook.encrypted_token).token,
+    "deployment-secret",
+  );
   assert.throws(() => oldVault.decrypt("mfa:owner", mfa.encrypted_secret));
   console.log(
-    "Credential rotation test passed: integrations and MFA secrets rotate atomically",
+    "Credential rotation test passed: integrations, MFA, and Outlook deployment secrets rotate atomically",
   );
 } finally {
   db.close();

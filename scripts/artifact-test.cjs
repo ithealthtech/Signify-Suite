@@ -56,6 +56,7 @@ for (const required of [
   "docs/SUBPROCESSORS.md",
   "docs/TERMS.md",
   "docs/SAAS-READINESS.md",
+  "docs/LICENSING.md",
   "docs/sbom.cdx.json",
   "manifest.json",
   "checksums.txt",
@@ -137,7 +138,9 @@ const checksumLines = fs
     }),
   ),
   expectedChecksums = relativeFiles
-    .filter((file) => file !== "checksums.txt")
+    .filter(
+      (file) => file !== "checksums.txt" && file !== "release-signature.json",
+    )
     .sort();
 if (
   JSON.stringify([...checksumEntries.keys()].sort()) !==
@@ -154,7 +157,7 @@ for (const [file, expected] of checksumEntries) {
 
 const example = fs.readFileSync(path.join(artifact, ".env.example"), "utf8"),
   populatedSecret = example.match(
-    /^(?:MICROSOFT_CLIENT_SECRET|STRIPE_SECRET_KEY|STRIPE_WEBHOOK_SECRET|SIGNIFY_CREDENTIAL_ENCRYPTION_KEY|SIGNIFY_OBSERVABILITY_TOKEN|S3_SECRET_ACCESS_KEY|BACKUP_S3_SECRET_ACCESS_KEY)=(?!\s*$).+/m,
+    /^(?:MICROSOFT_CLIENT_SECRET|STRIPE_SECRET_KEY|STRIPE_WEBHOOK_SECRET|RESEND_API_KEY|SIGNIFY_CREDENTIAL_ENCRYPTION_KEY|SIGNIFY_OBSERVABILITY_TOKEN|S3_SECRET_ACCESS_KEY|BACKUP_S3_SECRET_ACCESS_KEY)=(?!\s*$).+/m,
   );
 if (populatedSecret)
   throw new Error(
