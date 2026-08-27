@@ -1,12 +1,17 @@
 # Changelog
 
-## Unreleased
+## 1.1.0 - 2026-08-27
 
 - Aligned the runtime, container, release workflow, documentation, and signed
   package naming on version `1.1.0`.
 - Added periodic private-release detection and verified one-click installation
   for managed hosts, including package size limits, SHA-256 and Ed25519 checks,
   migration preflight, safety backup, readiness gating, and automatic rollback.
+- Added encrypted transactional email configuration, retry and idempotency
+  controls, delivery-aware account workflows, and production readiness gates.
+- Added repeatable Microsoft 365 and Stripe acceptance checks for permissions,
+  directory access, sandbox mail, recurring prices, webhook configuration, and
+  disposable test Checkout sessions with credential-free evidence reports.
 
 - Added a separate creator-controlled license authority with Ed25519 lease
   issuance, installation binding, activation-key rotation, revocation, and
@@ -54,6 +59,14 @@
   rotation.
 - Subscription entitlement is enforced on the server before signature data is
   returned, and Stripe credentials remain restricted to the Application Owner.
+
+### Acceptance status
+
+- The complete local validation, security, build, artifact, and clean-start
+  suites passed before release.
+- Live Microsoft 365 mail and Stripe Checkout acceptance was not executed for
+  this release because no external sandbox credentials were supplied. The new
+  acceptance command fails closed until both providers are configured.
 
 ## 1.0.0 - 2026-07-22
 

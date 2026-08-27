@@ -1,12 +1,30 @@
 "use strict";
+const fs = require("node:fs");
+const path = require("node:path");
 const Stripe = require("stripe");
 const { loadConfig } = require("../server/config.cjs");
 const { createCredentialVault } = require("../server/credential-vault.cjs");
 const { openDatabase } = require("../server/database.cjs");
+const {
+  acceptMicrosoft,
+  acceptStripe,
+} = require("../server/provider-acceptance.cjs");
 
 const config = loadConfig(process.env),
   db = openDatabase(config.databasePath),
-  vault = createCredentialVault(config.signature.credentialEncryptionKey);
+  vault = createCredentialVault(config.signature.credentialEncryptionKey),
+  exercise = process.argv.includes("--exercise"),
+  requested = process.argv
+    .filter((argument) => argument.startsWith("--provider="))
+    .map((argument) => argument.split("=")[1]),
+  providers = requested.length ? requested : ["microsoft", "stripe"],
+  reportPath = path.resolve(
+    process.env.SIGNIFY_ACCEPTANCE_REPORT ||
+      path.join("tmp", "provider-acceptance.json"),
+  ),
+  configuredAcceptanceSender = String(
+    process.env.SIGNIFY_ACCEPTANCE_M365_SENDER || "",
+  ).trim();
 
 function saved(provider) {
   const row = db
@@ -20,99 +38,104 @@ function saved(provider) {
     : null;
 }
 
-async function verifyStripe() {
+function microsoftInput() {
+  const stored = saved("microsoft"),
+    tenantId =
+      stored?.configuration.homeTenantId || config.signature.microsoftTenantId,
+    connection = tenantId
+      ? db
+          .prepare(
+            "SELECT sender_email FROM organization_microsoft_connections WHERE lower(tenant_id)=lower(?) AND status='connected' ORDER BY updated_at DESC LIMIT 1",
+          )
+          .get(tenantId)
+      : null;
+  return {
+    clientId:
+      stored?.credentials.clientId || config.signature.microsoftClientId,
+    clientSecret:
+      stored?.credentials.clientSecret ||
+      config.signature.microsoftClientSecret,
+    tenantId,
+    senderEmail:
+      configuredAcceptanceSender ||
+      connection?.sender_email ||
+      config.signature.microsoftSenderEmail,
+    recipientEmail:
+      process.env.SIGNIFY_ACCEPTANCE_EMAIL || configuredAcceptanceSender,
+    exercise,
+  };
+}
+
+function stripeInput() {
   const stored = saved("stripe"),
     secretKey =
       stored?.credentials.secretKey || config.signature.stripeSecretKey;
-  if (!secretKey) return { provider: "stripe", status: "skipped" };
-  const stripe = new Stripe(secretKey, {
-      maxNetworkRetries: 2,
-      timeout: 10000,
-    }),
-    [account, prices] = await Promise.all([
-      stripe.accounts.retrieve(),
-      stripe.prices.list({ active: true, type: "recurring", limit: 100 }),
-    ]),
-    mapped = stored?.configuration.prices || config.signature.stripePrices,
-    active = new Set(prices.data.map((price) => price.id)),
-    unavailable = Object.entries(mapped || {})
-      .filter(([, price]) => price && !active.has(price))
-      .map(([plan]) => plan);
-  if (unavailable.length)
-    throw new Error(
-      `Stripe mapped prices are unavailable for: ${unavailable.join(", ")}.`,
-    );
   return {
-    provider: "stripe",
-    status: "ready",
-    mode: secretKey.startsWith("sk_live_") ? "live" : "test",
-    accountId: account.id,
-    recurringPrices: prices.data.length,
-    mappedPlans: Object.values(mapped || {}).filter(Boolean).length,
+    secretKey,
+    mappedPrices: stored?.configuration.prices || config.signature.stripePrices,
+    webhookSecret:
+      stored?.credentials.webhookSecret || config.signature.stripeWebhookSecret,
+    webhookEndpointId: stored?.configuration.webhookEndpointId || "",
+    publicUrl: config.publicUrl,
+    customerEmail:
+      process.env.SIGNIFY_ACCEPTANCE_EMAIL || configuredAcceptanceSender,
+    exercise,
+    stripeClient: secretKey
+      ? new Stripe(secretKey, { maxNetworkRetries: 2, timeout: 15000 })
+      : null,
   };
 }
 
-async function verifyMicrosoft() {
-  const stored = saved("microsoft"),
-    clientId =
-      stored?.credentials.clientId || config.signature.microsoftClientId,
-    clientSecret =
-      stored?.credentials.clientSecret ||
-      config.signature.microsoftClientSecret,
-    tenantId =
-      stored?.configuration.homeTenantId || config.signature.microsoftTenantId;
-  if (!clientId || !clientSecret || !tenantId)
-    return { provider: "microsoft", status: "skipped" };
-  const tokenResponse = await fetch(
-      `https://login.microsoftonline.com/${encodeURIComponent(tenantId)}/oauth2/v2.0/token`,
-      {
-        method: "POST",
-        headers: { "Content-Type": "application/x-www-form-urlencoded" },
-        body: new URLSearchParams({
-          client_id: clientId,
-          client_secret: clientSecret,
-          scope: "https://graph.microsoft.com/.default",
-          grant_type: "client_credentials",
-        }),
-        signal: AbortSignal.timeout(15000),
-      },
-    ),
-    tokens = await tokenResponse.json();
-  if (!tokenResponse.ok || !tokens.access_token)
-    throw new Error(
-      tokens.error_description || "Microsoft token acquisition failed.",
-    );
-  const organizationResponse = await fetch(
-      "https://graph.microsoft.com/v1.0/organization?$select=id,displayName",
-      {
-        headers: { Authorization: `Bearer ${tokens.access_token}` },
-        signal: AbortSignal.timeout(15000),
-      },
-    ),
-    organizationData = await organizationResponse.json();
-  if (!organizationResponse.ok || !organizationData.value?.[0])
-    throw new Error(
-      organizationData.error?.message ||
-        "Microsoft organization verification failed.",
-    );
-  return {
-    provider: "microsoft",
-    status: "ready",
-    tenantId: organizationData.value[0].id,
-    organizationName: organizationData.value[0].displayName,
-  };
+function sanitizedMessage(error) {
+  return String(error?.message || error || "Provider acceptance failed.")
+    .replace(/(sk|whsec|github_pat)_[A-Za-z0-9_\-]+/g, "$1_[REDACTED]")
+    .replace(/Bearer\s+\S+/gi, "Bearer [REDACTED]")
+    .slice(0, 500);
 }
 
 (async () => {
-  try {
-    const results = await Promise.all([verifyMicrosoft(), verifyStripe()]);
-    for (const result of results) console.log(JSON.stringify(result));
-    if (results.every((result) => result.status === "skipped"))
-      throw new Error("No provider credentials are configured.");
-  } finally {
-    db.close();
+  const startedAt = new Date().toISOString(),
+    results = [];
+  for (const provider of providers) {
+    try {
+      if (provider === "microsoft")
+        results.push(await acceptMicrosoft(microsoftInput()));
+      else if (provider === "stripe")
+        results.push(await acceptStripe(stripeInput()));
+      else throw new Error(`Unsupported provider: ${provider}.`);
+    } catch (error) {
+      results.push({
+        provider,
+        status: "failed",
+        reason: sanitizedMessage(error),
+      });
+    }
   }
-})().catch((error) => {
-  console.error(`Provider verification failed: ${error.message}`);
-  process.exitCode = 1;
-});
+  const report = {
+    schemaVersion: 1,
+    startedAt,
+    completedAt: new Date().toISOString(),
+    exercise,
+    results,
+  };
+  fs.mkdirSync(path.dirname(reportPath), { recursive: true });
+  fs.writeFileSync(reportPath, `${JSON.stringify(report, null, 2)}\n`, {
+    mode: 0o600,
+  });
+  for (const result of results) console.log(JSON.stringify(result));
+  console.log(`Sanitized acceptance report: ${reportPath}`);
+  if (
+    results.length !== providers.length ||
+    results.some((result) =>
+      exercise
+        ? result.status !== "accepted"
+        : !["ready", "accepted"].includes(result.status),
+    )
+  )
+    process.exitCode = 1;
+})()
+  .catch((error) => {
+    console.error(`Provider acceptance failed: ${sanitizedMessage(error)}`);
+    process.exitCode = 1;
+  })
+  .finally(() => db.close());

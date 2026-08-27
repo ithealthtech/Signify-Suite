@@ -654,11 +654,19 @@ npm run check
 npm audit --omit=dev
 ```
 
-After configuring real provider credentials, run read-only provider checks:
+After configuring provider credentials, run read-only permission and endpoint
+checks:
 
 ```powershell
 npm run integrations:verify
 ```
+
+Before a release, use dedicated Microsoft 365 and Stripe test resources, set
+`SIGNIFY_ACCEPTANCE_M365_SENDER` to a sandbox mailbox, then run
+`npm run integrations:accept`. The command refuses Stripe live keys, sends one
+labeled Microsoft test message, creates and expires one Stripe test Checkout,
+and writes a credential-free report to `tmp/provider-acceptance.json`. See
+`docs/OPERATIONS.md` for the required permissions and evidence procedure.
 
 The unauthenticated monitoring endpoints are:
 
