@@ -1,6 +1,6 @@
 # Signify Creator
 
-**Current stable release:** [v1.0.0](https://github.com/ithealthtech/Signify-Suite/releases/tag/v1.0.0) ·
+**Current stable release:** [v1.1.0](https://github.com/ithealthtech/Signify-Suite/releases/tag/v1.1.0) ·
 [Download the latest signed production package](https://github.com/ithealthtech/Signify-Suite/releases/latest)
 
 Signify Creator is a self-hosted, multi-tenant email-signature SaaS for
@@ -612,7 +612,6 @@ and Ed25519 signature, preflights migrations against a database copy, creates a
 safety backup, restarts, and rolls back automatically if readiness fails.
 Hosting panels without stable links and a restart adapter remain download-only
 and should deploy the same signed package through their native release system.
-
 The host must allow outbound HTTPS access to `api.github.com` and GitHub release
 asset endpoints. Revoke and replace any token that appears in a URL, log, or
 support transcript.
