@@ -8,7 +8,10 @@
       content="{{ page.description | default: site.description | escape }}"
     />
     <title>{{ page.title | default: site.title }} | Signify Creator</title>
-    <link rel="stylesheet" href="{{ '/assets/style.css' | relative_url }}" />
+    <link
+      rel="stylesheet"
+      href="{{ '/assets/style.css' | relative_url }}?v={{ site.time | date: '%s' }}"
+    />
   </head>
   <body>
     <header class="site-header">

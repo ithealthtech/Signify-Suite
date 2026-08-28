@@ -67,6 +67,11 @@ assert.ok(
   fs.existsSync(path.join(source, "_layouts", "default.html")),
   "Pages layout is missing",
 );
+assert.match(
+  fs.readFileSync(path.join(source, "_layouts", "default.html"), "utf8"),
+  /style\.css[^"\n]*\?v=/,
+  "Pages stylesheet URL must be versioned to prevent stale visual assets",
+);
 assert.ok(
   fs.existsSync(path.join(source, "assets", "style.css")),
   "Pages stylesheet is missing",
