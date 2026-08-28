@@ -35,6 +35,7 @@
     "test:version": "node scripts/version-test.cjs",
     "test:unit": "node scripts/unit-test.cjs",
     "test:frontend": "node scripts/frontend-test.cjs",
+    "test:pages": "node scripts/pages-test.cjs",
     "test:database": "node scripts/database-test.cjs",
     "test:licensing": "node scripts/licensing-test.cjs",
     "test:release-signature": "node scripts/release-signature-test.cjs",

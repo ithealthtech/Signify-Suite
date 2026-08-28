@@ -1,8 +1,8 @@
 # Signify Creator
 
-**Create, manage, and deploy professional email signatures from one private web application.**
+**Create, manage, and deploy professional email signatures from one self-hosted web application.**
 
-[Latest release](https://github.com/ithealthtech/Signify-Suite/releases/latest) | [Installation help](#installation) | [Report a problem](https://github.com/ithealthtech/Signify-Suite/issues)
+[Documentation](https://ithealthtech.github.io/Signify-Suite/) | [Latest release](https://github.com/ithealthtech/Signify-Suite/releases/latest) | [Installation help](#installation) | [Report a problem](https://github.com/ithealthtech/Signify-Suite/issues)
 
 Signify Creator gives organizations a visual signature editor, reusable templates,
 campaign banners, approvals, Microsoft 365 delivery, analytics, and centralized
@@ -19,7 +19,7 @@ application and its data.
 - Microsoft 365 tenant connections and managed signature delivery
 - User management, direct user creation, invitations, and approvals
 - Trial and subscription controls managed by the Application Owner
-- Private GitHub update checks and one-click updates on supported hosts
+- GitHub release checks and one-click updates on supported hosts
 - Built-in backups, restore tools, audit history, health checks, and usage reports
 - Responsive pages for desktop, tablet, and mobile browsers
 
@@ -254,16 +254,18 @@ Start with a Stripe test key. Signify verifies the account, discovers recurring
 prices, maps plans, creates the webhook destination, and opens a test Checkout
 session. Move to a live key only after the sandbox test succeeds.
 
-### Private GitHub Updates
+### GitHub Updates
 
-Connect GitHub with:
+The public Signify release channel works without a token. An optional fine-grained
+token can provide a higher API rate limit or access to an authorized private fork.
+When using a token, restrict it to:
 
 - Repository name in `owner/repository` format
-- A fine-grained token restricted to that repository
+- A fine-grained token restricted to the intended repository
 - Repository permission **Contents: Read-only**
 
-Signify checks for releases every six hours by default. The token is encrypted and
-is never returned to the browser.
+Signify checks for releases every six hours by default. When a token is supplied,
+it is encrypted and is never returned to the browser.
 
 One-click installation also requires a compatible host restart command, a stable
 release folder, a readiness address, and the publisher release-verification key.
@@ -311,11 +313,12 @@ Start with test credentials, confirm the callback address exactly matches the
 provider configuration, and check that the host permits outbound HTTPS traffic.
 Provider setup can be skipped until the core application is working.
 
-### A private update cannot be found
+### An update cannot be found
 
-Confirm the repository name is correct and the GitHub token has read-only Contents
-access to that private repository. Revoke any token that was accidentally placed
-in a browser URL, screenshot, or support message.
+Confirm the repository name is correct and the host can reach GitHub. For an
+authorized private fork, confirm the token has read-only Contents access. Revoke
+any token that was accidentally placed in a browser URL, screenshot, or support
+message.
 
 ## Safety Notes
 
@@ -377,5 +380,7 @@ Use [GitHub Issues](https://github.com/ithealthtech/Signify-Suite/issues) for
 verified defects. Do not include passwords, setup tokens, API keys, customer data,
 or screenshots containing secrets.
 
-Signify Creator is private software. Installation and commercial use are subject
-to the rights provided by the repository owner and the active Signify license.
+Signify Creator is source-visible software. Public repository access does not
+include the private Signify License Authority and does not grant redistribution,
+resale, or commercial rights beyond those provided by the repository owner and
+the active Signify license.

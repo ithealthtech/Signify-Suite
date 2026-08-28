@@ -1,0 +1,18 @@
+title: Signify Creator
+description: Installation, configuration, usage, and administration guide
+url: https://ithealthtech.github.io
+baseurl: /Signify-Suite
+markdown: kramdown
+highlighter: rouge
+relative_links:
+  enabled: true
+  collections: true
+plugins:
+  - jekyll-relative-links
+exclude:
+  - README.md
+defaults:
+  - scope:
+      path: ""
+    values:
+      layout: default
