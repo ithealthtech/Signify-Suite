@@ -68,8 +68,9 @@ You need:
 - A persistent folder that is not erased when the app restarts or updates
 - An email address for the first Application Owner
 
-Microsoft 365, Stripe, transactional email, and GitHub are optional during setup.
-They can be connected later from **Application > Integrations**.
+Microsoft 365, transactional email, and GitHub are optional during setup. Stripe
+is an Enterprise-only integration and appears in **Application > Integrations**
+only after an eligible Enterprise license is active.
 
 > Signify currently uses SQLite and supports one application server and one worker
 > on a single host. Do not run multiple application replicas yet.
@@ -246,9 +247,10 @@ Application permissions require Microsoft 365 administrator consent.
 
 ### Stripe
 
-Stripe is available only to the Application Owner. It controls SaaS plans and
-tenant subscriptions; tenant users never receive Stripe credentials or provider
-settings.
+Stripe is available only in Enterprise Edition and only to the Application
+Owner. Community and other non-Enterprise editions do not display Stripe controls
+or permit Stripe API operations. Tenant users never receive Stripe credentials or
+provider settings.
 
 Start with a Stripe test key. Signify verifies the account, discovers recurring
 prices, maps plans, creates the webhook destination, and opens a test Checkout

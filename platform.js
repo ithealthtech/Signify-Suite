@@ -14,6 +14,7 @@ const state = {
   organizations: [],
   detail: null,
   stripePrices: [],
+  stripeAvailable: false,
   mfa: null,
   sessions: [],
   flags: {},
@@ -96,14 +97,20 @@ async function loadSession() {
   const result = await api("/api/platform/session");
   state.mfa = result.mfa;
   state.license = result.license;
+  state.stripeAvailable = result.stripe?.available === true;
   $("#statOrganizations").textContent = result.stats.organizations;
   $("#statActive").textContent = result.stats.active;
   $("#statSuspended").textContent = result.stats.suspended;
   $("#statMicrosoft").textContent = result.stats.microsoftConnected;
-  $("#stripeStatus").textContent = result.stripe.configured
-    ? "Stripe is configured for Application Owner checkout."
-    : "Stripe is not configured in this environment.";
-  $("#createCheckout").disabled = !result.stripe.configured;
+  if (state.stripeAvailable) {
+    $("#stripeStatus").textContent = result.stripe.configured
+      ? "Stripe is configured for Application Owner checkout."
+      : "Stripe is not configured in this environment.";
+    $("#createCheckout").disabled = !result.stripe.configured;
+  } else {
+    $("#stripeStatus").textContent = "";
+    $("#createCheckout").disabled = true;
+  }
   $("#ownerMfaStatus").textContent = result.mfa.enabled
     ? `Enabled. ${result.mfa.recoveryCodesRemaining} recovery codes remain.`
     : "Not enabled for this Application Owner account.";
@@ -125,10 +132,19 @@ function editionLabel(value) {
   return value === "enterprise" ? "Enterprise" : "Community";
 }
 
+function enterpriseStripeAvailable() {
+  return (
+    state.stripeAvailable &&
+    state.license?.edition === "enterprise" &&
+    state.license.features?.includes("tenant_billing")
+  );
+}
+
 function renderTenantMode() {
   const license = state.license;
   if (!license) return;
   const community = license.edition === "community",
+    stripeAvailable = enterpriseStripeAvailable(),
     tenant = state.organizations[0],
     capacity = tenant?.userCapacity,
     atTenantLimit = (license.tenantCount || 0) >= license.maxTenants;
@@ -137,7 +153,9 @@ function renderTenantMode() {
   $("#tenantPageTitle").textContent = community ? "Workspace" : "Tenants";
   $("#tenantPageDescription").textContent = community
     ? "Manage the workspace, people, Microsoft 365 connection, and application settings."
-    : "Lifecycle, Microsoft 365 connection, seats, and SaaS billing.";
+    : stripeAvailable
+      ? "Lifecycle, Microsoft 365 connection, seats, and SaaS billing."
+      : "Lifecycle, Microsoft 365 connection, seats, and application settings.";
   $("#openCreateTenant").hidden = community;
   $("#openCreateTenant").disabled = community || atTenantLimit;
   $("#tenantPortfolio").hidden = community;
@@ -151,7 +169,9 @@ function renderTenantMode() {
     : "Tenant usage";
   $("#ownersDescription").textContent = community
     ? "Only these accounts can manage this installation."
-    : "Only these accounts can manage tenants and Stripe.";
+    : stripeAvailable
+      ? "Only these accounts can manage tenants and Stripe."
+      : "Only these accounts can manage this installation and its tenants.";
   $("#fleetEyebrow").textContent = community
     ? "Installation operations"
     : "Cross-tenant operations";
@@ -164,7 +184,9 @@ function renderTenantMode() {
   $("#auditScopeHeader").textContent = community ? "Workspace" : "Tenant";
   $("#auditDescription").textContent = community
     ? "Application access, configuration, licensing, and integration changes."
-    : "Global tenant, access, subscription, and Stripe changes.";
+    : stripeAvailable
+      ? "Global tenant, access, subscription, and Stripe changes."
+      : "Global tenant, access, configuration, and integration changes.";
   if (community) {
     $("#tenantLicenseNote").textContent =
       `Community Edition includes one workspace and ${license.maxUsersPerTenant} users. Activate a commercial license to add tenants or increase user capacity.`;
@@ -509,6 +531,7 @@ function renderIntegrationTile(
   );
 }
 function openIntegration(provider) {
+  if (provider === "stripe" && !enterpriseStripeAvailable()) return;
   const names = {
     email: "Transactional Email",
     microsoft: "Microsoft 365",
@@ -530,7 +553,8 @@ async function loadIntegrations() {
     microsoft = result.microsoft,
     github = result.github,
     email = result.email;
-  state.stripePrices = stripe.catalog || state.stripePrices;
+  state.stripeAvailable = stripe?.available === true;
+  $("#stripeIntegrationTile").hidden = !enterpriseStripeAvailable();
   $("#microsoftIntegrationStatus").innerHTML =
     `<div><span>Status</span><strong>${escapeHtml(microsoft.status)}</strong></div>` +
     `<div><span>Organization</span><strong>${escapeHtml(microsoft.accountName || "Not connected")}</strong></div>` +
@@ -546,20 +570,28 @@ async function loadIntegrations() {
     microsoft.accountName,
     microsoft.configured,
   );
-  $("#stripeIntegrationStatus").innerHTML =
-    `<div><span>Status</span><strong>${escapeHtml(stripe.status)}</strong></div>` +
-    `<div><span>Account</span><strong>${escapeHtml(stripe.accountName || "Not connected")}</strong></div>` +
-    `<div><span>Mode</span><strong>${escapeHtml(stripe.mode || "-")}</strong></div>` +
-    `<div><span>Verified</span><strong>${escapeHtml(dateLabel(stripe.lastVerifiedAt))}</strong></div>`;
-  $("#stripeConnectForm").hidden = stripe.source === "vault";
-  $("#stripePlanForm").hidden = stripe.source !== "vault";
-  $("#stripeTestForm").hidden = !stripe.configured || stripe.mode !== "test";
-  renderIntegrationTile(
-    "stripe",
-    stripe.status,
-    stripe.accountName,
-    stripe.configured,
-  );
+  if (enterpriseStripeAvailable()) {
+    state.stripePrices = stripe.catalog || state.stripePrices;
+    $("#stripeIntegrationStatus").innerHTML =
+      `<div><span>Status</span><strong>${escapeHtml(stripe.status)}</strong></div>` +
+      `<div><span>Account</span><strong>${escapeHtml(stripe.accountName || "Not connected")}</strong></div>` +
+      `<div><span>Mode</span><strong>${escapeHtml(stripe.mode || "-")}</strong></div>` +
+      `<div><span>Verified</span><strong>${escapeHtml(dateLabel(stripe.lastVerifiedAt))}</strong></div>`;
+    $("#stripeConnectForm").hidden = stripe.source === "vault";
+    $("#stripePlanForm").hidden = stripe.source !== "vault";
+    $("#stripeTestForm").hidden = !stripe.configured || stripe.mode !== "test";
+    renderIntegrationTile(
+      "stripe",
+      stripe.status,
+      stripe.accountName,
+      stripe.configured,
+    );
+  } else {
+    state.stripePrices = [];
+    const dialog = $("#integrationDialog");
+    if (dialog.open && !$("[data-integration-panel='stripe']").hidden)
+      dialog.close();
+  }
   $("#githubIntegrationStatus").innerHTML =
     `<div><span>Status</span><strong>${escapeHtml(github.status)}</strong></div>` +
     `<div><span>Repository</span><strong>${escapeHtml(github.repository || "Not configured")}</strong></div>` +
@@ -584,7 +616,7 @@ async function loadIntegrations() {
   emailForm.elements.replyTo.value = email.replyTo || "";
   $("#disconnectEmail").disabled = email.source !== "vault";
   renderIntegrationTile("email", email.status, email.from, email.configured);
-  renderStripePrices(stripe.prices || {});
+  if (enterpriseStripeAvailable()) renderStripePrices(stripe.prices || {});
 }
 
 async function connectEmail(event) {
@@ -1089,7 +1121,8 @@ async function openTenant(id) {
   state.detail = result;
   state.lifecycle = lifecycle;
   state.flags = featureResult.flags;
-  const community = state.license?.edition === "community";
+  const community = state.license?.edition === "community",
+    stripeAvailable = enterpriseStripeAvailable();
   $("#detailName").textContent = result.organization.name;
   $("#detailSlug").textContent = result.organization.slug;
   $("#detailEyebrow").textContent = community
@@ -1097,7 +1130,7 @@ async function openTenant(id) {
     : "Tenant control";
   $("#tenantStatusForm").hidden = community;
   $("#supportAccessForm").hidden = community;
-  $("#tenantBillingControls").hidden = community;
+  $("#tenantBillingControls").hidden = !stripeAvailable;
   $("#exportTenant").textContent = community
     ? "Export workspace data"
     : "Export tenant data";
@@ -1114,17 +1147,19 @@ async function openTenant(id) {
     checkoutForm = $("#checkoutForm").elements;
   statusForm.status.value = result.organization.status;
   statusForm.reason.value = "";
-  subscriptionForm.plan.value = result.subscription.plan;
-  subscriptionForm.status.value = result.subscription.status;
-  subscriptionForm.seats.value = result.subscription.seats;
-  subscriptionForm.stripeCustomerId.value =
-    result.subscription.stripeCustomerId || "";
-  subscriptionForm.stripeSubscriptionId.value =
-    result.subscription.stripeSubscriptionId || "";
-  subscriptionForm.reason.value = "";
-  checkoutForm.plan.value = result.subscription.plan;
-  checkoutForm.customerEmail.value =
-    result.members.find((member) => member.role === "admin")?.email || "";
+  if (stripeAvailable) {
+    subscriptionForm.plan.value = result.subscription.plan;
+    subscriptionForm.status.value = result.subscription.status;
+    subscriptionForm.seats.value = result.subscription.seats;
+    subscriptionForm.stripeCustomerId.value =
+      result.subscription.stripeCustomerId || "";
+    subscriptionForm.stripeSubscriptionId.value =
+      result.subscription.stripeSubscriptionId || "";
+    subscriptionForm.reason.value = "";
+    checkoutForm.plan.value = result.subscription.plan;
+    checkoutForm.customerEmail.value =
+      result.members.find((member) => member.role === "admin")?.email || "";
+  }
   const featureForm = $("#tenantFeatureForm");
   for (const key of ["campaigns", "directory_sync", "tracking"])
     featureForm.elements[key].checked = Boolean(
@@ -1132,7 +1167,8 @@ async function openTenant(id) {
     );
   featureForm.elements.reason.value = "";
   $("#supportAccessForm").reset();
-  $("#stripeSubscriptionForm").elements.plan.value = result.subscription.plan;
+  if (stripeAvailable)
+    $("#stripeSubscriptionForm").elements.plan.value = result.subscription.plan;
   $("#detailMembers").innerHTML = result.members.length
     ? result.members
         .map(

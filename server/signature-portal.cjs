@@ -1099,7 +1099,24 @@ function createSignaturePortal({
       },
     );
   }
+  function enterpriseStripeEnabled() {
+    const entitlement = licensing.summary();
+    return (
+      entitlement.edition === "enterprise" &&
+      entitlement.features.includes("tenant_billing")
+    );
+  }
+  function requireEnterpriseStripe() {
+    if (!enterpriseStripeEnabled())
+      throw Object.assign(
+        new Error(
+          "Stripe is available only with an active Enterprise license.",
+        ),
+        { status: 403, code: "ENTERPRISE_STRIPE_REQUIRED" },
+      );
+  }
   function billingAvailable() {
+    if (!enterpriseStripeEnabled()) return false;
     const settings = stripeSettings();
     return Boolean(
       settings.secretKey &&
@@ -1118,7 +1135,7 @@ function createSignaturePortal({
     return { beta: 10, starter: 10, team: 50, business: 250 }[plan] || 10;
   }
   function subscriptionAccess(user) {
-    if (licensing.summary().edition === "community") return true;
+    if (!enterpriseStripeEnabled()) return true;
     const row = db
       .prepare(
         "SELECT * FROM organization_subscriptions WHERE organization_id=?",
@@ -1132,7 +1149,7 @@ function createSignaturePortal({
     );
   }
   function subscriptionEntitlement(user) {
-    if (licensing.summary().edition === "community")
+    if (!enterpriseStripeEnabled())
       return {
         subscription: null,
         access: true,
@@ -1252,6 +1269,8 @@ function createSignaturePortal({
   }
 
   async function performBillingReconciliation() {
+    if (!enterpriseStripeEnabled())
+      return { skipped: true, reason: "enterprise_license_required" };
     const settings = stripeSettings(),
       stripe = stripeClient(settings);
     if (!stripe) return { skipped: true, reason: "stripe_not_configured" };
@@ -2035,6 +2054,8 @@ function createSignaturePortal({
   Object.assign(workflowHandlers, tenantLifecycle.jobHandlers);
   const handle = async function handle(req, res, url, requestId) {
     if (url.pathname === "/webhooks/stripe" && req.method === "POST") {
+      if (!enterpriseStripeEnabled())
+        return json(res, 200, { received: true, ignored: true }, requestId);
       const stripeConfiguration = stripeSettings(),
         stripe = stripeClient(stripeConfiguration);
       if (!stripe || !stripeConfiguration.webhookSecret)
@@ -2525,14 +2546,17 @@ function createSignaturePortal({
                 )
                 .get().count,
             },
-            stripe: {
-              configured: billingAvailable(),
-              ...integrationSummary("stripe"),
-              vaultConfigured: credentialVault.configured,
-              plans: Object.entries(stripeSettings().prices || {})
-                .filter(([, price]) => Boolean(price))
-                .map(([plan]) => plan),
-            },
+            stripe: enterpriseStripeEnabled()
+              ? {
+                  available: true,
+                  configured: billingAvailable(),
+                  ...integrationSummary("stripe"),
+                  vaultConfigured: credentialVault.configured,
+                  plans: Object.entries(stripeSettings().prices || {})
+                    .filter(([, price]) => Boolean(price))
+                    .map(([plan]) => plan),
+                }
+              : { available: false },
             mfa: {
               required: Boolean(signature.requireOwnerMfa),
               enabled: Boolean(mfaRow(owner.id, true)),
@@ -2565,12 +2589,14 @@ function createSignaturePortal({
           { status: 403, code: "OWNER_MFA_REQUIRED" },
         );
       if (
-        req.method !== "GET" &&
         /^\/api\/platform\/organizations\/[^/]+\/(?:subscription|billing(?:\/|$))/.test(
           url.pathname,
-        )
+        ) ||
+        url.pathname === "/api/platform/billing/reconcile" ||
+        url.pathname.startsWith("/api/platform/integrations/stripe") ||
+        url.pathname === "/api/platform/setup/stripe-skip"
       )
-        licensing.requireFeature("tenant_billing");
+        requireEnterpriseStripe();
       if (
         (req.method === "PUT" &&
           /^\/api\/platform\/organizations\/[^/]+\/status$/.test(
@@ -2961,14 +2987,17 @@ function createSignaturePortal({
               configured: credentialVault.configured,
               keyId: credentialVault.keyId,
             },
-            stripe: {
-              ...integrationSummary("stripe"),
-              configured: billingAvailable(),
-              prices: stripeSettings().prices,
-              catalog:
-                safeJson(integrationRow("stripe")?.configuration_json)
-                  .catalog || [],
-            },
+            stripe: enterpriseStripeEnabled()
+              ? {
+                  available: true,
+                  ...integrationSummary("stripe"),
+                  configured: billingAvailable(),
+                  prices: stripeSettings().prices,
+                  catalog:
+                    safeJson(integrationRow("stripe")?.configuration_json)
+                      .catalog || [],
+                }
+              : { available: false },
             microsoft: {
               ...integrationSummary("microsoft"),
               ...safeJson(integrationRow("microsoft")?.configuration_json),
@@ -3008,11 +3037,14 @@ function createSignaturePortal({
               configured: microsoftAvailable(),
               homeTenantId: microsoft.homeTenantId,
             },
-            stripe: {
-              ...integrationSummary("stripe"),
-              configured: billingAvailable(),
-              skipped: stripeSkipped,
-            },
+            stripe: enterpriseStripeEnabled()
+              ? {
+                  available: true,
+                  ...integrationSummary("stripe"),
+                  configured: billingAvailable(),
+                  skipped: stripeSkipped,
+                }
+              : { available: false },
             email: {
               ...integrationSummary("email"),
               ...transactionalEmail.summary(),
@@ -3759,8 +3791,12 @@ function createSignaturePortal({
                 seats: row.seats,
                 trialEndsAt: row.trial_ends_at,
                 currentPeriodEnd: row.current_period_end,
-                stripeCustomerId: row.stripe_customer_id || null,
-                stripeSubscriptionId: row.stripe_subscription_id || null,
+                ...(enterpriseStripeEnabled()
+                  ? {
+                      stripeCustomerId: row.stripe_customer_id || null,
+                      stripeSubscriptionId: row.stripe_subscription_id || null,
+                    }
+                  : {}),
               },
               microsoft: row.microsoft_tenant_id
                 ? {
@@ -3950,7 +3986,7 @@ function createSignaturePortal({
             })),
             subscription: subscription
               ? {
-                  ...subscriptionDto(subscription, true),
+                  ...subscriptionDto(subscription, enterpriseStripeEnabled()),
                 }
               : null,
             microsoft: microsoftConnectionDto(microsoft),
@@ -5113,6 +5149,7 @@ function createSignaturePortal({
       req.method === "POST"
     ) {
       requireAdmin(user);
+      requireEnterpriseStripe();
       if (!billingAvailable())
         return json(
           res,

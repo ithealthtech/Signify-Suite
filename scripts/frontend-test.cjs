@@ -256,13 +256,13 @@ async function main() {
   );
   assert.match(
     platformHtml,
-    /id="tenantBillingControls"/,
-    "Tenant billing controls must have an edition-aware container",
+    /id="tenantBillingControls" hidden/,
+    "Tenant billing controls must be hidden until Enterprise is verified",
   );
   assert.match(
     platformSource,
-    /#tenantBillingControls"\)\.hidden = community/,
-    "Community workspace settings must hide tenant subscription and Stripe controls",
+    /#tenantBillingControls"\)\.hidden = !stripeAvailable/,
+    "Non-Enterprise workspace settings must hide tenant subscription and Stripe controls",
   );
   for (const control of ["tenantStatusForm", "supportAccessForm"])
     assert.match(
@@ -303,6 +303,21 @@ async function main() {
       new RegExp(`data-open-integration="${provider}"`),
       `Integration catalog is missing ${provider}`,
     );
+  assert.match(
+    platformHtml,
+    /id="stripeIntegrationTile"[\s\S]*?data-open-integration="stripe"[\s\S]*?hidden/,
+    "Stripe integration must be hidden until Enterprise is verified",
+  );
+  assert.match(
+    platformSource,
+    /function enterpriseStripeAvailable\(\)/,
+    "Stripe visibility must use the Enterprise entitlement",
+  );
+  assert.match(
+    platformSource,
+    /#stripeIntegrationTile"\)\.hidden = !enterpriseStripeAvailable\(\)/,
+    "Stripe integration visibility must follow the Enterprise entitlement",
+  );
   assert.match(
     platformHtml,
     /<dialog class="integration-dialog" id="integrationDialog">/,

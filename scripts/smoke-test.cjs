@@ -590,6 +590,60 @@ async function main() {
         result.body.license.maxTenants === 1,
       "fresh installation did not default to Community Edition",
     );
+    result = await request(baseUrl, "/api/platform/session", {
+      jar: adminJar,
+    });
+    assert(
+      result.response.status === 200 &&
+        result.body.stripe.available === false &&
+        !Object.hasOwn(result.body.stripe, "configured"),
+      "Community Edition exposed Stripe session configuration",
+    );
+    result = await request(baseUrl, "/api/platform/integrations", {
+      jar: adminJar,
+    });
+    assert(
+      result.response.status === 200 &&
+        result.body.stripe.available === false &&
+        !Object.hasOwn(result.body.stripe, "prices"),
+      "Community Edition exposed Stripe integration details",
+    );
+    result = await request(
+      baseUrl,
+      "/api/platform/integrations/stripe/connect",
+      {
+        method: "POST",
+        body: {
+          secretKey: "sk_test_blocked_community",
+          reason: "Verify Enterprise-only Stripe",
+        },
+        jar: adminJar,
+      },
+    );
+    assert(
+      result.response.status === 403 &&
+        result.body.error.code === "ENTERPRISE_STRIPE_REQUIRED",
+      "Community Edition could configure Stripe",
+    );
+    result = await request(baseUrl, "/api/signature/billing/checkout", {
+      method: "POST",
+      body: { plan: "starter" },
+      jar: adminJar,
+    });
+    assert(
+      result.response.status === 403 &&
+        result.body.error.code === "ENTERPRISE_STRIPE_REQUIRED",
+      "Community Edition could start Stripe checkout",
+    );
+    result = await rawRequest(baseUrl, "/webhooks/stripe", "untrusted", {
+      "Content-Type": "application/json",
+    });
+    assert(
+      result.response.status === 200 &&
+        result.body.received === true &&
+        result.body.ignored === true,
+      "Community Edition did not safely ignore Stripe webhooks",
+    );
     result = await request(baseUrl, "/api/platform/organizations", {
       method: "POST",
       body: {
@@ -608,10 +662,6 @@ async function main() {
       .prepare("SELECT id FROM organizations ORDER BY created_at LIMIT 1")
       .get().id;
     for (const [route, body] of [
-      [
-        `/api/platform/organizations/${communityOrganizationId}/billing/checkout`,
-        { plan: "starter", customerEmail: "billing@example.com" },
-      ],
       [
         `/api/platform/organizations/${communityOrganizationId}/status`,
         { status: "suspended", reason: "Community boundary test" },

@@ -295,8 +295,10 @@
             </button>
             <button
               class="integration-tile"
+              id="stripeIntegrationTile"
               data-open-integration="stripe"
               type="button"
+              hidden
             >
               <span class="provider-logo stripe-logo" aria-hidden="true"
                 >stripe</span
@@ -1228,7 +1230,7 @@
             Open workspace for support
           </button>
         </form>
-        <div id="tenantBillingControls">
+        <div id="tenantBillingControls" hidden>
           <form class="control-form" id="subscriptionForm">
             <h3>Subscription</h3>
             <div class="form-grid three">

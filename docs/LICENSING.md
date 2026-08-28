@@ -9,6 +9,7 @@
 | Signature editor and campaigns        | Included                             | Included                               |
 | Microsoft 365 tenant connection       | Included for the installation tenant | Included for licensed tenants          |
 | Multi-tenant control plane            | Capacity locked                      | Included                               |
+| Stripe tenant billing                 | Not available                        | Requires `tenant_billing` entitlement  |
 | Application updates and backups       | Included                             | Included                               |
 | Product support and commercial rights | Community terms                      | Commercial agreement                   |
 
@@ -33,6 +34,12 @@ by default. If the authority is unavailable, the last signed entitlement remains
 valid until its displayed grace deadline. An authoritative revoked or suspended
 response downgrades the installation immediately and is remembered locally so an
 old token cannot be replayed.
+
+Stripe is fail-closed and Enterprise-only. Its integration, tenant subscription
+controls, checkout, portal, webhook processing, and reconciliation are available
+only while the active signed license has both `edition: enterprise` and the
+`tenant_billing` feature. Stored provider credentials are retained during a
+downgrade but are not exposed or used until an eligible license is restored.
 
 ## Trust boundary
 

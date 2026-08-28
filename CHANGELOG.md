@@ -1,5 +1,12 @@
 # Changelog
 
+## Unreleased
+
+- Made Stripe an Enterprise-only integration across the Application Owner UI,
+  tenant checkout, billing APIs, webhooks, and reconciliation jobs. Community
+  and other non-Enterprise editions no longer expose Stripe configuration or
+  provider identifiers.
+
 ## 1.1.0 - 2026-08-27
 
 - Aligned the runtime, container, release workflow, documentation, and signed
