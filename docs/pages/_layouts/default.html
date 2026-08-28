@@ -1,0 +1,64 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta
+      name="description"
+      content="{{ page.description | default: site.description | escape }}"
+    />
+    <title>{{ page.title | default: site.title }} | Signify Creator</title>
+    <link rel="stylesheet" href="{{ '/assets/style.css' | relative_url }}" />
+  </head>
+  <body>
+    <header class="site-header">
+      <a
+        class="brand"
+        href="{{ '/' | relative_url }}"
+        aria-label="Signify Creator documentation home"
+      >
+        <span class="brand-mark" aria-hidden="true">S</span>
+        <span><strong>Signify</strong><small>Creator Guide</small></span>
+      </a>
+      <nav aria-label="Documentation shortcuts">
+        <a href="{{ '/Installation.html' | relative_url }}">Install</a>
+        <a href="{{ '/Configuration.html' | relative_url }}">Configure</a>
+        <a href="{{ '/Using-Signify-Creator.html' | relative_url }}">Use</a>
+        <a href="https://github.com/ithealthtech/Signify-Suite/releases/latest"
+          >Releases</a
+        >
+      </nav>
+    </header>
+    <div class="site-shell">
+      <aside class="sidebar" aria-label="Guide navigation">
+        <p class="sidebar-label">Documentation</p>
+        <a href="{{ '/' | relative_url }}">Overview</a>
+        <a href="{{ '/Installation.html' | relative_url }}">Installation</a>
+        <a href="{{ '/Configuration.html' | relative_url }}">Configuration</a>
+        <a href="{{ '/Using-Signify-Creator.html' | relative_url }}"
+          >Using Signify Creator</a
+        >
+        <a href="{{ '/Application-Owner-Guide.html' | relative_url }}"
+          >Application Owner</a
+        >
+        <a href="{{ '/Troubleshooting.html' | relative_url }}"
+          >Troubleshooting</a
+        >
+        <hr />
+        <a href="https://github.com/ithealthtech/Signify-Suite"
+          >Source repository</a
+        >
+        <a href="https://github.com/ithealthtech/Signify-Suite/issues"
+          >Report a problem</a
+        >
+      </aside>
+      <main class="content" id="main-content">{{ content }}</main>
+    </div>
+    <footer>
+      <span>Signify Creator documentation</span>
+      <a href="https://github.com/ithealthtech/Signify-Suite/releases/latest"
+        >Latest release</a
+      >
+    </footer>
+  </body>
+</html>
