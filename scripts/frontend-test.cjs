@@ -163,8 +163,8 @@ async function main() {
   );
   assert.match(
     signatureSource,
-    /ANIMATED_BANNER_WIDTH = 440,\s*ANIMATED_BANNER_HEIGHT = 100/,
-    "Animated banners must use the same 440 by 100 dimensions as email templates",
+    /ANIMATED_BANNER_MAX_WIDTH = 440,\s*ANIMATED_BANNER_MAX_HEIGHT = 220/,
+    "Animated banners must use bounded, aspect-ratio-preserving dimensions",
   );
   const signatureHtml = fs.readFileSync(
       path.join(__dirname, "..", "signature.html"),
@@ -179,6 +179,10 @@ async function main() {
       "digital-grid",
       "spotlight",
       "soft-pulse",
+      "aurora-flow",
+      "prism-sweep",
+      "particle-trail",
+      "cinematic-glow",
     ];
   for (const effect of animationEffects)
     assert.match(
@@ -194,6 +198,40 @@ async function main() {
       new RegExp(`effect === "${effect}"`),
       `Animation renderer is missing ${effect}`,
     );
+  for (const control of [
+    "animationPreviewCanvas",
+    "animationProgress",
+    "animationStatus",
+  ])
+    assert.match(
+      signatureHtml,
+      new RegExp(`id="${control}"`),
+      `Animation Studio is missing ${control}`,
+    );
+  assert.match(
+    signatureHtml,
+    /name="bannerQuality"[\s\S]*value="standard"[\s\S]*value="high"[\s\S]*value="ultra"/,
+    "Animation Studio is missing quality controls",
+  );
+  assert.match(
+    signatureSource,
+    /standard:\s*Object\.freeze\(\{[\s\S]*baseFrames: 20[\s\S]*high:\s*Object\.freeze\(\{[\s\S]*baseFrames: 36[\s\S]*ultra:\s*Object\.freeze\(\{[\s\S]*baseFrames: 48[\s\S]*frameDelay: 40[\s\S]*renderScale: 2/,
+    "Animation quality profiles are missing professional frame-rate and supersampling budgets",
+  );
+  assert.ok(
+    !signatureHtml.includes('name="bannerFit"'),
+    "Animation Studio must not offer a crop-or-stretch framing mode",
+  );
+  assert.match(
+    signatureSource,
+    /function animationDimensions\(image\)[\s\S]*Math\.min\([\s\S]*1,[\s\S]*ANIMATED_BANNER_MAX_WIDTH \/ sourceWidth,[\s\S]*ANIMATED_BANNER_MAX_HEIGHT \/ sourceHeight/,
+    "Animation output must preserve source dimensions and only scale down",
+  );
+  assert.match(
+    signatureSource,
+    /state\.signature\.bannerSourceUrl = source;[\s\S]*state\.signature\.bannerUrl = result\.url;/,
+    "Generated animations must preserve their original source image",
+  );
   assert.match(
     signatureHtml,
     /signature\.js\?v=\d+/,

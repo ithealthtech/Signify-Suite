@@ -9,6 +9,39 @@ const BRAND_FONT_STACKS = Object.freeze({
   verdana: "Verdana, Arial, sans-serif",
   georgia: "Georgia, 'Times New Roman', serif",
 });
+const BANNER_ANIMATION_EFFECTS = Object.freeze([
+  "tech-pulse",
+  "signal-rings",
+  "starfield",
+  "clean",
+  "scan-line",
+  "digital-grid",
+  "spotlight",
+  "soft-pulse",
+  "aurora-flow",
+  "prism-sweep",
+  "particle-trail",
+  "cinematic-glow",
+]);
+
+function normalizedBannerAnimation(input = {}) {
+  const value = input && typeof input === "object" ? input : {},
+    intensity = Math.round(Number(value.intensity));
+  return {
+    effect: BANNER_ANIMATION_EFFECTS.includes(String(value.effect))
+      ? String(value.effect)
+      : "tech-pulse",
+    speed: ["slow", "normal", "fast"].includes(String(value.speed))
+      ? String(value.speed)
+      : "normal",
+    quality: ["standard", "high", "ultra"].includes(String(value.quality))
+      ? String(value.quality)
+      : "ultra",
+    intensity: Number.isFinite(intensity)
+      ? Math.max(20, Math.min(100, intensity))
+      : 70,
+  };
+}
 
 function validEmail(value) {
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(value || ""));
@@ -176,13 +209,45 @@ function signatureInputError(input) {
     input.fields?.social?.facebook,
   ])
     if (value && !validUrl(value)) return "Enter valid contact URLs.";
-  for (const value of [input.photoUrl, input.bannerUrl])
+  for (const value of [input.photoUrl, input.bannerUrl, input.bannerSourceUrl])
     if (value && !validMediaUrl(value)) return "Enter valid image URLs.";
+  if (
+    input.bannerAnimation !== undefined &&
+    (!input.bannerAnimation ||
+      typeof input.bannerAnimation !== "object" ||
+      Array.isArray(input.bannerAnimation))
+  )
+    return "Banner animation settings must be an object.";
+  if (
+    input.bannerAnimation?.effect &&
+    !BANNER_ANIMATION_EFFECTS.includes(String(input.bannerAnimation.effect))
+  )
+    return "Choose an available banner animation effect.";
+  if (
+    input.bannerAnimation?.speed &&
+    !["slow", "normal", "fast"].includes(String(input.bannerAnimation.speed))
+  )
+    return "Choose a valid banner animation speed.";
+  if (
+    input.bannerAnimation?.quality &&
+    !["standard", "high", "ultra"].includes(
+      String(input.bannerAnimation.quality),
+    )
+  )
+    return "Choose a valid banner animation quality.";
+  if (
+    input.bannerAnimation?.intensity !== undefined &&
+    (!Number.isFinite(Number(input.bannerAnimation.intensity)) ||
+      Number(input.bannerAnimation.intensity) < 20 ||
+      Number(input.bannerAnimation.intensity) > 100)
+  )
+    return "Banner animation intensity must be between 20 and 100.";
   return "";
 }
 
 module.exports = {
   BRAND_FONT_STACKS,
+  BANNER_ANIMATION_EFFECTS,
   campaignInput,
   canonicalBrandFont,
   canonicalRole,
@@ -190,6 +255,7 @@ module.exports = {
   cleanUrl,
   limited,
   normalizedBrand,
+  normalizedBannerAnimation,
   safeJson,
   safeLink,
   safeMedia,

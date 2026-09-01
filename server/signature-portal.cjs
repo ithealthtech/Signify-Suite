@@ -8,11 +8,14 @@ const {
   verify: verifySignature,
   randomUUID,
 } = require("node:crypto");
-const { GIFEncoder, quantize, applyPalette } = require("gifenc");
 const QRCode = require("qrcode");
 const OTPAuth = require("otpauth");
 const Stripe = require("stripe");
 const sharp = require("sharp");
+const {
+  encodeAnimatedBanner,
+  parseAnimatedBannerInput,
+} = require("./animated-banner.cjs");
 const { createCredentialVault } = require("./credential-vault.cjs");
 const { createAccessControl } = require("./access-control.cjs");
 const {
@@ -47,6 +50,7 @@ const {
   cleanUrl,
   limited,
   normalizedBrand,
+  normalizedBannerAnimation,
   safeJson,
   safeLink,
   safeMedia,
@@ -243,6 +247,13 @@ function normalizeSignature(row, raw = safeJson(row.signature_json)) {
         ? raw.bannerUrl
         : raw.bannerImageUrl,
     ),
+    bannerSourceUrl: safeMedia(
+      raw.bannerSourceUrl ||
+        (raw.bannerUrl && !/\/generated-banners\//i.test(raw.bannerUrl)
+          ? raw.bannerUrl
+          : raw.bannerImageUrl),
+    ),
+    bannerAnimation: normalizedBannerAnimation(raw.bannerAnimation),
     vcardEnabled: Boolean(raw.vcardEnabled),
     ribbonText: limited(
       raw.ribbonText || "Seasonal greetings from our team",
@@ -5751,60 +5762,16 @@ function createSignaturePortal({
       req.method === "POST"
     ) {
       requireEditor(user);
-      const body = await readJsonBody(req, { limit: 12 * 1024 * 1024 });
-      if (
-        !Array.isArray(body.frames) ||
-        body.frames.length < 1 ||
-        body.frames.length > 30
-      )
-        return json(
-          res,
-          400,
-          {
-            error: {
-              code: "GIF_FRAMES_INVALID",
-              message: "Animated banner must include 1 to 30 frames.",
-            },
-          },
-          requestId,
-        );
-      const width = Math.max(1, Math.min(1200, Number(body.width) || 650)),
-        height = Math.max(1, Math.min(400, Number(body.height) || 78)),
-        delay = Math.max(40, Math.min(500, Number(body.delay) || 90)),
-        frames = body.frames.map((frame) =>
-          Buffer.from(String(frame || ""), "base64"),
-        );
-      if (frames.some((frame) => frame.length !== width * height * 4))
-        return json(
-          res,
-          400,
-          {
-            error: {
-              code: "GIF_FRAME_SIZE_INVALID",
-              message: "Animated banner frame data is invalid.",
-            },
-          },
-          requestId,
-        );
-      const palette = quantize(Buffer.concat(frames), 256, {
-          format: "rgb565",
-        }),
-        gif = GIFEncoder();
-      frames.forEach((frame, index) =>
-        gif.writeFrame(applyPalette(frame, palette, "rgb565"), width, height, {
-          palette: index === 0 ? palette : undefined,
-          delay,
-          repeat: 0,
-        }),
-      );
-      gif.finish();
-      const name = `banner-${randomUUID()}.gif`,
+      const body = await readJsonBody(req, { limit: 36 * 1024 * 1024 }),
+        animation = parseAnimatedBannerInput(body),
+        bytes = await encodeAnimatedBanner(animation),
+        name = `banner-${randomUUID()}.gif`,
         stored = await (mediaStorage
           ? mediaStorage.write({
               organizationId: user.organizationId,
               collection: "generated-banners",
               name,
-              bytes: Buffer.from(gif.bytes()),
+              bytes,
               limitBytes: signature.mediaLimitBytes || 250 * 1024 * 1024,
             })
           : writeTenantMedia({
@@ -5812,18 +5779,34 @@ function createSignaturePortal({
               organizationId: user.organizationId,
               collection: "generated-banners",
               name,
-              bytes: Buffer.from(gif.bytes()),
+              bytes,
               limitBytes: signature.mediaLimitBytes || 250 * 1024 * 1024,
             }));
       recordAudit(user, "asset.generated", "asset", name, {
         kind: "animated-banner",
-        frames: frames.length,
-        width,
-        height,
+        frames: animation.frames.length,
+        width: animation.width,
+        height: animation.height,
+        delay: animation.delay,
+        quality: animation.quality,
         storedBytes: stored.storedBytes,
         usageBytes: stored.usageBytes,
       });
-      return json(res, 201, stored, requestId);
+      return json(
+        res,
+        201,
+        {
+          ...stored,
+          animation: {
+            frames: animation.frames.length,
+            width: animation.width,
+            height: animation.height,
+            delay: animation.delay,
+            quality: animation.quality,
+          },
+        },
+        requestId,
+      );
     }
     if (url.pathname === "/api/signature/preview" && req.method === "POST") {
       const body = await readJsonBody(req, { limit: 65536 }),

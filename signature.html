@@ -6,8 +6,8 @@
     <title>Signify Creator</title>
     <link rel="icon" type="image/png" href="/ithtfavicon.png" />
     <link rel="stylesheet" href="signify-shared.css?v=20260718" />
-    <link rel="stylesheet" href="signature.css?v=20260722" />
-    <link rel="stylesheet" href="signify-app.css?v=2026082601" />
+    <link rel="stylesheet" href="signature.css?v=2026082901" />
+    <link rel="stylesheet" href="signify-app.css?v=2026082901" />
   </head>
   <body>
     <main class="auth-shell" id="authView">
@@ -345,7 +345,7 @@
                 </div>
                 <div>
                   <strong>Header banner</strong
-                  ><small>Recommended 440 × 100</small
+                  ><small>Up to 440 px wide · original proportions</small
                   ><input
                     id="bannerInput"
                     type="file"
@@ -459,9 +459,30 @@
                   <span>Proactive monitoring</span>
                 </button>
               </div>
-              <div class="animation-tools">
+              <section
+                class="animation-tools"
+                aria-labelledby="animationStudioTitle"
+              >
+                <div class="animation-heading">
+                  <div>
+                    <strong id="animationStudioTitle">Animation studio</strong>
+                    <small id="animationSummary"
+                      >Ultra quality · 48 frames · 25 FPS</small
+                    >
+                  </div>
+                  <span class="animation-live-badge">Live</span>
+                </div>
+                <div class="animation-preview" id="animationPreviewShell">
+                  <canvas
+                    id="animationPreviewCanvas"
+                    width="440"
+                    height="188"
+                    aria-label="Animated banner preview"
+                  ></canvas>
+                  <span id="animationPreviewEmpty">No banner selected</span>
+                </div>
                 <fieldset class="effect-picker">
-                  <legend>Animation effect</legend>
+                  <legend>Motion style</legend>
                   <div class="effect-options">
                     <label class="effect-option tech-pulse">
                       <input
@@ -470,8 +491,11 @@
                         value="tech-pulse"
                         checked
                       />
-                      <span aria-hidden="true"></span
-                      ><strong>Tech pulse</strong>
+                      <span aria-hidden="true"></span>
+                      <span
+                        ><strong>Tech pulse</strong
+                        ><small>Electric sweep</small></span
+                      >
                     </label>
                     <label class="effect-option signal-rings">
                       <input
@@ -479,8 +503,11 @@
                         type="radio"
                         value="signal-rings"
                       />
-                      <span aria-hidden="true"></span
-                      ><strong>Signal rings</strong>
+                      <span aria-hidden="true"></span>
+                      <span
+                        ><strong>Signal rings</strong
+                        ><small>Radiating waves</small></span
+                      >
                     </label>
                     <label class="effect-option starfield">
                       <input
@@ -488,12 +515,19 @@
                         type="radio"
                         value="starfield"
                       />
-                      <span aria-hidden="true"></span><strong>Starfield</strong>
+                      <span aria-hidden="true"></span>
+                      <span
+                        ><strong>Starfield</strong
+                        ><small>Drifting stars</small></span
+                      >
                     </label>
                     <label class="effect-option clean">
                       <input name="bannerEffect" type="radio" value="clean" />
-                      <span aria-hidden="true"></span
-                      ><strong>Light sweep</strong>
+                      <span aria-hidden="true"></span>
+                      <span
+                        ><strong>Light sweep</strong
+                        ><small>Polished shine</small></span
+                      >
                     </label>
                     <label class="effect-option scan-line">
                       <input
@@ -501,7 +535,11 @@
                         type="radio"
                         value="scan-line"
                       />
-                      <span aria-hidden="true"></span><strong>Scan line</strong>
+                      <span aria-hidden="true"></span>
+                      <span
+                        ><strong>Scan line</strong
+                        ><small>Cyan scanner</small></span
+                      >
                     </label>
                     <label class="effect-option digital-grid">
                       <input
@@ -509,8 +547,11 @@
                         type="radio"
                         value="digital-grid"
                       />
-                      <span aria-hidden="true"></span
-                      ><strong>Digital grid</strong>
+                      <span aria-hidden="true"></span>
+                      <span
+                        ><strong>Digital grid</strong
+                        ><small>Moving circuitry</small></span
+                      >
                     </label>
                     <label class="effect-option spotlight">
                       <input
@@ -518,7 +559,11 @@
                         type="radio"
                         value="spotlight"
                       />
-                      <span aria-hidden="true"></span><strong>Spotlight</strong>
+                      <span aria-hidden="true"></span>
+                      <span
+                        ><strong>Spotlight</strong
+                        ><small>Focus beam</small></span
+                      >
                     </label>
                     <label class="effect-option soft-pulse">
                       <input
@@ -526,19 +571,125 @@
                         type="radio"
                         value="soft-pulse"
                       />
-                      <span aria-hidden="true"></span
-                      ><strong>Soft pulse</strong>
+                      <span aria-hidden="true"></span>
+                      <span
+                        ><strong>Soft pulse</strong
+                        ><small>Breathing glow</small></span
+                      >
+                    </label>
+                    <label class="effect-option aurora-flow">
+                      <input
+                        name="bannerEffect"
+                        type="radio"
+                        value="aurora-flow"
+                      />
+                      <span aria-hidden="true"></span>
+                      <span
+                        ><strong>Aurora flow</strong
+                        ><small>Color ribbons</small></span
+                      >
+                    </label>
+                    <label class="effect-option prism-sweep">
+                      <input
+                        name="bannerEffect"
+                        type="radio"
+                        value="prism-sweep"
+                      />
+                      <span aria-hidden="true"></span>
+                      <span
+                        ><strong>Prism sweep</strong
+                        ><small>Spectrum flare</small></span
+                      >
+                    </label>
+                    <label class="effect-option particle-trail">
+                      <input
+                        name="bannerEffect"
+                        type="radio"
+                        value="particle-trail"
+                      />
+                      <span aria-hidden="true"></span>
+                      <span
+                        ><strong>Particle trail</strong
+                        ><small>Light stream</small></span
+                      >
+                    </label>
+                    <label class="effect-option cinematic-glow">
+                      <input
+                        name="bannerEffect"
+                        type="radio"
+                        value="cinematic-glow"
+                      />
+                      <span aria-hidden="true"></span>
+                      <span
+                        ><strong>Cinematic glow</strong
+                        ><small>Premium depth</small></span
+                      >
                     </label>
                   </div>
                 </fieldset>
+                <div class="animation-control-grid">
+                  <label
+                    >Quality
+                    <select name="bannerQuality">
+                      <option value="standard">Standard</option>
+                      <option value="high">High</option>
+                      <option value="ultra" selected>Ultra</option>
+                    </select></label
+                  >
+                </div>
+                <fieldset class="animation-speed">
+                  <legend>Motion speed</legend>
+                  <div>
+                    <label
+                      ><input name="bannerSpeed" type="radio" value="slow" />
+                      <span>Slow</span></label
+                    >
+                    <label
+                      ><input
+                        name="bannerSpeed"
+                        type="radio"
+                        value="normal"
+                        checked
+                      />
+                      <span>Smooth</span></label
+                    >
+                    <label
+                      ><input name="bannerSpeed" type="radio" value="fast" />
+                      <span>Fast</span></label
+                    >
+                  </div>
+                </fieldset>
+                <label class="animation-intensity"
+                  ><span
+                    >Effect intensity
+                    <output id="animationIntensityValue">70%</output></span
+                  >
+                  <input
+                    name="bannerIntensity"
+                    type="range"
+                    min="20"
+                    max="100"
+                    step="5"
+                    value="70"
+                  />
+                </label>
                 <button
-                  class="button secondary"
+                  class="button primary wide"
                   id="animateBanner"
                   type="button"
                 >
-                  Generate animated GIF
+                  Create animation
                 </button>
-              </div>
+                <progress
+                  id="animationProgress"
+                  max="100"
+                  value="0"
+                  hidden
+                ></progress>
+                <p class="animation-status" id="animationStatus" role="status">
+                  Ready
+                </p>
+              </section>
             </section>
           </form>
         </aside>
@@ -632,6 +783,6 @@
     </dialog>
     <div class="toast" id="toast" role="status" aria-live="polite"></div>
     <script src="signify-shared.js?v=20260718"></script>
-    <script src="signature.js?v=2026082502"></script>
+    <script src="signature.js?v=2026082901"></script>
   </body>
 </html>

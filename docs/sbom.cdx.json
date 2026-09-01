@@ -2,7 +2,7 @@
   "$schema": "http://cyclonedx.org/schema/bom-1.5.schema.json",
   "bomFormat": "CycloneDX",
   "specVersion": "1.5",
-  "serialNumber": "urn:uuid:83d6485c-61ce-5a45-a092-bbb183e19f11",
+  "serialNumber": "urn:uuid:4738808c-e379-51b4-ab24-61ed46498b9e",
   "version": 1,
   "metadata": {
     "timestamp": "1970-01-01T00:00:00.000Z",
@@ -50,19 +50,19 @@
   },
   "components": [
     {
-      "bom-ref": "@aws-sdk/checksums@3.1000.18",
+      "bom-ref": "@aws-sdk/checksums@3.1000.29",
       "type": "library",
       "name": "@aws-sdk/checksums",
-      "version": "3.1000.18",
+      "version": "3.1000.29",
       "scope": "required",
       "author": "AWS SDK for JavaScript Team",
       "description": "Checksum algorithms and flexible checksums middleware for the AWS SDK",
-      "purl": "pkg:npm/%40aws-sdk/checksums@3.1000.18",
+      "purl": "pkg:npm/%40aws-sdk/checksums@3.1000.29",
       "properties": [],
       "externalReferences": [
         {
           "type": "distribution",
-          "url": "https://registry.npmjs.org/@aws-sdk/checksums/-/checksums-3.1000.18.tgz"
+          "url": "https://registry.npmjs.org/@aws-sdk/checksums/-/checksums-3.1000.29.tgz"
         },
         {
           "type": "vcs",
@@ -76,7 +76,7 @@
       "hashes": [
         {
           "alg": "SHA-512",
-          "content": "2089a46c4c97755ebfb9a179afa5a493ef3bd7c990c35965f378f46b86b7d11dc933fac75457560224f88ed26916326223033fa09e92c48c6bd33d93690506ab"
+          "content": "0edbb482be1d9c04d900fc0461ba42b06f8ca4b33b380962cb68137a9105430975bd9e832f740c1f616f78c6b71cbbcfb0e76126c3d10772adc5586987d4fbe4"
         }
       ],
       "licenses": [
@@ -88,19 +88,19 @@
       ]
     },
     {
-      "bom-ref": "@aws-sdk/client-s3@3.1091.0",
+      "bom-ref": "@aws-sdk/client-s3@3.1124.0",
       "type": "library",
       "name": "@aws-sdk/client-s3",
-      "version": "3.1091.0",
+      "version": "3.1124.0",
       "scope": "required",
       "author": "AWS SDK for JavaScript Team",
       "description": "AWS SDK for JavaScript S3 Client for Node.js, Browser and React Native",
-      "purl": "pkg:npm/%40aws-sdk/client-s3@3.1091.0",
+      "purl": "pkg:npm/%40aws-sdk/client-s3@3.1124.0",
       "properties": [],
       "externalReferences": [
         {
           "type": "distribution",
-          "url": "https://registry.npmjs.org/@aws-sdk/client-s3/-/client-s3-3.1091.0.tgz"
+          "url": "https://registry.npmjs.org/@aws-sdk/client-s3/-/client-s3-3.1124.0.tgz"
         },
         {
           "type": "vcs",
@@ -114,7 +114,7 @@
       "hashes": [
         {
           "alg": "SHA-512",
-          "content": "8ef5c109665d3c45c0085ed311b2ddc0b826adc5af02a4a72097916e79c54f12ee3d1019b446ee8d5514e3c8bb3c69eb3a83ba25ce870b0f6146a0440a8292c3"
+          "content": "7f6d0192c815957b9f71ffe68a375ed4b023c0cfe2483746de61ad377c9114e5335ed94510e8f1362d517f629bfab4a0a22392a4ed2150e9daf41b3e275817d8"
         }
       ],
       "licenses": [
@@ -126,19 +126,19 @@
       ]
     },
     {
-      "bom-ref": "@aws-sdk/core@3.975.3",
+      "bom-ref": "@aws-sdk/core@3.977.9",
       "type": "library",
       "name": "@aws-sdk/core",
-      "version": "3.975.3",
+      "version": "3.977.9",
       "scope": "required",
       "author": "AWS SDK for JavaScript Team",
       "description": "Core functions & classes shared by multiple AWS SDK clients.",
-      "purl": "pkg:npm/%40aws-sdk/core@3.975.3",
+      "purl": "pkg:npm/%40aws-sdk/core@3.977.9",
       "properties": [],
       "externalReferences": [
         {
           "type": "distribution",
-          "url": "https://registry.npmjs.org/@aws-sdk/core/-/core-3.975.3.tgz"
+          "url": "https://registry.npmjs.org/@aws-sdk/core/-/core-3.977.9.tgz"
         },
         {
           "type": "vcs",
@@ -152,7 +152,7 @@
       "hashes": [
         {
           "alg": "SHA-512",
-          "content": "eeeaf79022aebcf2ea96c6765e5be7341550eca9294aee98e9d393c123c72eb1694c47d933c8ac2c125ce1c82ff7a581ec689f795338dfa9a9c9cc3105ddaf10"
+          "content": "adea8f14442b6710d9a5e1a3e0f14c7a905e4792c660746aabf2f49a8b53ce0164091040e2b15d6955c348b632187871573eec4f63c39cf37d0a5b8649f83224"
         }
       ],
       "licenses": [
@@ -164,19 +164,19 @@
       ]
     },
     {
-      "bom-ref": "@aws-sdk/credential-provider-env@3.972.59",
+      "bom-ref": "@aws-sdk/credential-provider-env@3.972.70",
       "type": "library",
       "name": "@aws-sdk/credential-provider-env",
-      "version": "3.972.59",
+      "version": "3.972.70",
       "scope": "required",
       "author": "AWS SDK for JavaScript Team",
       "description": "AWS credential provider that sources credentials from known environment variables",
-      "purl": "pkg:npm/%40aws-sdk/credential-provider-env@3.972.59",
+      "purl": "pkg:npm/%40aws-sdk/credential-provider-env@3.972.70",
       "properties": [],
       "externalReferences": [
         {
           "type": "distribution",
-          "url": "https://registry.npmjs.org/@aws-sdk/credential-provider-env/-/credential-provider-env-3.972.59.tgz"
+          "url": "https://registry.npmjs.org/@aws-sdk/credential-provider-env/-/credential-provider-env-3.972.70.tgz"
         },
         {
           "type": "vcs",
@@ -190,7 +190,7 @@
       "hashes": [
         {
           "alg": "SHA-512",
-          "content": "372e5ee0c7e1dd03e688073402251ef9c6d35c3971914dd173e12958e7f259e584cbaca9ec56b52a67cd78273ed5af1bcbdcd0f60b6886689052430f49c1779e"
+          "content": "1f8d3807b749976982ac1a9a843118b1a9c1d3185d0e9ead5e75dc4d49d79a6a72d90dc9d07a346d46a36768ebfd1770cc2c92e7d1a2f315c81703cb18197a53"
         }
       ],
       "licenses": [
@@ -202,19 +202,19 @@
       ]
     },
     {
-      "bom-ref": "@aws-sdk/credential-provider-http@3.972.61",
+      "bom-ref": "@aws-sdk/credential-provider-http@3.972.72",
       "type": "library",
       "name": "@aws-sdk/credential-provider-http",
-      "version": "3.972.61",
+      "version": "3.972.72",
       "scope": "required",
       "author": "AWS SDK for JavaScript Team",
       "description": "AWS credential provider for containers and HTTP sources",
-      "purl": "pkg:npm/%40aws-sdk/credential-provider-http@3.972.61",
+      "purl": "pkg:npm/%40aws-sdk/credential-provider-http@3.972.72",
       "properties": [],
       "externalReferences": [
         {
           "type": "distribution",
-          "url": "https://registry.npmjs.org/@aws-sdk/credential-provider-http/-/credential-provider-http-3.972.61.tgz"
+          "url": "https://registry.npmjs.org/@aws-sdk/credential-provider-http/-/credential-provider-http-3.972.72.tgz"
         },
         {
           "type": "vcs",
@@ -228,7 +228,7 @@
       "hashes": [
         {
           "alg": "SHA-512",
-          "content": "f23023812b65e58b6ae3e1c5dd7ffd7fe1264629da45b19146d40692d94f7c1455c7bdc7f91d72e3cbc87977ab42d60615a52a904a777d3ea33fce78ad53b6c9"
+          "content": "5fdf3360ead539eba8b025feea4b5fdbd142d8dd861cf2e26bbaafea6ccfcd373e44f02e1d60834bef99e892bb78662a6ffbfab9a5bb6c05da3af0c17e897ed3"
         }
       ],
       "licenses": [
@@ -240,19 +240,19 @@
       ]
     },
     {
-      "bom-ref": "@aws-sdk/credential-provider-ini@3.973.4",
+      "bom-ref": "@aws-sdk/credential-provider-ini@3.973.15",
       "type": "library",
       "name": "@aws-sdk/credential-provider-ini",
-      "version": "3.973.4",
+      "version": "3.973.15",
       "scope": "required",
       "author": "AWS SDK for JavaScript Team",
       "description": "AWS credential provider that sources credentials from ~/.aws/credentials and ~/.aws/config",
-      "purl": "pkg:npm/%40aws-sdk/credential-provider-ini@3.973.4",
+      "purl": "pkg:npm/%40aws-sdk/credential-provider-ini@3.973.15",
       "properties": [],
       "externalReferences": [
         {
           "type": "distribution",
-          "url": "https://registry.npmjs.org/@aws-sdk/credential-provider-ini/-/credential-provider-ini-3.973.4.tgz"
+          "url": "https://registry.npmjs.org/@aws-sdk/credential-provider-ini/-/credential-provider-ini-3.973.15.tgz"
         },
         {
           "type": "vcs",
@@ -266,7 +266,7 @@
       "hashes": [
         {
           "alg": "SHA-512",
-          "content": "7ba66f56c8fdd1a4402dfd641cff89e22a82d78f7a669560a88ffebb42c9e472fbabb0136ae1b2e20743bd108fd772f5a4dfdf32264b6a1d7ad8f1886246d455"
+          "content": "472920eace5c781bb29cc3865a0a28c0ee0dfb6ec97e7a9702755a4ae9d997484e3b55e8752af118dcfab0211b9e64b49407d06432b26f77dbaf8ea04aebfa4a"
         }
       ],
       "licenses": [
@@ -278,19 +278,19 @@
       ]
     },
     {
-      "bom-ref": "@aws-sdk/credential-provider-login@3.972.66",
+      "bom-ref": "@aws-sdk/credential-provider-login@3.972.77",
       "type": "library",
       "name": "@aws-sdk/credential-provider-login",
-      "version": "3.972.66",
+      "version": "3.972.77",
       "scope": "required",
       "author": "AWS SDK for JavaScript Team",
       "description": "AWS credential provider that sources credentials from aws login cached tokens",
-      "purl": "pkg:npm/%40aws-sdk/credential-provider-login@3.972.66",
+      "purl": "pkg:npm/%40aws-sdk/credential-provider-login@3.972.77",
       "properties": [],
       "externalReferences": [
         {
           "type": "distribution",
-          "url": "https://registry.npmjs.org/@aws-sdk/credential-provider-login/-/credential-provider-login-3.972.66.tgz"
+          "url": "https://registry.npmjs.org/@aws-sdk/credential-provider-login/-/credential-provider-login-3.972.77.tgz"
         },
         {
           "type": "vcs",
@@ -304,7 +304,7 @@
       "hashes": [
         {
           "alg": "SHA-512",
-          "content": "8367ecaa6f3baff9cab612d9d159240c11259068343ef49af1df7b1d0e848a531b25367a8716bc17191267225f80f7c57599f44d39a439f7d09934947001c89e"
+          "content": "25be7dc5f1084a83799a66e703e1d8a9db6b497dc2802b49a287fe5790fcfd3814239e96eb718411de58e7c5a28d4dcebbaf9612068b0f57de5736915d5e480d"
         }
       ],
       "licenses": [
@@ -316,19 +316,19 @@
       ]
     },
     {
-      "bom-ref": "@aws-sdk/credential-provider-node@3.972.70",
+      "bom-ref": "@aws-sdk/credential-provider-node@3.972.82",
       "type": "library",
       "name": "@aws-sdk/credential-provider-node",
-      "version": "3.972.70",
+      "version": "3.972.82",
       "scope": "required",
       "author": "AWS SDK for JavaScript Team",
       "description": "AWS credential provider that sources credentials from a Node.JS environment. ",
-      "purl": "pkg:npm/%40aws-sdk/credential-provider-node@3.972.70",
+      "purl": "pkg:npm/%40aws-sdk/credential-provider-node@3.972.82",
       "properties": [],
       "externalReferences": [
         {
           "type": "distribution",
-          "url": "https://registry.npmjs.org/@aws-sdk/credential-provider-node/-/credential-provider-node-3.972.70.tgz"
+          "url": "https://registry.npmjs.org/@aws-sdk/credential-provider-node/-/credential-provider-node-3.972.82.tgz"
         },
         {
           "type": "vcs",
@@ -342,7 +342,7 @@
       "hashes": [
         {
           "alg": "SHA-512",
-          "content": "df1cef906772901ba7c6a87c5ae7665294b22d6bc885f23a681428d5be6b6f79833b998d2da74afb4862234a81401315ca725b7cb3be023cbd773b4cc32f4ef3"
+          "content": "ce70e410e19707c5b7906d4b25428fddfa01658ffda8b3347a297f0f15974a9dfb5ec76c44b40713f77f39a08619580aa40eb39d1dfc87ff88364f1da3516388"
         }
       ],
       "licenses": [
@@ -354,19 +354,19 @@
       ]
     },
     {
-      "bom-ref": "@aws-sdk/credential-provider-process@3.972.59",
+      "bom-ref": "@aws-sdk/credential-provider-process@3.972.70",
       "type": "library",
       "name": "@aws-sdk/credential-provider-process",
-      "version": "3.972.59",
+      "version": "3.972.70",
       "scope": "required",
       "author": "AWS SDK for JavaScript Team",
       "description": "AWS credential provider that sources credential_process from ~/.aws/credentials and ~/.aws/config",
-      "purl": "pkg:npm/%40aws-sdk/credential-provider-process@3.972.59",
+      "purl": "pkg:npm/%40aws-sdk/credential-provider-process@3.972.70",
       "properties": [],
       "externalReferences": [
         {
           "type": "distribution",
-          "url": "https://registry.npmjs.org/@aws-sdk/credential-provider-process/-/credential-provider-process-3.972.59.tgz"
+          "url": "https://registry.npmjs.org/@aws-sdk/credential-provider-process/-/credential-provider-process-3.972.70.tgz"
         },
         {
           "type": "vcs",
@@ -380,7 +380,7 @@
       "hashes": [
         {
           "alg": "SHA-512",
-          "content": "0e5645dbf3212e56ad0dd96b232dc2502a5f75b2eb2b1fb748c8d5a3e5b21e73e9c3391cfccdefc001f0e0e5497fb0ccbcefb8bdf46a48231cfc4f48d5ab8dd2"
+          "content": "dabcb4ddf19126be2c5778c8fa87238f926a00b9c50faca63392a23420d932fabc6d7d8649b134be38b868ce374d50a5da75eaa8b459694c5dabf29e591018e1"
         }
       ],
       "licenses": [
@@ -392,19 +392,19 @@
       ]
     },
     {
-      "bom-ref": "@aws-sdk/credential-provider-sso@3.973.3",
+      "bom-ref": "@aws-sdk/credential-provider-sso@3.973.14",
       "type": "library",
       "name": "@aws-sdk/credential-provider-sso",
-      "version": "3.973.3",
+      "version": "3.973.14",
       "scope": "required",
       "author": "AWS SDK for JavaScript Team",
       "description": "AWS credential provider that exchanges a resolved SSO login token file for temporary AWS credentials",
-      "purl": "pkg:npm/%40aws-sdk/credential-provider-sso@3.973.3",
+      "purl": "pkg:npm/%40aws-sdk/credential-provider-sso@3.973.14",
       "properties": [],
       "externalReferences": [
         {
           "type": "distribution",
-          "url": "https://registry.npmjs.org/@aws-sdk/credential-provider-sso/-/credential-provider-sso-3.973.3.tgz"
+          "url": "https://registry.npmjs.org/@aws-sdk/credential-provider-sso/-/credential-provider-sso-3.973.14.tgz"
         },
         {
           "type": "vcs",
@@ -418,7 +418,7 @@
       "hashes": [
         {
           "alg": "SHA-512",
-          "content": "8667431e8cb61b912cd9ef0881e94d31852e49023ab82200299309daed8f74a0e1c6f6e4d6e583fe0e3e47b47973fb497ca101d7e2a38d689aa02aff4be65389"
+          "content": "8e4860ffca1c000a1cd111722cc842c3eff3661ee0cacb5081de05e21ce735af0fe02739d353d09b177e8c62e2307a1d3c9fbb66fff7ce733ada06688f26ac98"
         }
       ],
       "licenses": [
@@ -430,19 +430,19 @@
       ]
     },
     {
-      "bom-ref": "@aws-sdk/credential-provider-web-identity@3.972.65",
+      "bom-ref": "@aws-sdk/credential-provider-web-identity@3.972.76",
       "type": "library",
       "name": "@aws-sdk/credential-provider-web-identity",
-      "version": "3.972.65",
+      "version": "3.972.76",
       "scope": "required",
       "author": "AWS SDK for JavaScript Team",
       "description": "AWS credential provider that calls STS assumeRole for temporary AWS credentials",
-      "purl": "pkg:npm/%40aws-sdk/credential-provider-web-identity@3.972.65",
+      "purl": "pkg:npm/%40aws-sdk/credential-provider-web-identity@3.972.76",
       "properties": [],
       "externalReferences": [
         {
           "type": "distribution",
-          "url": "https://registry.npmjs.org/@aws-sdk/credential-provider-web-identity/-/credential-provider-web-identity-3.972.65.tgz"
+          "url": "https://registry.npmjs.org/@aws-sdk/credential-provider-web-identity/-/credential-provider-web-identity-3.972.76.tgz"
         },
         {
           "type": "vcs",
@@ -456,7 +456,7 @@
       "hashes": [
         {
           "alg": "SHA-512",
-          "content": "80741bfcab747218e4fc94036bf1890ea980bc4b959fc9fbcf5d302b68742c533d4d40d192886038ee1a105facdac04b3346ebec29795ba3fba61823aeb26f2d"
+          "content": "777006c95bbbe7d3c6af7e66101dacdb6c7194d100e6ba5dc6d48f26d85f3c526fa10f1db77e7b8953c40aa59f5315e9d6da0902f2a66ed7086151a281a1ac08"
         }
       ],
       "licenses": [
@@ -468,18 +468,18 @@
       ]
     },
     {
-      "bom-ref": "@aws-sdk/middleware-sdk-s3@3.972.64",
+      "bom-ref": "@aws-sdk/middleware-sdk-s3@3.972.75",
       "type": "library",
       "name": "@aws-sdk/middleware-sdk-s3",
-      "version": "3.972.64",
+      "version": "3.972.75",
       "scope": "required",
       "author": "AWS SDK for JavaScript Team",
-      "purl": "pkg:npm/%40aws-sdk/middleware-sdk-s3@3.972.64",
+      "purl": "pkg:npm/%40aws-sdk/middleware-sdk-s3@3.972.75",
       "properties": [],
       "externalReferences": [
         {
           "type": "distribution",
-          "url": "https://registry.npmjs.org/@aws-sdk/middleware-sdk-s3/-/middleware-sdk-s3-3.972.64.tgz"
+          "url": "https://registry.npmjs.org/@aws-sdk/middleware-sdk-s3/-/middleware-sdk-s3-3.972.75.tgz"
         },
         {
           "type": "vcs",
@@ -493,7 +493,7 @@
       "hashes": [
         {
           "alg": "SHA-512",
-          "content": "4418b8dda9e10c152ff8709fc42397c06384ec6993e27ec2855d38330af6d918574cd71a996fe25a72653a8b433c2652ac9e1d12f8594a259640cc0b5fe66114"
+          "content": "c0c22c36e99154a68d30a86f53fb3d56b744c04f12ea04b35e9e11ca0146e4110c9c69245dff1c8e1f337fb70a241a540e9a935aac1bcf98ac120a7dac7e8b9e"
         }
       ],
       "licenses": [
@@ -505,19 +505,19 @@
       ]
     },
     {
-      "bom-ref": "@aws-sdk/nested-clients@3.997.33",
+      "bom-ref": "@aws-sdk/nested-clients@3.997.44",
       "type": "library",
       "name": "@aws-sdk/nested-clients",
-      "version": "3.997.33",
+      "version": "3.997.44",
       "scope": "required",
       "author": "AWS SDK for JavaScript Team",
       "description": "Nested clients for AWS SDK packages.",
-      "purl": "pkg:npm/%40aws-sdk/nested-clients@3.997.33",
+      "purl": "pkg:npm/%40aws-sdk/nested-clients@3.997.44",
       "properties": [],
       "externalReferences": [
         {
           "type": "distribution",
-          "url": "https://registry.npmjs.org/@aws-sdk/nested-clients/-/nested-clients-3.997.33.tgz"
+          "url": "https://registry.npmjs.org/@aws-sdk/nested-clients/-/nested-clients-3.997.44.tgz"
         },
         {
           "type": "vcs",
@@ -531,7 +531,7 @@
       "hashes": [
         {
           "alg": "SHA-512",
-          "content": "75564eae823faf7fc436fa8d1a08cc3ee97e8e3973f4675d7d5bac8135e55637d98f98ac89b3b179c2e41906d13e9f173ae5fe4407e35cb1603e40f5252e71af"
+          "content": "361120af28e5045f70dfc657a86ca6415dbc2219186b598a8656d89ea222b39ec06305865587d43e083fa82dab2d1a8e51f6e5c71fbe8abbe3bb5d245536bc57"
         }
       ],
       "licenses": [
@@ -543,18 +543,18 @@
       ]
     },
     {
-      "bom-ref": "@aws-sdk/s3-request-presigner@3.1091.0",
+      "bom-ref": "@aws-sdk/s3-request-presigner@3.1124.0",
       "type": "library",
       "name": "@aws-sdk/s3-request-presigner",
-      "version": "3.1091.0",
+      "version": "3.1124.0",
       "scope": "required",
       "author": "AWS SDK for JavaScript Team",
-      "purl": "pkg:npm/%40aws-sdk/s3-request-presigner@3.1091.0",
+      "purl": "pkg:npm/%40aws-sdk/s3-request-presigner@3.1124.0",
       "properties": [],
       "externalReferences": [
         {
           "type": "distribution",
-          "url": "https://registry.npmjs.org/@aws-sdk/s3-request-presigner/-/s3-request-presigner-3.1091.0.tgz"
+          "url": "https://registry.npmjs.org/@aws-sdk/s3-request-presigner/-/s3-request-presigner-3.1124.0.tgz"
         },
         {
           "type": "vcs",
@@ -568,7 +568,7 @@
       "hashes": [
         {
           "alg": "SHA-512",
-          "content": "05d17514d3a163289ffed00dd2ebd39e3a3f202fc992029f05b43c3f0b4cdae0f2d8cabde5a2bc9214be905f192bae30c54dccd1fd302e50174eb1b1387b6b51"
+          "content": "7bd47c1500f840d00cfa0d97f0707fc2be6ae298095e3143308f85382ef9f44cfbd311b9668ee508153fc1520b485436c0ead3efa17a9153deddb30447131fdb"
         }
       ],
       "licenses": [
@@ -580,18 +580,18 @@
       ]
     },
     {
-      "bom-ref": "@aws-sdk/signature-v4-multi-region@3.996.41",
+      "bom-ref": "@aws-sdk/signature-v4-multi-region@3.996.46",
       "type": "library",
       "name": "@aws-sdk/signature-v4-multi-region",
-      "version": "3.996.41",
+      "version": "3.996.46",
       "scope": "required",
       "author": "AWS SDK for JavaScript Team",
-      "purl": "pkg:npm/%40aws-sdk/signature-v4-multi-region@3.996.41",
+      "purl": "pkg:npm/%40aws-sdk/signature-v4-multi-region@3.996.46",
       "properties": [],
       "externalReferences": [
         {
           "type": "distribution",
-          "url": "https://registry.npmjs.org/@aws-sdk/signature-v4-multi-region/-/signature-v4-multi-region-3.996.41.tgz"
+          "url": "https://registry.npmjs.org/@aws-sdk/signature-v4-multi-region/-/signature-v4-multi-region-3.996.46.tgz"
         },
         {
           "type": "vcs",
@@ -605,7 +605,7 @@
       "hashes": [
         {
           "alg": "SHA-512",
-          "content": "40c532b60f8540c1a8b9cf201d2d342a8622877f8de9caa6548fe9406388a3b36becea506a25e34983ae2febec3d9d6dca66382c043c318707266c2ce4b4719e"
+          "content": "2fedb1653c9eff64fde9fde5c02c2cd19c3a186d891d95bd7bc16956018179e13148ac9ea19e82591a419a5ffb0cd88afcedba8eb80f33d17e032f15920cd459"
         }
       ],
       "licenses": [
@@ -617,19 +617,19 @@
       ]
     },
     {
-      "bom-ref": "@aws-sdk/token-providers@3.1088.0",
+      "bom-ref": "@aws-sdk/token-providers@3.1116.0",
       "type": "library",
       "name": "@aws-sdk/token-providers",
-      "version": "3.1088.0",
+      "version": "3.1116.0",
       "scope": "required",
       "author": "AWS SDK for JavaScript Team",
       "description": "A collection of token providers",
-      "purl": "pkg:npm/%40aws-sdk/token-providers@3.1088.0",
+      "purl": "pkg:npm/%40aws-sdk/token-providers@3.1116.0",
       "properties": [],
       "externalReferences": [
         {
           "type": "distribution",
-          "url": "https://registry.npmjs.org/@aws-sdk/token-providers/-/token-providers-3.1088.0.tgz"
+          "url": "https://registry.npmjs.org/@aws-sdk/token-providers/-/token-providers-3.1116.0.tgz"
         },
         {
           "type": "vcs",
@@ -643,7 +643,7 @@
       "hashes": [
         {
           "alg": "SHA-512",
-          "content": "e0e6dab56b76aa9260e45064e0b38e2ab4d06336aa79ec00b5d3b7afd64ef251fd62a2eda53ccbc88772d2627e9d575f60e9ea21290a35f9b33f6d9b343870cb"
+          "content": "ca0222bcaaa1f1a1f3364b9c3825c7c880600692cf7eb488d260aa5c5faf2c1b0f4d42aa8f4552a806341853deee5425e079ed8ce710f8a4b24bba145760b9e1"
         }
       ],
       "licenses": [
@@ -655,19 +655,19 @@
       ]
     },
     {
-      "bom-ref": "@aws-sdk/types@3.974.2",
+      "bom-ref": "@aws-sdk/types@3.974.5",
       "type": "library",
       "name": "@aws-sdk/types",
-      "version": "3.974.2",
+      "version": "3.974.5",
       "scope": "required",
       "author": "AWS SDK for JavaScript Team",
       "description": "Types for the AWS SDK",
-      "purl": "pkg:npm/%40aws-sdk/types@3.974.2",
+      "purl": "pkg:npm/%40aws-sdk/types@3.974.5",
       "properties": [],
       "externalReferences": [
         {
           "type": "distribution",
-          "url": "https://registry.npmjs.org/@aws-sdk/types/-/types-3.974.2.tgz"
+          "url": "https://registry.npmjs.org/@aws-sdk/types/-/types-3.974.5.tgz"
         },
         {
           "type": "vcs",
@@ -681,7 +681,7 @@
       "hashes": [
         {
           "alg": "SHA-512",
-          "content": "dd6e8852d4b115b1fa5fb59bec3cc6095e5088542c77483c6ce7e7b69983c5097306829650c06efc93d04740f0904f87a67c5de9d6f5b576cec1d78775d1ba70"
+          "content": "2e4c0b2f604b6c2eb034d9b825a1fd99b12a04c74e64272de95018aa174de14d71ad633e7d425011f6c7c10803ca96a93964d1b65936e5a91be5a7ccd0ff0221"
         }
       ],
       "licenses": [
@@ -693,19 +693,19 @@
       ]
     },
     {
-      "bom-ref": "@aws-sdk/xml-builder@3.972.36",
+      "bom-ref": "@aws-sdk/xml-builder@3.972.40",
       "type": "library",
       "name": "@aws-sdk/xml-builder",
-      "version": "3.972.36",
+      "version": "3.972.40",
       "scope": "required",
       "author": "AWS SDK for JavaScript Team",
       "description": "XML utilities for the AWS SDK",
-      "purl": "pkg:npm/%40aws-sdk/xml-builder@3.972.36",
+      "purl": "pkg:npm/%40aws-sdk/xml-builder@3.972.40",
       "properties": [],
       "externalReferences": [
         {
           "type": "distribution",
-          "url": "https://registry.npmjs.org/@aws-sdk/xml-builder/-/xml-builder-3.972.36.tgz"
+          "url": "https://registry.npmjs.org/@aws-sdk/xml-builder/-/xml-builder-3.972.40.tgz"
         },
         {
           "type": "vcs",
@@ -719,7 +719,7 @@
       "hashes": [
         {
           "alg": "SHA-512",
-          "content": "45d1a64b518baed69338b1351254a5b8c95d36ba64f449aaeae62cf124bc88796ee714c098cf6b46433dd68e3cfab211af206dc8ef6dfae2d80a8306ea354c54"
+          "content": "c25166088194970178cf1fe49dcc3e6e6c53421d4779226ae26615fd5e5c65448969d0cfde45ef196f119f6d5c8a68ffef2f63bbee3ba185978bdeef17b73368"
         }
       ],
       "licenses": [
@@ -802,19 +802,19 @@
       ]
     },
     {
-      "bom-ref": "@img/sharp-win32-x64@0.35.3",
+      "bom-ref": "@img/sharp-win32-x64@0.35.4",
       "type": "library",
       "name": "@img/sharp-win32-x64",
-      "version": "0.35.3",
+      "version": "0.35.4",
       "scope": "optional",
       "author": "Lovell Fuller <npm@lovell.info>",
       "description": "Prebuilt sharp for use with Windows x64",
-      "purl": "pkg:npm/%40img/sharp-win32-x64@0.35.3",
+      "purl": "pkg:npm/%40img/sharp-win32-x64@0.35.4",
       "properties": [],
       "externalReferences": [
         {
           "type": "distribution",
-          "url": "https://registry.npmjs.org/@img/sharp-win32-x64/-/sharp-win32-x64-0.35.3.tgz"
+          "url": "https://registry.npmjs.org/@img/sharp-win32-x64/-/sharp-win32-x64-0.35.4.tgz"
         },
         {
           "type": "vcs",
@@ -828,7 +828,7 @@
       "hashes": [
         {
           "alg": "SHA-512",
-          "content": "0f8cb5bcd799ac820908dfae1da595b47f3a07e682add31862389ccbda571ef6c665e1982cb49ddf0755b82dfb171557954d4046c93ce1e2967d631719812abc"
+          "content": "5ed9a762105cace46c2785c99e0cb3aff1163f485164b019445680a5d2aebe2caa17bf3eca5c61db2d3a666b542c030e9ce6c9dee72937401cc125a7328c1346"
         }
       ],
       "licenses": [
@@ -910,18 +910,18 @@
       ]
     },
     {
-      "bom-ref": "@smithy/core@3.29.5",
+      "bom-ref": "@smithy/core@3.33.3",
       "type": "library",
       "name": "@smithy/core",
-      "version": "3.29.5",
+      "version": "3.33.3",
       "scope": "required",
       "author": "AWS Smithy Team",
-      "purl": "pkg:npm/%40smithy/core@3.29.5",
+      "purl": "pkg:npm/%40smithy/core@3.33.3",
       "properties": [],
       "externalReferences": [
         {
           "type": "distribution",
-          "url": "https://registry.npmjs.org/@smithy/core/-/core-3.29.5.tgz"
+          "url": "https://registry.npmjs.org/@smithy/core/-/core-3.33.3.tgz"
         },
         {
           "type": "vcs",
@@ -935,7 +935,7 @@
       "hashes": [
         {
           "alg": "SHA-512",
-          "content": "8b4764dade41f82c15fdd7097541c82d890e405e65a1ff1fe3874509f0d64e8182c634fd610f82807a9302f271cdcdfecea4309b642d56827922a88d6abfc29d"
+          "content": "0ac39e2aaffd900df2e95247b7effe5530ad05ac49e0e4c5a60ae321484fa4320ac41722d64d9b25a400485da1fc42d6aee946a7eb7dec367499ebdf003f2276"
         }
       ],
       "licenses": [
@@ -947,19 +947,19 @@
       ]
     },
     {
-      "bom-ref": "@smithy/credential-provider-imds@4.4.10",
+      "bom-ref": "@smithy/credential-provider-imds@4.5.2",
       "type": "library",
       "name": "@smithy/credential-provider-imds",
-      "version": "4.4.10",
+      "version": "4.5.2",
       "scope": "required",
       "author": "AWS SDK for JavaScript Team",
       "description": "AWS credential provider that sources credentials from the EC2 instance metadata service and ECS container metadata service",
-      "purl": "pkg:npm/%40smithy/credential-provider-imds@4.4.10",
+      "purl": "pkg:npm/%40smithy/credential-provider-imds@4.5.2",
       "properties": [],
       "externalReferences": [
         {
           "type": "distribution",
-          "url": "https://registry.npmjs.org/@smithy/credential-provider-imds/-/credential-provider-imds-4.4.10.tgz"
+          "url": "https://registry.npmjs.org/@smithy/credential-provider-imds/-/credential-provider-imds-4.5.2.tgz"
         },
         {
           "type": "vcs",
@@ -973,7 +973,7 @@
       "hashes": [
         {
           "alg": "SHA-512",
-          "content": "3097a701ee0e291654a352dd6181430ac487c5a1ef227214ff3e761ac85e3bdbe5d7f552c92542af4ce4c8a0fa4c588691251a586c6f299ffbd0ebe05194791d"
+          "content": "03db92767ef6a336d15128add1e89bd135bb9d7b8d3e569e334cdc1a427e9c4ead15c4836e79adc28c5b4c2141ba455072ccc3032bec77bfab4ddb8f4d7a7282"
         }
       ],
       "licenses": [
@@ -985,19 +985,19 @@
       ]
     },
     {
-      "bom-ref": "@smithy/fetch-http-handler@5.6.7",
+      "bom-ref": "@smithy/fetch-http-handler@5.7.2",
       "type": "library",
       "name": "@smithy/fetch-http-handler",
-      "version": "5.6.7",
+      "version": "5.7.2",
       "scope": "required",
       "author": "AWS SDK for JavaScript Team",
       "description": "Provides a way to make requests",
-      "purl": "pkg:npm/%40smithy/fetch-http-handler@5.6.7",
+      "purl": "pkg:npm/%40smithy/fetch-http-handler@5.7.2",
       "properties": [],
       "externalReferences": [
         {
           "type": "distribution",
-          "url": "https://registry.npmjs.org/@smithy/fetch-http-handler/-/fetch-http-handler-5.6.7.tgz"
+          "url": "https://registry.npmjs.org/@smithy/fetch-http-handler/-/fetch-http-handler-5.7.2.tgz"
         },
         {
           "type": "vcs",
@@ -1011,7 +1011,7 @@
       "hashes": [
         {
           "alg": "SHA-512",
-          "content": "df3a60f32aaac97ce82b64ec443764a953a3d910c115f2d7c02733399e5ced3581e1e89a79b7d20ac6cc8c33d80773c9f62855eb641a79a759fb02da759b4d18"
+          "content": "9d9c964e64a92445e5e95b5654c049bdeffbc75d8366eeac217d73d5af9931a1e541046cf59a6ee8d6d37bf826c585d5469923c720d8a59e60c7620ce9ffd693"
         }
       ],
       "licenses": [
@@ -1023,19 +1023,19 @@
       ]
     },
     {
-      "bom-ref": "@smithy/node-http-handler@4.9.7",
+      "bom-ref": "@smithy/node-http-handler@4.12.0",
       "type": "library",
       "name": "@smithy/node-http-handler",
-      "version": "4.9.7",
+      "version": "4.12.0",
       "scope": "required",
       "author": "AWS SDK for JavaScript Team",
       "description": "Provides a way to make requests",
-      "purl": "pkg:npm/%40smithy/node-http-handler@4.9.7",
+      "purl": "pkg:npm/%40smithy/node-http-handler@4.12.0",
       "properties": [],
       "externalReferences": [
         {
           "type": "distribution",
-          "url": "https://registry.npmjs.org/@smithy/node-http-handler/-/node-http-handler-4.9.7.tgz"
+          "url": "https://registry.npmjs.org/@smithy/node-http-handler/-/node-http-handler-4.12.0.tgz"
         },
         {
           "type": "vcs",
@@ -1049,7 +1049,7 @@
       "hashes": [
         {
           "alg": "SHA-512",
-          "content": "c0253c1c22e302d015ab1c5ed23db17dff4b7043f0df28c16e0e487500c86059f19cfc5bc5c48b73bae07b1ee4aa6f4bfd660e9c91206964257c391995ea3330"
+          "content": "d26ab5a4769d7f25c2602aa6d9c3696e33484fe7db694a4dc5ec196ff60daf62f422b11530e6fc80cfc59782ba5ef1c25b7b923431703e5ffe88a9b46f1f6362"
         }
       ],
       "licenses": [
@@ -1061,19 +1061,19 @@
       ]
     },
     {
-      "bom-ref": "@smithy/signature-v4@5.6.6",
+      "bom-ref": "@smithy/signature-v4@5.7.3",
       "type": "library",
       "name": "@smithy/signature-v4",
-      "version": "5.6.6",
+      "version": "5.7.3",
       "scope": "required",
       "author": "AWS SDK for JavaScript Team",
       "description": "A standalone implementation of the AWS Signature V4 request signing algorithm",
-      "purl": "pkg:npm/%40smithy/signature-v4@5.6.6",
+      "purl": "pkg:npm/%40smithy/signature-v4@5.7.3",
       "properties": [],
       "externalReferences": [
         {
           "type": "distribution",
-          "url": "https://registry.npmjs.org/@smithy/signature-v4/-/signature-v4-5.6.6.tgz"
+          "url": "https://registry.npmjs.org/@smithy/signature-v4/-/signature-v4-5.7.3.tgz"
         },
         {
           "type": "vcs",
@@ -1087,7 +1087,7 @@
       "hashes": [
         {
           "alg": "SHA-512",
-          "content": "79f3fa0cddd44c5af322c18ee36ff171a6eff2353bfbd9f011da611541fbc8bd24d35d0447201668ee352854080cb70564b67cc73210af8c29945c4dcec95219"
+          "content": "ec89869be1641d12dc05a46db4800c67a6f325959bd9c246a188eae3a176523c9cba35b3acbf4610df61e30ede4325c962796dad48716db89e040211addaa9a3"
         }
       ],
       "licenses": [
@@ -1099,18 +1099,18 @@
       ]
     },
     {
-      "bom-ref": "@smithy/types@4.16.1",
+      "bom-ref": "@smithy/types@4.17.2",
       "type": "library",
       "name": "@smithy/types",
-      "version": "4.16.1",
+      "version": "4.17.2",
       "scope": "required",
       "author": "AWS Smithy Team",
-      "purl": "pkg:npm/%40smithy/types@4.16.1",
+      "purl": "pkg:npm/%40smithy/types@4.17.2",
       "properties": [],
       "externalReferences": [
         {
           "type": "distribution",
-          "url": "https://registry.npmjs.org/@smithy/types/-/types-4.16.1.tgz"
+          "url": "https://registry.npmjs.org/@smithy/types/-/types-4.17.2.tgz"
         },
         {
           "type": "vcs",
@@ -1124,7 +1124,7 @@
       "hashes": [
         {
           "alg": "SHA-512",
-          "content": "d0916cdd5db2d8cf6d296e676bfab17baf59bfebb12cc3bb4016e1c45fc51eefc6a7634564000bf6d5a5f4f534db1c68d3ba5bdc6f454f28cd73a0f9b99ac922"
+          "content": "14e2a9559a1bf4c3d39f6ce74731ab9ec307bfb04eb0a570dd788ffdc3b260b0d567da8aa789e27c88920ae514fdf223e55bb450e031085afea9102d1b435490"
         }
       ],
       "licenses": [
@@ -1622,48 +1622,6 @@
       ]
     },
     {
-      "bom-ref": "gifenc@1.0.3",
-      "type": "library",
-      "name": "gifenc",
-      "version": "1.0.3",
-      "scope": "required",
-      "author": "Matt DesLauriers",
-      "description": "very fast JS GIF encoder",
-      "purl": "pkg:npm/gifenc@1.0.3",
-      "properties": [],
-      "externalReferences": [
-        {
-          "type": "distribution",
-          "url": "https://registry.npmjs.org/gifenc/-/gifenc-1.0.3.tgz"
-        },
-        {
-          "type": "vcs",
-          "url": "git://github.com/mattdesl/gifenc.git"
-        },
-        {
-          "type": "website",
-          "url": "https://github.com/mattdesl/gifenc"
-        },
-        {
-          "type": "issue-tracker",
-          "url": "https://github.com/mattdesl/gifenc/issues"
-        }
-      ],
-      "hashes": [
-        {
-          "alg": "SHA-512",
-          "content": "c5dafa01dadf18171fce770e3543a55cc06e739c090ed3ae784ddce6b746d28360b4834b0fe7f6885665b6b051658cc00916caafe992554ff1f7ccefdaede39b"
-        }
-      ],
-      "licenses": [
-        {
-          "license": {
-            "id": "MIT"
-          }
-        }
-      ]
-    },
-    {
       "bom-ref": "is-fullwidth-code-point@3.0.0",
       "type": "library",
       "name": "is-fullwidth-code-point",
@@ -1920,19 +1878,19 @@
       ]
     },
     {
-      "bom-ref": "pg@8.22.0",
+      "bom-ref": "pg@8.23.0",
       "type": "library",
       "name": "pg",
-      "version": "8.22.0",
+      "version": "8.23.0",
       "scope": "required",
       "author": "Brian Carlson <brian.m.carlson@gmail.com>",
       "description": "PostgreSQL client - pure javascript & libpq with the same API",
-      "purl": "pkg:npm/pg@8.22.0",
+      "purl": "pkg:npm/pg@8.23.0",
       "properties": [],
       "externalReferences": [
         {
           "type": "distribution",
-          "url": "https://registry.npmjs.org/pg/-/pg-8.22.0.tgz"
+          "url": "https://registry.npmjs.org/pg/-/pg-8.23.0.tgz"
         },
         {
           "type": "vcs",
@@ -1946,7 +1904,7 @@
       "hashes": [
         {
           "alg": "SHA-512",
-          "content": "f308a1d6f54804cc6850cda8078b2826c0fdb439c3a4bbf8397049f8427316cbf2703fa57f222b782da0187abbf1ff236cb2edf9bbe53d315d1597c990ebb300"
+          "content": "229d844029e0a3024b18e7c2c241613d753bfe58e5867e91c659b2e1761f2f663ebf244ce7dfbcb91db1a9158a75899b5e6c4214e0262b106e49409d177e2a2e"
         }
       ],
       "licenses": [
@@ -2108,18 +2066,18 @@
       ]
     },
     {
-      "bom-ref": "pg-protocol@1.15.0",
+      "bom-ref": "pg-protocol@1.16.0",
       "type": "library",
       "name": "pg-protocol",
-      "version": "1.15.0",
+      "version": "1.16.0",
       "scope": "required",
       "description": "The postgres client/server binary protocol, implemented in TypeScript",
-      "purl": "pkg:npm/pg-protocol@1.15.0",
+      "purl": "pkg:npm/pg-protocol@1.16.0",
       "properties": [],
       "externalReferences": [
         {
           "type": "distribution",
-          "url": "https://registry.npmjs.org/pg-protocol/-/pg-protocol-1.15.0.tgz"
+          "url": "https://registry.npmjs.org/pg-protocol/-/pg-protocol-1.16.0.tgz"
         },
         {
           "type": "vcs",
@@ -2129,7 +2087,7 @@
       "hashes": [
         {
           "alg": "SHA-512",
-          "content": "72af6c102239b34fae3d45e36f3f22a323c99e2e91cec4626f4512ebb8b92284d92b0f1f35e625544eeef05e1d1bbbc4249b5ce70743d4ad7cf65082530a964d"
+          "content": "b082d7bad2d58c22e3703b8e9af857e5ed99e1c4b9a86ffa06edd592917075fffadf712518ba4487d6e09ae239238b2a2aa9227d0886ca209cc751ddb6b2bbb6"
         }
       ],
       "licenses": [
@@ -2576,19 +2534,19 @@
       ]
     },
     {
-      "bom-ref": "sharp@0.35.3",
+      "bom-ref": "sharp@0.35.4",
       "type": "library",
       "name": "sharp",
-      "version": "0.35.3",
+      "version": "0.35.4",
       "scope": "required",
       "author": "Lovell Fuller <npm@lovell.info>",
       "description": "High performance Node.js image processing, the fastest module to resize JPEG, PNG, WebP, GIF, AVIF and TIFF images",
-      "purl": "pkg:npm/sharp@0.35.3",
+      "purl": "pkg:npm/sharp@0.35.4",
       "properties": [],
       "externalReferences": [
         {
           "type": "distribution",
-          "url": "https://registry.npmjs.org/sharp/-/sharp-0.35.3.tgz"
+          "url": "https://registry.npmjs.org/sharp/-/sharp-0.35.4.tgz"
         },
         {
           "type": "vcs",
@@ -2602,7 +2560,7 @@
       "hashes": [
         {
           "alg": "SHA-512",
-          "content": "7a3d33547b991870a20015dc3717988694673cd3c072f6c6f1131d0408430312ca9024554a92b7232bbba9bab0dc9333a23d1111e33a7f7b492ed570974d36dd"
+          "content": "9fefbc5d6723fa308eaf620e97b87c2db2a71810d8e1a3db9a9acc38d04d15d9f42265eaa4656fe739620ecd15f476e66c240ba5bba8d9e8fdac0a0e413bcc0c"
         }
       ],
       "licenses": [
@@ -2712,19 +2670,19 @@
       ]
     },
     {
-      "bom-ref": "stripe@22.3.2",
+      "bom-ref": "stripe@22.6.0",
       "type": "library",
       "name": "stripe",
-      "version": "22.3.2",
+      "version": "22.6.0",
       "scope": "required",
       "author": "Stripe <support@stripe.com> (https://stripe.com/)",
       "description": "Stripe API wrapper",
-      "purl": "pkg:npm/stripe@22.3.2",
+      "purl": "pkg:npm/stripe@22.6.0",
       "properties": [],
       "externalReferences": [
         {
           "type": "distribution",
-          "url": "https://registry.npmjs.org/stripe/-/stripe-22.3.2.tgz"
+          "url": "https://registry.npmjs.org/stripe/-/stripe-22.6.0.tgz"
         },
         {
           "type": "vcs",
@@ -2738,7 +2696,7 @@
       "hashes": [
         {
           "alg": "SHA-512",
-          "content": "3b5dd03af804210bc3953cba51b6f9901f7cd30a5b866a1936c8025ca20b8c23194baedff9b5beeb0f7d9378274a2fcdd6592bca88f5598769193e5673979d8e"
+          "content": "13393e598104c17d832f116b29f6fa728ce7942319bc268260c34f5cd1c5499901204cc5e47826ed12dbdfcabfd21f4e9798ec509189468aef87302f72481f87"
         }
       ],
       "licenses": [
@@ -3087,222 +3045,221 @@
     {
       "ref": "signify-creator@1.1.0",
       "dependsOn": [
-        "@aws-sdk/client-s3@3.1091.0",
-        "@aws-sdk/s3-request-presigner@3.1091.0",
-        "gifenc@1.0.3",
+        "@aws-sdk/client-s3@3.1124.0",
+        "@aws-sdk/s3-request-presigner@3.1124.0",
         "otpauth@9.5.1",
-        "pg@8.22.0",
+        "pg@8.23.0",
         "qrcode@1.5.4",
-        "sharp@0.35.3",
-        "stripe@22.3.2",
+        "sharp@0.35.4",
+        "stripe@22.6.0",
         "tar@7.5.22"
       ]
     },
     {
-      "ref": "@aws-sdk/checksums@3.1000.18",
+      "ref": "@aws-sdk/checksums@3.1000.29",
       "dependsOn": [
-        "@aws-sdk/core@3.975.3",
-        "@aws-sdk/types@3.974.2",
-        "@smithy/core@3.29.5",
-        "@smithy/types@4.16.1",
+        "@aws-sdk/core@3.977.9",
+        "@aws-sdk/types@3.974.5",
+        "@smithy/core@3.33.3",
+        "@smithy/types@4.17.2",
         "tslib@2.8.1"
       ]
     },
     {
-      "ref": "@aws-sdk/client-s3@3.1091.0",
+      "ref": "@aws-sdk/client-s3@3.1124.0",
       "dependsOn": [
-        "@aws-sdk/checksums@3.1000.18",
-        "@aws-sdk/core@3.975.3",
-        "@aws-sdk/credential-provider-node@3.972.70",
-        "@aws-sdk/middleware-sdk-s3@3.972.64",
-        "@aws-sdk/signature-v4-multi-region@3.996.41",
-        "@aws-sdk/types@3.974.2",
-        "@smithy/core@3.29.5",
-        "@smithy/fetch-http-handler@5.6.7",
-        "@smithy/node-http-handler@4.9.7",
-        "@smithy/types@4.16.1",
+        "@aws-sdk/checksums@3.1000.29",
+        "@aws-sdk/core@3.977.9",
+        "@aws-sdk/credential-provider-node@3.972.82",
+        "@aws-sdk/middleware-sdk-s3@3.972.75",
+        "@aws-sdk/signature-v4-multi-region@3.996.46",
+        "@aws-sdk/types@3.974.5",
+        "@smithy/core@3.33.3",
+        "@smithy/fetch-http-handler@5.7.2",
+        "@smithy/node-http-handler@4.12.0",
+        "@smithy/types@4.17.2",
         "tslib@2.8.1"
       ]
     },
     {
-      "ref": "@aws-sdk/core@3.975.3",
+      "ref": "@aws-sdk/core@3.977.9",
       "dependsOn": [
-        "@aws-sdk/types@3.974.2",
-        "@aws-sdk/xml-builder@3.972.36",
+        "@aws-sdk/types@3.974.5",
+        "@aws-sdk/xml-builder@3.972.40",
         "@aws/lambda-invoke-store@0.3.0",
-        "@smithy/core@3.29.5",
-        "@smithy/signature-v4@5.6.6",
-        "@smithy/types@4.16.1",
+        "@smithy/core@3.33.3",
+        "@smithy/signature-v4@5.7.3",
+        "@smithy/types@4.17.2",
         "bowser@2.14.1",
         "tslib@2.8.1"
       ]
     },
     {
-      "ref": "@aws-sdk/credential-provider-env@3.972.59",
+      "ref": "@aws-sdk/credential-provider-env@3.972.70",
       "dependsOn": [
-        "@aws-sdk/core@3.975.3",
-        "@aws-sdk/types@3.974.2",
-        "@smithy/core@3.29.5",
-        "@smithy/types@4.16.1",
+        "@aws-sdk/core@3.977.9",
+        "@aws-sdk/types@3.974.5",
+        "@smithy/core@3.33.3",
+        "@smithy/types@4.17.2",
         "tslib@2.8.1"
       ]
     },
     {
-      "ref": "@aws-sdk/credential-provider-http@3.972.61",
+      "ref": "@aws-sdk/credential-provider-http@3.972.72",
       "dependsOn": [
-        "@aws-sdk/core@3.975.3",
-        "@aws-sdk/types@3.974.2",
-        "@smithy/core@3.29.5",
-        "@smithy/fetch-http-handler@5.6.7",
-        "@smithy/node-http-handler@4.9.7",
-        "@smithy/types@4.16.1",
+        "@aws-sdk/core@3.977.9",
+        "@aws-sdk/types@3.974.5",
+        "@smithy/core@3.33.3",
+        "@smithy/fetch-http-handler@5.7.2",
+        "@smithy/node-http-handler@4.12.0",
+        "@smithy/types@4.17.2",
         "tslib@2.8.1"
       ]
     },
     {
-      "ref": "@aws-sdk/credential-provider-ini@3.973.4",
+      "ref": "@aws-sdk/credential-provider-ini@3.973.15",
       "dependsOn": [
-        "@aws-sdk/core@3.975.3",
-        "@aws-sdk/credential-provider-env@3.972.59",
-        "@aws-sdk/credential-provider-http@3.972.61",
-        "@aws-sdk/credential-provider-login@3.972.66",
-        "@aws-sdk/credential-provider-process@3.972.59",
-        "@aws-sdk/credential-provider-sso@3.973.3",
-        "@aws-sdk/credential-provider-web-identity@3.972.65",
-        "@aws-sdk/nested-clients@3.997.33",
-        "@aws-sdk/types@3.974.2",
-        "@smithy/core@3.29.5",
-        "@smithy/credential-provider-imds@4.4.10",
-        "@smithy/types@4.16.1",
+        "@aws-sdk/core@3.977.9",
+        "@aws-sdk/credential-provider-env@3.972.70",
+        "@aws-sdk/credential-provider-http@3.972.72",
+        "@aws-sdk/credential-provider-login@3.972.77",
+        "@aws-sdk/credential-provider-process@3.972.70",
+        "@aws-sdk/credential-provider-sso@3.973.14",
+        "@aws-sdk/credential-provider-web-identity@3.972.76",
+        "@aws-sdk/nested-clients@3.997.44",
+        "@aws-sdk/types@3.974.5",
+        "@smithy/core@3.33.3",
+        "@smithy/credential-provider-imds@4.5.2",
+        "@smithy/types@4.17.2",
         "tslib@2.8.1"
       ]
     },
     {
-      "ref": "@aws-sdk/credential-provider-login@3.972.66",
+      "ref": "@aws-sdk/credential-provider-login@3.972.77",
       "dependsOn": [
-        "@aws-sdk/core@3.975.3",
-        "@aws-sdk/nested-clients@3.997.33",
-        "@aws-sdk/types@3.974.2",
-        "@smithy/core@3.29.5",
-        "@smithy/types@4.16.1",
+        "@aws-sdk/core@3.977.9",
+        "@aws-sdk/nested-clients@3.997.44",
+        "@aws-sdk/types@3.974.5",
+        "@smithy/core@3.33.3",
+        "@smithy/types@4.17.2",
         "tslib@2.8.1"
       ]
     },
     {
-      "ref": "@aws-sdk/credential-provider-node@3.972.70",
+      "ref": "@aws-sdk/credential-provider-node@3.972.82",
       "dependsOn": [
-        "@aws-sdk/credential-provider-env@3.972.59",
-        "@aws-sdk/credential-provider-http@3.972.61",
-        "@aws-sdk/credential-provider-ini@3.973.4",
-        "@aws-sdk/credential-provider-process@3.972.59",
-        "@aws-sdk/credential-provider-sso@3.973.3",
-        "@aws-sdk/credential-provider-web-identity@3.972.65",
-        "@aws-sdk/types@3.974.2",
-        "@smithy/core@3.29.5",
-        "@smithy/credential-provider-imds@4.4.10",
-        "@smithy/types@4.16.1",
+        "@aws-sdk/credential-provider-env@3.972.70",
+        "@aws-sdk/credential-provider-http@3.972.72",
+        "@aws-sdk/credential-provider-ini@3.973.15",
+        "@aws-sdk/credential-provider-process@3.972.70",
+        "@aws-sdk/credential-provider-sso@3.973.14",
+        "@aws-sdk/credential-provider-web-identity@3.972.76",
+        "@aws-sdk/types@3.974.5",
+        "@smithy/core@3.33.3",
+        "@smithy/credential-provider-imds@4.5.2",
+        "@smithy/types@4.17.2",
         "tslib@2.8.1"
       ]
     },
     {
-      "ref": "@aws-sdk/credential-provider-process@3.972.59",
+      "ref": "@aws-sdk/credential-provider-process@3.972.70",
       "dependsOn": [
-        "@aws-sdk/core@3.975.3",
-        "@aws-sdk/types@3.974.2",
-        "@smithy/core@3.29.5",
-        "@smithy/types@4.16.1",
+        "@aws-sdk/core@3.977.9",
+        "@aws-sdk/types@3.974.5",
+        "@smithy/core@3.33.3",
+        "@smithy/types@4.17.2",
         "tslib@2.8.1"
       ]
     },
     {
-      "ref": "@aws-sdk/credential-provider-sso@3.973.3",
+      "ref": "@aws-sdk/credential-provider-sso@3.973.14",
       "dependsOn": [
-        "@aws-sdk/core@3.975.3",
-        "@aws-sdk/nested-clients@3.997.33",
-        "@aws-sdk/token-providers@3.1088.0",
-        "@aws-sdk/types@3.974.2",
-        "@smithy/core@3.29.5",
-        "@smithy/types@4.16.1",
+        "@aws-sdk/core@3.977.9",
+        "@aws-sdk/nested-clients@3.997.44",
+        "@aws-sdk/token-providers@3.1116.0",
+        "@aws-sdk/types@3.974.5",
+        "@smithy/core@3.33.3",
+        "@smithy/types@4.17.2",
         "tslib@2.8.1"
       ]
     },
     {
-      "ref": "@aws-sdk/credential-provider-web-identity@3.972.65",
+      "ref": "@aws-sdk/credential-provider-web-identity@3.972.76",
       "dependsOn": [
-        "@aws-sdk/core@3.975.3",
-        "@aws-sdk/nested-clients@3.997.33",
-        "@aws-sdk/types@3.974.2",
-        "@smithy/core@3.29.5",
-        "@smithy/types@4.16.1",
+        "@aws-sdk/core@3.977.9",
+        "@aws-sdk/nested-clients@3.997.44",
+        "@aws-sdk/types@3.974.5",
+        "@smithy/core@3.33.3",
+        "@smithy/types@4.17.2",
         "tslib@2.8.1"
       ]
     },
     {
-      "ref": "@aws-sdk/middleware-sdk-s3@3.972.64",
+      "ref": "@aws-sdk/middleware-sdk-s3@3.972.75",
       "dependsOn": [
-        "@aws-sdk/core@3.975.3",
-        "@aws-sdk/signature-v4-multi-region@3.996.41",
-        "@aws-sdk/types@3.974.2",
-        "@smithy/core@3.29.5",
-        "@smithy/types@4.16.1",
+        "@aws-sdk/core@3.977.9",
+        "@aws-sdk/signature-v4-multi-region@3.996.46",
+        "@aws-sdk/types@3.974.5",
+        "@smithy/core@3.33.3",
+        "@smithy/types@4.17.2",
         "tslib@2.8.1"
       ]
     },
     {
-      "ref": "@aws-sdk/nested-clients@3.997.33",
+      "ref": "@aws-sdk/nested-clients@3.997.44",
       "dependsOn": [
-        "@aws-sdk/core@3.975.3",
-        "@aws-sdk/signature-v4-multi-region@3.996.41",
-        "@aws-sdk/types@3.974.2",
-        "@smithy/core@3.29.5",
-        "@smithy/fetch-http-handler@5.6.7",
-        "@smithy/node-http-handler@4.9.7",
-        "@smithy/types@4.16.1",
+        "@aws-sdk/core@3.977.9",
+        "@aws-sdk/signature-v4-multi-region@3.996.46",
+        "@aws-sdk/types@3.974.5",
+        "@smithy/core@3.33.3",
+        "@smithy/fetch-http-handler@5.7.2",
+        "@smithy/node-http-handler@4.12.0",
+        "@smithy/types@4.17.2",
         "tslib@2.8.1"
       ]
     },
     {
-      "ref": "@aws-sdk/s3-request-presigner@3.1091.0",
+      "ref": "@aws-sdk/s3-request-presigner@3.1124.0",
       "dependsOn": [
-        "@aws-sdk/core@3.975.3",
-        "@aws-sdk/signature-v4-multi-region@3.996.41",
-        "@aws-sdk/types@3.974.2",
-        "@smithy/core@3.29.5",
-        "@smithy/types@4.16.1",
+        "@aws-sdk/core@3.977.9",
+        "@aws-sdk/signature-v4-multi-region@3.996.46",
+        "@aws-sdk/types@3.974.5",
+        "@smithy/core@3.33.3",
+        "@smithy/types@4.17.2",
         "tslib@2.8.1"
       ]
     },
     {
-      "ref": "@aws-sdk/signature-v4-multi-region@3.996.41",
+      "ref": "@aws-sdk/signature-v4-multi-region@3.996.46",
       "dependsOn": [
-        "@aws-sdk/types@3.974.2",
-        "@smithy/signature-v4@5.6.6",
-        "@smithy/types@4.16.1",
+        "@aws-sdk/types@3.974.5",
+        "@smithy/signature-v4@5.7.3",
+        "@smithy/types@4.17.2",
         "tslib@2.8.1"
       ]
     },
     {
-      "ref": "@aws-sdk/token-providers@3.1088.0",
+      "ref": "@aws-sdk/token-providers@3.1116.0",
       "dependsOn": [
-        "@aws-sdk/core@3.975.3",
-        "@aws-sdk/nested-clients@3.997.33",
-        "@aws-sdk/types@3.974.2",
-        "@smithy/core@3.29.5",
-        "@smithy/types@4.16.1",
+        "@aws-sdk/core@3.977.9",
+        "@aws-sdk/nested-clients@3.997.44",
+        "@aws-sdk/types@3.974.5",
+        "@smithy/core@3.33.3",
+        "@smithy/types@4.17.2",
         "tslib@2.8.1"
       ]
     },
     {
-      "ref": "@aws-sdk/types@3.974.2",
+      "ref": "@aws-sdk/types@3.974.5",
       "dependsOn": [
-        "@smithy/types@4.16.1",
+        "@smithy/types@4.17.2",
         "tslib@2.8.1"
       ]
     },
     {
-      "ref": "@aws-sdk/xml-builder@3.972.36",
+      "ref": "@aws-sdk/xml-builder@3.972.40",
       "dependsOn": [
-        "@smithy/types@4.16.1",
+        "@smithy/types@4.17.2",
         "tslib@2.8.1"
       ]
     },
@@ -3315,7 +3272,7 @@
       "dependsOn": []
     },
     {
-      "ref": "@img/sharp-win32-x64@0.35.3",
+      "ref": "@img/sharp-win32-x64@0.35.4",
       "dependsOn": []
     },
     {
@@ -3329,46 +3286,46 @@
       "dependsOn": []
     },
     {
-      "ref": "@smithy/core@3.29.5",
+      "ref": "@smithy/core@3.33.3",
       "dependsOn": [
-        "@smithy/types@4.16.1",
+        "@smithy/types@4.17.2",
         "tslib@2.8.1"
       ]
     },
     {
-      "ref": "@smithy/credential-provider-imds@4.4.10",
+      "ref": "@smithy/credential-provider-imds@4.5.2",
       "dependsOn": [
-        "@smithy/core@3.29.5",
-        "@smithy/types@4.16.1",
+        "@smithy/core@3.33.3",
+        "@smithy/types@4.17.2",
         "tslib@2.8.1"
       ]
     },
     {
-      "ref": "@smithy/fetch-http-handler@5.6.7",
+      "ref": "@smithy/fetch-http-handler@5.7.2",
       "dependsOn": [
-        "@smithy/core@3.29.5",
-        "@smithy/types@4.16.1",
+        "@smithy/core@3.33.3",
+        "@smithy/types@4.17.2",
         "tslib@2.8.1"
       ]
     },
     {
-      "ref": "@smithy/node-http-handler@4.9.7",
+      "ref": "@smithy/node-http-handler@4.12.0",
       "dependsOn": [
-        "@smithy/core@3.29.5",
-        "@smithy/types@4.16.1",
+        "@smithy/core@3.33.3",
+        "@smithy/types@4.17.2",
         "tslib@2.8.1"
       ]
     },
     {
-      "ref": "@smithy/signature-v4@5.6.6",
+      "ref": "@smithy/signature-v4@5.7.3",
       "dependsOn": [
-        "@smithy/core@3.29.5",
-        "@smithy/types@4.16.1",
+        "@smithy/core@3.33.3",
+        "@smithy/types@4.17.2",
         "tslib@2.8.1"
       ]
     },
     {
-      "ref": "@smithy/types@4.16.1",
+      "ref": "@smithy/types@4.17.2",
       "dependsOn": [
         "tslib@2.8.1"
       ]
@@ -3440,10 +3397,6 @@
       "dependsOn": []
     },
     {
-      "ref": "gifenc@1.0.3",
-      "dependsOn": []
-    },
-    {
       "ref": "is-fullwidth-code-point@3.0.0",
       "dependsOn": []
     },
@@ -3486,11 +3439,11 @@
       "dependsOn": []
     },
     {
-      "ref": "pg@8.22.0",
+      "ref": "pg@8.23.0",
       "dependsOn": [
         "pg-connection-string@2.14.0",
         "pg-pool@3.14.0",
-        "pg-protocol@1.15.0",
+        "pg-protocol@1.16.0",
         "pg-types@2.2.0",
         "pgpass@1.0.5",
         "pg-cloudflare@1.4.0"
@@ -3511,11 +3464,11 @@
     {
       "ref": "pg-pool@3.14.0",
       "dependsOn": [
-        "pg@8.22.0"
+        "pg@8.23.0"
       ]
     },
     {
-      "ref": "pg-protocol@1.15.0",
+      "ref": "pg-protocol@1.16.0",
       "dependsOn": []
     },
     {
@@ -3581,12 +3534,12 @@
       "dependsOn": []
     },
     {
-      "ref": "sharp@0.35.3",
+      "ref": "sharp@0.35.4",
       "dependsOn": [
         "@img/colour@1.1.0",
         "detect-libc@2.1.2",
         "semver@7.8.5",
-        "@img/sharp-win32-x64@0.35.3"
+        "@img/sharp-win32-x64@0.35.4"
       ]
     },
     {
@@ -3608,7 +3561,7 @@
       ]
     },
     {
-      "ref": "stripe@22.3.2",
+      "ref": "stripe@22.6.0",
       "dependsOn": []
     },
     {

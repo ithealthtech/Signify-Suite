@@ -16,6 +16,7 @@ const {
   canonicalRole,
   canonicalStatus,
   normalizedBrand,
+  normalizedBannerAnimation,
   signatureInputError,
   validDate,
   validEmail,
@@ -84,6 +85,34 @@ assert.deepEqual(
     companyName: "",
     logoUrl: "",
   },
+);
+assert.deepEqual(normalizedBannerAnimation(), {
+  effect: "tech-pulse",
+  speed: "normal",
+  quality: "ultra",
+  intensity: 70,
+});
+assert.deepEqual(
+  normalizedBannerAnimation({
+    effect: "aurora-flow",
+    speed: "fast",
+    quality: "ultra",
+    intensity: 140,
+  }),
+  {
+    effect: "aurora-flow",
+    speed: "fast",
+    quality: "ultra",
+    intensity: 100,
+  },
+);
+assert.equal(
+  signatureInputError({ bannerAnimation: { effect: "unknown" } }),
+  "Choose an available banner animation effect.",
+);
+assert.equal(
+  signatureInputError({ bannerAnimation: { intensity: 19 } }),
+  "Banner animation intensity must be between 20 and 100.",
 );
 
 const ownerDb = {
