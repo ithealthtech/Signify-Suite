@@ -101,6 +101,22 @@ Use clear PNG, JPEG, WebP, or GIF assets that are appropriate for email. Avoid
 very large source files. Tenant media limits are controlled by the Application
 Owner.
 
+### Animate a Banner
+
+1. Open **Studio > Assets**.
+2. Upload a banner or choose one from the banner library.
+3. Choose a motion style and review it in the live animation preview.
+4. Choose Standard, High, or Ultra quality and adjust the speed and intensity.
+5. Select **Create animation**, wait for the completed file size to appear, and
+   then save the signature.
+
+Ultra is the default professional profile. It renders at twice the delivery
+resolution before downsampling and exports at up to 25 FPS. Slower motion uses
+additional frames to preserve that frame rate. Signify keeps the source banner's
+original proportions, scales it down only when it exceeds the email-safe limits,
+and preserves the original when generating another version. Changing an effect
+therefore does not crop the artwork or recompress the previous GIF.
+
 ### Contact Card and QR Code
 
 Enable **Add contact card** to include a QR code and downloadable vCard when the
@@ -232,11 +248,11 @@ signatures or campaigns.
 3. Choose the banner dimensions.
 4. Add overlay text when needed.
 5. Set font, size, weight, alignment, and color.
-6. Choose an animation effect for supported output.
+6. Choose an animation effect, speed, intensity, and quality.
 7. Save the banner to the repository.
 
-Keep text away from the image edges. Verify that animation does not change the
-banner's final displayed dimensions.
+Keep text away from the image edges. Generated email banners keep their source
+proportions and are reduced only when needed to fit within 440 by 220 pixels.
 
 ### Banner Example
 

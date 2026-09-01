@@ -695,15 +695,72 @@ button {
 .asset-preview img {
   width: 100%;
   height: 100%;
-  object-fit: cover;
+  object-fit: contain;
 }
 .animation-tools {
   display: grid;
-  gap: 10px;
-  margin-top: 18px;
+  gap: 14px;
+  margin-top: 20px;
+  border-top: 1px solid var(--line);
+  padding-top: 18px;
 }
-.animation-tools select {
-  margin-top: 6px;
+.animation-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+.animation-heading > div {
+  display: grid;
+  gap: 3px;
+}
+.animation-heading strong {
+  color: var(--ink);
+  font-size: 13px;
+}
+.animation-heading small {
+  color: var(--muted);
+  font-size: 10px;
+}
+.animation-live-badge {
+  border: 1px solid #bfd8cb;
+  border-radius: 999px;
+  background: #edf8f1;
+  padding: 4px 8px;
+  color: #167247;
+  font-size: 9px;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+.animation-preview {
+  position: relative;
+  display: grid;
+  place-items: center;
+  overflow: hidden;
+  width: 100%;
+  aspect-ratio: 440 / 188;
+  border: 1px solid #303642;
+  border-radius: 7px;
+  background:
+    linear-gradient(45deg, #1d2129 25%, transparent 25%) 0 0 / 12px 12px,
+    linear-gradient(45deg, transparent 75%, #1d2129 75%) 0 0 / 12px 12px,
+    linear-gradient(45deg, transparent 75%, #1d2129 75%) 6px -6px / 12px 12px,
+    linear-gradient(45deg, #1d2129 25%, #242a34 25%) 6px 6px / 12px 12px;
+  box-shadow: 0 8px 20px rgba(22, 27, 36, 0.14);
+}
+.animation-preview canvas {
+  display: block;
+  width: 100%;
+  height: auto;
+}
+.animation-preview > span {
+  position: absolute;
+  color: #c7ccd6;
+  font-size: 10px;
+  font-weight: 700;
+}
+.animation-preview.has-banner > span {
+  display: none;
 }
 .banner-library-heading {
   display: flex;
@@ -757,8 +814,8 @@ button {
 .banner-preset img {
   display: block;
   width: 100%;
-  aspect-ratio: 4.4 / 1;
-  object-fit: cover;
+  height: auto;
+  background: #121722;
 }
 .banner-preset span {
   display: block;
@@ -789,7 +846,7 @@ button {
   grid-template-columns: 34px minmax(0, 1fr);
   align-items: center;
   gap: 8px;
-  min-height: 46px;
+  min-height: 54px;
   overflow: hidden;
   border: 1.5px solid var(--line);
   border-radius: 7px;
@@ -806,21 +863,34 @@ button {
   opacity: 0;
   pointer-events: none;
 }
-.effect-option > span {
+.effect-option > span:first-of-type {
   width: 34px;
-  height: 30px;
+  height: 36px;
   border-radius: 4px;
   background-color: #17191f;
 }
-.effect-option strong {
+.effect-option > span:last-child {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+.effect-option strong,
+.effect-option small {
   min-width: 0;
   font-size: 10px;
   line-height: 1.2;
 }
-.effect-option.tech-pulse > span {
+.effect-option small {
+  overflow: hidden;
+  color: var(--muted);
+  font-size: 8px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.effect-option.tech-pulse > span:first-of-type {
   background: linear-gradient(90deg, #17191f 20%, #5fe5ff 50%, #17191f 80%);
 }
-.effect-option.signal-rings > span {
+.effect-option.signal-rings > span:first-of-type {
   background:
     radial-gradient(
       circle at 70% 50%,
@@ -836,16 +906,16 @@ button {
     ),
     #17191f;
 }
-.effect-option.starfield > span {
+.effect-option.starfield > span:first-of-type {
   background:
     radial-gradient(circle at 20% 25%, #fff 0 1px, transparent 2px),
     radial-gradient(circle at 68% 60%, #fff 0 1px, transparent 2px),
     radial-gradient(circle at 42% 78%, #8da5ff 0 1px, transparent 2px), #17191f;
 }
-.effect-option.clean > span {
+.effect-option.clean > span:first-of-type {
   background: linear-gradient(110deg, #17191f 28%, #e3e6ef 48%, #17191f 68%);
 }
-.effect-option.scan-line > span {
+.effect-option.scan-line > span:first-of-type {
   background: linear-gradient(
     90deg,
     #17191f 0 38%,
@@ -853,14 +923,14 @@ button {
     #17191f 62% 100%
   );
 }
-.effect-option.digital-grid > span {
+.effect-option.digital-grid > span:first-of-type {
   background-color: #17191f;
   background-image:
     linear-gradient(rgba(126, 145, 225, 0.5) 1px, transparent 1px),
     linear-gradient(90deg, rgba(126, 145, 225, 0.5) 1px, transparent 1px);
   background-size: 8px 8px;
 }
-.effect-option.spotlight > span {
+.effect-option.spotlight > span:first-of-type {
   background: radial-gradient(
     circle at 65% 50%,
     #f2f4ff 0,
@@ -868,8 +938,130 @@ button {
     #17191f 58%
   );
 }
-.effect-option.soft-pulse > span {
+.effect-option.soft-pulse > span:first-of-type {
   background: radial-gradient(circle, #596392 0, #2c3045 42%, #17191f 75%);
+}
+.effect-option.aurora-flow > span:first-of-type {
+  background:
+    radial-gradient(circle at 20% 70%, #66f5d2 0, transparent 48%),
+    radial-gradient(circle at 78% 30%, #786cff 0, transparent 50%), #111826;
+}
+.effect-option.prism-sweep > span:first-of-type {
+  background: linear-gradient(
+    115deg,
+    #11151d 10%,
+    #ff5c8a 35%,
+    #ffd36a 48%,
+    #5fe5ff 62%,
+    #11151d 88%
+  );
+}
+.effect-option.particle-trail > span:first-of-type {
+  background:
+    radial-gradient(circle at 18% 72%, #fff 0 1px, transparent 2px),
+    radial-gradient(circle at 48% 45%, #5fe5ff 0 2px, transparent 3px),
+    radial-gradient(circle at 78% 24%, #b9c4ff 0 1px, transparent 2px), #121923;
+}
+.effect-option.cinematic-glow > span:first-of-type {
+  background:
+    radial-gradient(circle at 28% 55%, #ffbd79 0, transparent 40%),
+    radial-gradient(circle at 78% 45%, #5678ff 0, transparent 48%), #151821;
+}
+.animation-control-grid {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 10px;
+}
+.animation-control-grid label,
+.animation-intensity,
+.animation-speed legend {
+  color: #555b65;
+  font-size: 10px;
+  font-weight: 700;
+}
+.animation-control-grid label {
+  display: grid;
+  gap: 6px;
+}
+.animation-control-grid select {
+  width: 100%;
+  height: 38px;
+  border: 1px solid #d4d8de;
+  border-radius: 5px;
+  background: #fff;
+  padding: 0 10px;
+  color: var(--ink);
+}
+.animation-speed {
+  margin: 0;
+  border: 0;
+  padding: 0;
+}
+.animation-speed legend {
+  margin-bottom: 7px;
+  padding: 0;
+}
+.animation-speed > div {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  overflow: hidden;
+  border: 1px solid #d4d8de;
+  border-radius: 6px;
+  background: #f5f6f8;
+  padding: 3px;
+}
+.animation-speed label {
+  position: relative;
+}
+.animation-speed input {
+  position: absolute;
+  opacity: 0;
+  pointer-events: none;
+}
+.animation-speed span {
+  display: grid;
+  place-items: center;
+  min-height: 32px;
+  border-radius: 4px;
+  color: #656b75;
+  font-size: 10px;
+  font-weight: 700;
+  cursor: pointer;
+}
+.animation-speed input:checked + span {
+  background: #fff;
+  color: var(--accent);
+  box-shadow: 0 1px 5px rgba(28, 34, 45, 0.13);
+}
+.animation-intensity {
+  display: grid;
+  gap: 7px;
+}
+.animation-intensity > span {
+  display: flex;
+  justify-content: space-between;
+}
+.animation-intensity output {
+  color: var(--accent);
+}
+.animation-intensity input {
+  width: 100%;
+  accent-color: var(--accent);
+}
+.animation-tools progress {
+  width: 100%;
+  height: 5px;
+  border: 0;
+  border-radius: 999px;
+  accent-color: var(--accent);
+}
+.animation-status {
+  min-height: 14px;
+  margin: -5px 0 0;
+  color: var(--muted);
+  font-size: 9px;
+  line-height: 1.45;
+  text-align: center;
 }
 .preview-workspace {
   display: flex;
@@ -1312,6 +1504,9 @@ button {
   .control-tabs {
     margin-inline: -22px;
     padding-inline: 22px;
+  }
+  .animation-control-grid {
+    grid-template-columns: 1fr;
   }
 }
 .subscription-locked {

@@ -1,5 +1,25 @@
 # Changelog
 
+## Unreleased
+
+### Added
+
+- Rebuilt the Studio animation generator with a live preview, 12 motion styles,
+  Standard, High, and Ultra quality profiles plus adjustable speed and intensity.
+- Added a Sharp-based animated GIF pipeline with per-frame validation, optimized
+  256-color output, exact animation timing, and automated frame integrity tests.
+- Added professional Ultra rendering with 2x supersampling, 25 FPS playback, and
+  speed-aware frame budgets of up to 60 frames.
+
+### Fixed
+
+- Preserved the original source banner when regenerating an animation so repeated
+  edits no longer compound GIF compression artifacts.
+- Prevented automatic banner enlargement, cropping, and stretching by preserving
+  each source image's proportions throughout preview, generation, and email HTML.
+- Persisted animation style, speed, quality, and intensity across saves
+  and reloads.
+
 ## 1.1.0 - 2026-08-27
 
 - Aligned the runtime, container, release workflow, documentation, and signed

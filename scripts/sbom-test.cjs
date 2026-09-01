@@ -18,7 +18,7 @@ assert.equal(
   sbom.metadata.component.version,
   require("../package.json").version,
 );
-for (const dependency of ["gifenc", "qrcode", "sharp", "stripe"])
+for (const dependency of ["qrcode", "sharp", "stripe"])
   assert.ok(components.has(dependency), `SBOM is missing ${dependency}.`);
 for (const component of components.values()) {
   assert.ok(

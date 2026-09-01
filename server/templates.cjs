@@ -128,9 +128,9 @@ function vcardBlock(qrDataUri, vcardTrackedUrl) {
 
 // ---------- Universal header banner (the image a user uploads themselves —
 // works with every template, not just one) ----------
-function headerBannerRow(bannerUrl, width = 440, height = 100) {
+function headerBannerRow(bannerUrl, width = 440) {
   if (!bannerUrl) return "";
-  return `<tr><td style="padding-bottom:14px;"><img src="${esc(bannerUrl)}" width="${width}" height="${height}" alt="" style="display:block;border:0;width:${width}px;height:${height}px;object-fit:cover;border-radius:8px;"></td></tr>`;
+  return `<tr><td style="padding-bottom:14px;"><img src="${esc(bannerUrl)}" width="${width}" alt="" style="display:block;border:0;width:${width}px;max-width:100%;height:auto;border-radius:8px;"></td></tr>`;
 }
 
 function personInitials(name = "") {
@@ -293,7 +293,7 @@ function bannerCard({ f, colors, photoUrl, bannerUrl }) {
   <tr>
     <td width="440" bgcolor="#ffffff" style="width:440px;background:#ffffff;border:1px solid #d9dde7;border-radius:8px;box-shadow:0 5px 12px rgba(17,24,39,.22);overflow:hidden;">
       <table role="presentation" cellpadding="0" cellspacing="0" border="0" width="440" style="width:440px;">
-        ${bannerUrl ? `<tr><td><img src="${esc(bannerUrl)}" width="440" height="100" alt="" style="display:block;border:0;width:440px;height:100px;object-fit:cover;"></td></tr>` : ""}
+        ${bannerUrl ? `<tr><td><img src="${esc(bannerUrl)}" width="440" alt="" style="display:block;border:0;width:440px;max-width:100%;height:auto;"></td></tr>` : ""}
         <tr>
           <td bgcolor="#ffffff" style="background:#ffffff;padding:16px 18px 17px;">
             <table role="presentation" cellpadding="0" cellspacing="0" border="0">

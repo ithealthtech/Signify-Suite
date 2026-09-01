@@ -484,8 +484,10 @@ async function main() {
         bannerCard.includes('bgcolor="#c8cdd8"') &&
         bannerCard.includes("box-shadow:") &&
         bannerCard.match(/banner\.png/g)?.length === 1 &&
+        !bannerCard.includes('height="100"') &&
+        !bannerCard.includes("object-fit:cover") &&
         bannerCard.includes(">TG<"),
-      "Banner Card did not preserve its Outlook-safe shadow and identity layout",
+      "Banner Card did not preserve its image proportions and Outlook-safe layout",
     );
     result = await request(baseUrl, "/signature.html");
     assert(
@@ -1393,7 +1395,7 @@ async function main() {
     );
     fs.unlinkSync(normalizedLogoPath);
     const animatedBannerWidth = 440,
-      animatedBannerHeight = 100,
+      animatedBannerHeight = 190,
       animationFrame = (red, green, blue) => {
         const frame = Buffer.alloc(
           animatedBannerWidth * animatedBannerHeight * 4,
@@ -1416,12 +1418,15 @@ async function main() {
         width: animatedBannerWidth,
         height: animatedBannerHeight,
         delay: 80,
+        quality: "ultra",
         frames: animationFrames,
       },
       jar: editorJar,
     });
     assert(
       result.response.status === 201 &&
+        result.body.animation?.frames === animationFrames.length &&
+        result.body.animation?.quality === "ultra" &&
         /^\/generated-banners\/[^/]+\/banner-[\w-]+\.gif$/.test(
           result.body.url,
         ),
@@ -1437,13 +1442,36 @@ async function main() {
       fs.statSync(generatedBannerPath).size > 0,
       "generated GIF was empty",
     );
-    const generatedBannerMetadata = await sharp(generatedBannerPath).metadata();
+    const generatedBannerMetadata = await sharp(generatedBannerPath, {
+      animated: true,
+    }).metadata();
     assert(
       generatedBannerMetadata.width === animatedBannerWidth &&
-        generatedBannerMetadata.height === animatedBannerHeight,
-      "generated GIF dimensions did not match the email banner contract",
+        generatedBannerMetadata.pageHeight === animatedBannerHeight &&
+        generatedBannerMetadata.pages === animationFrames.length &&
+        generatedBannerMetadata.height ===
+          animatedBannerHeight * animationFrames.length &&
+        generatedBannerMetadata.delay?.every((delay) => delay === 80) &&
+        generatedBannerMetadata.loop === 0,
+      "generated GIF pages, dimensions, or timing did not match the animation contract",
     );
     fs.unlinkSync(generatedBannerPath);
+    result = await request(baseUrl, "/api/signature/generated-banners", {
+      method: "POST",
+      body: {
+        width: 441,
+        height: animatedBannerHeight,
+        delay: 80,
+        quality: "ultra",
+        frames: animationFrames,
+      },
+      jar: editorJar,
+    });
+    assert(
+      result.response.status === 400 &&
+        result.body.error?.code === "GIF_DIMENSIONS_INVALID",
+      "animated banner endpoint accepted invalid frame dimensions",
+    );
     result = await request(baseUrl, "/api/signature/register", {
       method: "POST",
       body: {

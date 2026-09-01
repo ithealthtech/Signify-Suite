@@ -48,6 +48,13 @@ let state = {
   previewController: null,
   entitlementTimer: null,
 };
+let animationPreview = {
+  image: null,
+  source: "",
+  frameRequest: null,
+  loadSequence: 0,
+  startedAt: 0,
+};
 
 const toast = createToast(els.toast, 2600);
 function activeUser() {
@@ -276,10 +283,17 @@ function fillForm() {
   form.vcardEnabled.checked = Boolean(sig.vcardEnabled);
   form.accent.value = sig.colors?.accent || "#2563eb";
   form.ribbonText.value = sig.ribbonText || "";
+  const animation = normalizeAnimationSettings(sig.bannerAnimation);
+  form.bannerEffect.value = animation.effect;
+  form.bannerSpeed.value = animation.speed;
+  form.bannerQuality.value = animation.quality;
+  form.bannerIntensity.value = String(animation.intensity);
   updateSelectedTemplate();
   renderAsset(els.photoPreview, sig.photoUrl, "Photo");
   renderAsset(els.bannerPreview, sig.bannerUrl, "Banner");
   updateSelectedBanner();
+  updateAnimationControls();
+  void refreshAnimationPreview();
   renderWorkflow();
 }
 function collectForm() {
@@ -307,6 +321,12 @@ function collectForm() {
     colors: { accent: form.accent.value },
     vcardEnabled: form.vcardEnabled.checked,
     ribbonText: form.ribbonText.value.trim(),
+    bannerSourceUrl:
+      existing.bannerSourceUrl ||
+      (/\/generated-banners\//i.test(existing.bannerUrl || "")
+        ? ""
+        : existing.bannerUrl || ""),
+    bannerAnimation: animationSettingsFromForm(),
   };
 }
 function updateSelectedTemplate() {
@@ -635,13 +655,17 @@ els.employeeSelect.addEventListener("change", () => {
 });
 els.signatureForm.addEventListener("input", markDirty);
 els.signatureForm.addEventListener("change", markDirty);
+$(".animation-tools").addEventListener("input", updateAnimationControls);
+$(".animation-tools").addEventListener("change", updateAnimationControls);
 els.templateGrid.addEventListener("click", (event) => {
   const card = event.target.closest("[data-template-id]");
   if (!card) return;
   state.signature.templateId = card.dataset.templateId;
-  if (card.dataset.templateId === "bannerCard" && !state.signature.bannerUrl)
+  if (card.dataset.templateId === "bannerCard" && !state.signature.bannerUrl) {
     state.signature.bannerUrl =
       "/event-banners/cloud-services-modernization.png";
+    state.signature.bannerSourceUrl = state.signature.bannerUrl;
+  }
   updateSelectedTemplate();
   updateSelectedBanner();
   renderAsset(els.bannerPreview, state.signature.bannerUrl, "Banner preview");
@@ -703,6 +727,7 @@ async function uploadImage(file, kind) {
       body: JSON.stringify({ kind, dataUrl }),
     });
     state.signature[kind === "photo" ? "photoUrl" : "bannerUrl"] = result.url;
+    if (kind === "banner") state.signature.bannerSourceUrl = result.url;
     fillForm();
     markDirty();
     toast(`${kind === "photo" ? "Photo" : "Banner"} uploaded`);
@@ -720,158 +745,471 @@ function fileToDataUrl(file) {
 }
 $("#removeBanner").addEventListener("click", () => {
   state.signature.bannerUrl = "";
+  state.signature.bannerSourceUrl = "";
   fillForm();
   markDirty();
 });
 $$("[data-banner-url]").forEach((button) =>
   button.addEventListener("click", () => {
     state.signature.bannerUrl = button.dataset.bannerUrl;
+    state.signature.bannerSourceUrl = button.dataset.bannerUrl;
     fillForm();
     markDirty();
     toast("Banner added to the signature");
   }),
 );
-$("#animateBanner").addEventListener("click", async (event) => {
-  if (!state.signature.bannerUrl) return toast("Upload a banner first");
-  const button = event.currentTarget;
-  setBusy(button, true, "Generating…");
-  try {
-    const frames = await buildAnimationFrames(
-      state.signature.bannerUrl,
-      $('[name="bannerEffect"]:checked').value,
+$("#animateBanner").addEventListener("click", generateAnimatedBanner);
+const ANIMATED_BANNER_MAX_WIDTH = 440,
+  ANIMATED_BANNER_MAX_HEIGHT = 220,
+  ANIMATION_QUALITY = Object.freeze({
+    standard: Object.freeze({
+      baseFrames: 20,
+      frameDelay: 80,
+      label: "Standard",
+      renderScale: 1,
+    }),
+    high: Object.freeze({
+      baseFrames: 36,
+      frameDelay: 50,
+      label: "High",
+      renderScale: 1.5,
+    }),
+    ultra: Object.freeze({
+      baseFrames: 48,
+      frameDelay: 40,
+      label: "Ultra",
+      renderScale: 2,
+    }),
+  }),
+  ANIMATION_SPEED_FACTORS = Object.freeze({
+    slow: 1.25,
+    normal: 1,
+    fast: 0.75,
+  });
+
+function normalizeAnimationSettings(input = {}) {
+  return {
+    effect: [
+      "tech-pulse",
+      "signal-rings",
+      "starfield",
+      "clean",
+      "scan-line",
+      "digital-grid",
+      "spotlight",
+      "soft-pulse",
+      "aurora-flow",
+      "prism-sweep",
+      "particle-trail",
+      "cinematic-glow",
+    ].includes(input.effect)
+      ? input.effect
+      : "tech-pulse",
+    speed: ["slow", "normal", "fast"].includes(input.speed)
+      ? input.speed
+      : "normal",
+    quality: Object.hasOwn(ANIMATION_QUALITY, input.quality)
+      ? input.quality
+      : "ultra",
+    intensity: Math.max(20, Math.min(100, Number(input.intensity) || 70)),
+  };
+}
+function animationSettingsFromForm() {
+  const form = els.signatureForm.elements;
+  return normalizeAnimationSettings({
+    effect: form.bannerEffect.value,
+    speed: form.bannerSpeed.value,
+    quality: form.bannerQuality.value,
+    intensity: form.bannerIntensity.value,
+  });
+}
+function animationProfile(settings) {
+  const quality = ANIMATION_QUALITY[settings.quality],
+    frames = Math.max(
+      2,
+      Math.min(
+        60,
+        Math.round(
+          quality.baseFrames * ANIMATION_SPEED_FACTORS[settings.speed],
+        ),
+      ),
     );
+  return {
+    ...quality,
+    frames,
+    fps: Number((1000 / quality.frameDelay).toFixed(1)),
+  };
+}
+function animationDimensions(image) {
+  const sourceWidth = Number(image.naturalWidth || image.width),
+    sourceHeight = Number(image.naturalHeight || image.height);
+  if (!(sourceWidth > 0 && sourceHeight > 0))
+    throw new Error("The selected banner has invalid dimensions.");
+  const scale = Math.min(
+    1,
+    ANIMATED_BANNER_MAX_WIDTH / sourceWidth,
+    ANIMATED_BANNER_MAX_HEIGHT / sourceHeight,
+  );
+  return {
+    width: Math.max(1, Math.round(sourceWidth * scale)),
+    height: Math.max(1, Math.round(sourceHeight * scale)),
+  };
+}
+function updateAnimationControls() {
+  const settings = animationSettingsFromForm(),
+    profile = animationProfile(settings);
+  $("#animationIntensityValue").value = `${settings.intensity}%`;
+  $("#animationSummary").textContent =
+    `${profile.label} quality · ${profile.frames} frames · ${profile.fps} FPS`;
+}
+async function refreshAnimationPreview() {
+  const source =
+      state.signature?.bannerSourceUrl || state.signature?.bannerUrl || "",
+    sequence = ++animationPreview.loadSequence,
+    shell = $("#animationPreviewShell"),
+    canvas = $("#animationPreviewCanvas"),
+    ctx = canvas.getContext("2d", { alpha: false });
+  window.cancelAnimationFrame(animationPreview.frameRequest);
+  animationPreview.frameRequest = null;
+  if (!source) {
+    animationPreview.image = null;
+    animationPreview.source = "";
+    shell.classList.remove("has-banner");
+    shell.style.removeProperty("aspect-ratio");
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    $("#animationStatus").textContent = "Ready";
+    return;
+  }
+  try {
+    const image = await loadImage(source);
+    if (sequence !== animationPreview.loadSequence) return;
+    const dimensions = animationDimensions(image);
+    canvas.width = dimensions.width;
+    canvas.height = dimensions.height;
+    shell.style.aspectRatio = `${dimensions.width} / ${dimensions.height}`;
+    animationPreview.image = image;
+    animationPreview.source = source;
+    animationPreview.startedAt = window.performance.now();
+    shell.classList.add("has-banner");
+    $("#animationStatus").textContent = "Live preview";
+    const draw = (time) => {
+      const settings = animationSettingsFromForm(),
+        profile = animationProfile(settings),
+        cycle = profile.frames * profile.frameDelay,
+        progress = ((time - animationPreview.startedAt) % cycle) / cycle;
+      drawAnimationFrame(ctx, image, progress, settings);
+      animationPreview.frameRequest = window.requestAnimationFrame(draw);
+    };
+    animationPreview.frameRequest = window.requestAnimationFrame(draw);
+  } catch (error) {
+    shell.classList.remove("has-banner");
+    $("#animationPreviewEmpty").textContent = "Preview unavailable";
+    $("#animationStatus").textContent = error.message;
+  }
+}
+function drawingDimensions(ctx) {
+  return {
+    width: ctx.animationWidth || ctx.canvas.width,
+    height: ctx.animationHeight || ctx.canvas.height,
+  };
+}
+function drawBannerBase(ctx, image) {
+  const { width, height } = drawingDimensions(ctx);
+  ctx.clearRect(0, 0, width, height);
+  ctx.imageSmoothingEnabled = true;
+  ctx.imageSmoothingQuality = "high";
+  ctx.drawImage(image, 0, 0, width, height);
+}
+function glow(ctx, x, y, radius, color, alpha) {
+  const gradient = ctx.createRadialGradient(x, y, 0, x, y, radius);
+  gradient.addColorStop(0, color.replace("ALPHA", String(alpha)));
+  gradient.addColorStop(1, color.replace("ALPHA", "0"));
+  ctx.fillStyle = gradient;
+  ctx.fillRect(x - radius, y - radius, radius * 2, radius * 2);
+}
+function drawSweep(ctx, progress, intensity, color) {
+  const { width, height } = drawingDimensions(ctx),
+    x = -100 + (width + 200) * progress,
+    gradient = ctx.createLinearGradient(x - 90, 0, x + 90, 0);
+  gradient.addColorStop(0, color.replace("ALPHA", "0"));
+  gradient.addColorStop(0.42, color.replace("ALPHA", String(intensity * 0.22)));
+  gradient.addColorStop(0.5, color.replace("ALPHA", String(intensity * 0.64)));
+  gradient.addColorStop(0.58, color.replace("ALPHA", String(intensity * 0.22)));
+  gradient.addColorStop(1, color.replace("ALPHA", "0"));
+  ctx.fillStyle = gradient;
+  ctx.fillRect(0, 0, width, height);
+}
+function drawAnimationFrame(ctx, image, progress, input) {
+  const settings = normalizeAnimationSettings(input),
+    intensity = settings.intensity / 100,
+    { width, height } = drawingDimensions(ctx),
+    tau = Math.PI * 2,
+    effect = settings.effect;
+  drawBannerBase(ctx, image);
+  ctx.save();
+  ctx.globalCompositeOperation = "screen";
+  if (effect === "tech-pulse" || effect === "clean") {
+    drawSweep(
+      ctx,
+      progress,
+      intensity,
+      effect === "tech-pulse"
+        ? "rgba(95,229,255,ALPHA)"
+        : "rgba(255,255,255,ALPHA)",
+    );
+    if (effect === "tech-pulse") {
+      ctx.fillStyle = `rgba(95,229,255,${intensity * 0.22})`;
+      const line = ((progress * (width + 40)) % (width + 40)) - 20;
+      ctx.fillRect(line, 0, 2, height);
+    }
+  } else if (effect === "signal-rings") {
+    for (let index = 0; index < 4; index++) {
+      const phase = (progress + index / 4) % 1,
+        alpha = (1 - phase) * intensity * 0.52;
+      ctx.strokeStyle = `rgba(200,225,255,${alpha})`;
+      ctx.lineWidth = 1.5 + (1 - phase);
+      ctx.beginPath();
+      ctx.arc(width * 0.78, height * 0.52, 8 + phase * 125, 0, tau);
+      ctx.stroke();
+    }
+  } else if (effect === "starfield") {
+    for (let index = 0; index < 30; index++) {
+      const x =
+          (index * 83 +
+            Math.sin(progress * tau) * (38 + (index % 5) * 7) +
+            width) %
+          width,
+        y = (index * 37 + Math.sin(index * 2.1) * 18 + height) % height,
+        twinkle =
+          0.35 + 0.65 * ((Math.sin(progress * tau * 2 + index) + 1) / 2),
+        size = index % 7 === 0 ? 2 : 1;
+      ctx.fillStyle = `rgba(225,240,255,${intensity * twinkle})`;
+      ctx.fillRect(x, y, size, size);
+    }
+  } else if (effect === "scan-line") {
+    const scan = ((progress * (width + 90)) % (width + 90)) - 45;
+    drawSweep(ctx, progress, intensity * 0.9, "rgba(95,229,255,ALPHA)");
+    ctx.fillStyle = `rgba(190,250,255,${intensity * 0.48})`;
+    ctx.fillRect(scan, 0, 1.5, height);
+  } else if (effect === "digital-grid") {
+    const offsetX = progress * 24,
+      offsetY = progress * 16;
+    ctx.strokeStyle = `rgba(165,190,255,${intensity * 0.28})`;
+    ctx.lineWidth = 1;
+    for (let x = offsetX - 24; x < width; x += 24) {
+      ctx.beginPath();
+      ctx.moveTo(x, 0);
+      ctx.lineTo(x, height);
+      ctx.stroke();
+    }
+    for (let y = offsetY - 16; y < height; y += 16) {
+      ctx.beginPath();
+      ctx.moveTo(0, y);
+      ctx.lineTo(width, y);
+      ctx.stroke();
+    }
+  } else if (effect === "spotlight") {
+    const x = width * (0.5 - 0.4 * Math.cos(progress * tau));
+    glow(ctx, x, height / 2, 120, "rgba(235,241,255,ALPHA)", intensity * 0.42);
+  } else if (effect === "soft-pulse") {
+    const strength = Math.sin(progress * Math.PI) ** 2 * intensity * 0.28;
+    ctx.fillStyle = `rgba(205,218,255,${strength})`;
+    ctx.fillRect(0, 0, width, height);
+  } else if (effect === "aurora-flow") {
+    const drift = Math.sin(progress * tau),
+      drift2 = Math.cos(progress * tau);
+    glow(
+      ctx,
+      width * (0.25 + drift * 0.12),
+      height * 0.74,
+      170,
+      "rgba(63,255,205,ALPHA)",
+      intensity * 0.42,
+    );
+    glow(
+      ctx,
+      width * (0.7 + drift2 * 0.1),
+      height * 0.25,
+      180,
+      "rgba(112,91,255,ALPHA)",
+      intensity * 0.44,
+    );
+    glow(
+      ctx,
+      width * (0.5 - drift * 0.08),
+      height * 0.5,
+      110,
+      "rgba(74,181,255,ALPHA)",
+      intensity * 0.28,
+    );
+  } else if (effect === "prism-sweep") {
+    const x = -120 + (width + 240) * progress,
+      gradient = ctx.createLinearGradient(x - 100, 0, x + 100, 0);
+    gradient.addColorStop(0, "rgba(255,70,140,0)");
+    gradient.addColorStop(0.28, `rgba(255,70,140,${intensity * 0.24})`);
+    gradient.addColorStop(0.46, `rgba(255,218,100,${intensity * 0.32})`);
+    gradient.addColorStop(0.62, `rgba(80,225,255,${intensity * 0.34})`);
+    gradient.addColorStop(1, "rgba(105,90,255,0)");
+    ctx.fillStyle = gradient;
+    ctx.fillRect(0, 0, width, height);
+  } else if (effect === "particle-trail") {
+    for (let index = 0; index < 20; index++) {
+      const phase = (progress + index / 20) % 1,
+        x = phase * width,
+        y = height * (0.5 + Math.sin(phase * tau * 1.5 + index) * 0.32),
+        alpha = Math.sin(phase * Math.PI) * intensity * 0.68,
+        radius = index % 4 === 0 ? 8 : 5;
+      glow(ctx, x, y, radius, "rgba(140,235,255,ALPHA)", alpha);
+    }
+  } else if (effect === "cinematic-glow") {
+    const wave = Math.sin(progress * tau),
+      pulse = 0.74 + wave * 0.18;
+    glow(
+      ctx,
+      width * (0.28 + wave * 0.08),
+      height * 0.58,
+      150,
+      "rgba(255,179,108,ALPHA)",
+      intensity * 0.34 * pulse,
+    );
+    glow(
+      ctx,
+      width * (0.75 - wave * 0.07),
+      height * 0.42,
+      170,
+      "rgba(85,118,255,ALPHA)",
+      intensity * 0.4 * pulse,
+    );
+    const vignette = ctx.createRadialGradient(
+      width / 2,
+      height / 2,
+      15,
+      width / 2,
+      height / 2,
+      width * 0.58,
+    );
+    vignette.addColorStop(0, "rgba(0,0,0,0)");
+    vignette.addColorStop(1, `rgba(0,0,0,${intensity * 0.28})`);
+    ctx.globalCompositeOperation = "multiply";
+    ctx.fillStyle = vignette;
+    ctx.fillRect(0, 0, width, height);
+  }
+  ctx.restore();
+}
+async function buildAnimationFrames(source, settings, progress) {
+  const image = await loadImage(source),
+    dimensions = animationDimensions(image),
+    profile = animationProfile(settings),
+    renderCanvas = document.createElement("canvas"),
+    outputCanvas = document.createElement("canvas"),
+    frames = [];
+  renderCanvas.width = Math.round(dimensions.width * profile.renderScale);
+  renderCanvas.height = Math.round(dimensions.height * profile.renderScale);
+  outputCanvas.width = dimensions.width;
+  outputCanvas.height = dimensions.height;
+  const renderContext = renderCanvas.getContext("2d", { alpha: false }),
+    outputContext = outputCanvas.getContext("2d", {
+      alpha: false,
+      willReadFrequently: true,
+    });
+  renderContext.animationWidth = dimensions.width;
+  renderContext.animationHeight = dimensions.height;
+  renderContext.setTransform(
+    profile.renderScale,
+    0,
+    0,
+    profile.renderScale,
+    0,
+    0,
+  );
+  outputContext.imageSmoothingEnabled = true;
+  outputContext.imageSmoothingQuality = "high";
+  for (let frame = 0; frame < profile.frames; frame++) {
+    drawAnimationFrame(renderContext, image, frame / profile.frames, settings);
+    outputContext.clearRect(0, 0, dimensions.width, dimensions.height);
+    outputContext.drawImage(
+      renderCanvas,
+      0,
+      0,
+      dimensions.width,
+      dimensions.height,
+    );
+    frames.push(
+      bytesToBase64(
+        outputContext.getImageData(0, 0, dimensions.width, dimensions.height)
+          .data,
+      ),
+    );
+    progress?.(((frame + 1) / profile.frames) * 72);
+    if (frame % 4 === 3) await new Promise(window.requestAnimationFrame);
+  }
+  return { ...dimensions, frames, profile };
+}
+async function generateAnimatedBanner(event) {
+  const source =
+    state.signature.bannerSourceUrl || state.signature.bannerUrl || "";
+  if (!source) return toast("Choose a banner first");
+  const button = event.currentTarget,
+    settings = animationSettingsFromForm(),
+    profile = animationProfile(settings),
+    progress = $("#animationProgress"),
+    status = $("#animationStatus");
+  setBusy(button, true, "Creating…");
+  progress.hidden = false;
+  progress.value = 0;
+  status.textContent = "Rendering supersampled motion frames";
+  try {
+    const animation = await buildAnimationFrames(source, settings, (value) => {
+      progress.value = value;
+    });
+    progress.value = 78;
+    status.textContent = "Encoding high-detail GIF";
     const result = await api("/api/signature/generated-banners", {
       method: "POST",
       body: JSON.stringify({
-        width: ANIMATED_BANNER_WIDTH,
-        height: ANIMATED_BANNER_HEIGHT,
-        delay: 80,
-        frames,
+        width: animation.width,
+        height: animation.height,
+        delay: animation.profile.frameDelay,
+        quality: settings.quality,
+        frames: animation.frames,
       }),
     });
+    progress.value = 100;
+    state.signature.bannerSourceUrl = source;
+    state.signature.bannerAnimation = settings;
     state.signature.bannerUrl = result.url;
-    fillForm();
+    renderAsset(els.bannerPreview, result.url, "Animated banner");
+    updateSelectedBanner();
     markDirty();
-    toast("Animated banner ready");
+    const size = Number(result.storedBytes || 0),
+      sizeLabel = size
+        ? `${size < 1024 * 1024 ? `${Math.round(size / 1024)} KB` : `${(size / 1024 / 1024).toFixed(1)} MB`}`
+        : `${profile.frames} frames`;
+    status.textContent = `Animation ready · ${sizeLabel}`;
+    toast("Animation created");
   } catch (error) {
-    toast(error.message);
+    const message =
+      error.name === "SecurityError"
+        ? "Upload this banner to Signify before animating it."
+        : error.message;
+    status.textContent = message;
+    toast(message);
   } finally {
     setBusy(button, false);
+    window.setTimeout(() => {
+      progress.hidden = true;
+      progress.value = 0;
+    }, 700);
   }
-});
-const ANIMATED_BANNER_WIDTH = 440,
-  ANIMATED_BANNER_HEIGHT = 100;
-async function buildAnimationFrames(source, effect) {
-  const image = await loadImage(source),
-    canvas = document.createElement("canvas"),
-    width = ANIMATED_BANNER_WIDTH,
-    height = ANIMATED_BANNER_HEIGHT;
-  canvas.width = width;
-  canvas.height = height;
-  const ctx = canvas.getContext("2d"),
-    frames = [];
-  for (let frame = 0; frame < 12; frame++) {
-    ctx.clearRect(0, 0, width, height);
-    const scale = Math.max(width / image.width, height / image.height),
-      drawWidth = image.width * scale,
-      drawHeight = image.height * scale;
-    ctx.drawImage(
-      image,
-      (width - drawWidth) / 2,
-      (height - drawHeight) / 2,
-      drawWidth,
-      drawHeight,
-    );
-    const t = frame / 12;
-    if (effect === "starfield") {
-      ctx.fillStyle = "rgba(255,255,255,.8)";
-      for (let i = 0; i < 18; i++) {
-        const x = (i * 79 + frame * 31) % width,
-          y = (i * 37 + frame * 7) % height;
-        ctx.fillRect(x, y, 2, 2);
-      }
-    } else if (effect === "signal-rings") {
-      ctx.strokeStyle = "rgba(255,255,255,.42)";
-      ctx.lineWidth = 2;
-      for (let r = 0; r < 3; r++) {
-        ctx.beginPath();
-        ctx.arc(
-          width * 0.78,
-          height * 0.52,
-          10 + ((frame * 8 + r * 26) % 110),
-          0,
-          Math.PI * 2,
-        );
-        ctx.stroke();
-      }
-    } else if (effect === "scan-line") {
-      const x = -60 + (width + 120) * t,
-        gradient = ctx.createLinearGradient(x - 45, 0, x + 45, 0);
-      gradient.addColorStop(0, "rgba(95,229,255,0)");
-      gradient.addColorStop(0.5, "rgba(95,229,255,.38)");
-      gradient.addColorStop(1, "rgba(95,229,255,0)");
-      ctx.fillStyle = gradient;
-      ctx.fillRect(0, 0, width, height);
-    } else if (effect === "digital-grid") {
-      ctx.strokeStyle = "rgba(166,180,255,.24)";
-      ctx.lineWidth = 1;
-      const offset = (frame * 4) % 24;
-      for (let x = offset - 24; x < width; x += 24) {
-        ctx.beginPath();
-        ctx.moveTo(x, 0);
-        ctx.lineTo(x, height);
-        ctx.stroke();
-      }
-      for (let y = offset - 24; y < height; y += 24) {
-        ctx.beginPath();
-        ctx.moveTo(0, y);
-        ctx.lineTo(width, y);
-        ctx.stroke();
-      }
-    } else if (effect === "spotlight") {
-      const x = width * (0.1 + 0.8 * t),
-        gradient = ctx.createRadialGradient(
-          x,
-          height / 2,
-          0,
-          x,
-          height / 2,
-          110,
-        );
-      gradient.addColorStop(0, "rgba(255,255,255,.34)");
-      gradient.addColorStop(0.45, "rgba(190,202,255,.16)");
-      gradient.addColorStop(1, "rgba(255,255,255,0)");
-      ctx.fillStyle = gradient;
-      ctx.fillRect(0, 0, width, height);
-    } else if (effect === "soft-pulse") {
-      const strength = 0.08 + 0.14 * ((Math.sin(t * Math.PI * 2) + 1) / 2);
-      ctx.fillStyle = `rgba(205,214,255,${strength})`;
-      ctx.fillRect(0, 0, width, height);
-    } else {
-      const gradient = ctx.createLinearGradient(
-        -140 + width * t,
-        0,
-        width * t + 140,
-        0,
-      );
-      gradient.addColorStop(0, "rgba(255,255,255,0)");
-      gradient.addColorStop(
-        0.5,
-        effect === "tech-pulse"
-          ? "rgba(95,229,255,.36)"
-          : "rgba(255,255,255,.28)",
-      );
-      gradient.addColorStop(1, "rgba(255,255,255,0)");
-      ctx.fillStyle = gradient;
-      ctx.fillRect(0, 0, width, height);
-    }
-    frames.push(bytesToBase64(ctx.getImageData(0, 0, width, height).data));
-  }
-  return frames;
 }
 function loadImage(src) {
   return new Promise((resolve, reject) => {
     const image = new Image();
+    try {
+      if (new URL(src, location.href).origin !== location.origin)
+        image.crossOrigin = "anonymous";
+    } catch {}
+    image.decoding = "async";
     image.onload = () => resolve(image);
     image.onerror = () => reject(new Error("Could not load the banner image."));
     image.src = src;
